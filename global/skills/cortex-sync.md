@@ -146,9 +146,9 @@ For each project in the profile, check `$CORTEX_DIR/<project>/` for these files 
 
 ```
 Project health:
-  + web-project-1: all files present
-  ~ web-project-4: missing recommended: LEARNINGS.md
-  ! dexscreener: missing required: summary.md, CLAUDE.md
+  + my-app: all files present
+  ~ backend: missing recommended: LEARNINGS.md
+  ! new-project: missing required: summary.md, CLAUDE.md
 ```
 
 Legend: `+` all good, `~` missing recommended files, `!` missing required files.
