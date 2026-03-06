@@ -6,10 +6,10 @@ ERRORS=0
 
 # 1. Check tool count in CLAUDE.md matches actual registrations in index.ts
 REGISTERED=$(grep -c 'server\.registerTool(' mcp/src/index.ts)
-DOCUMENTED=$(grep -oP 'MCP Tools \(\K[0-9]+' CLAUDE.md || echo "0")
+DOCUMENTED=$(grep -oP 'MCP Tools \(\K[0-9]+' docs/llms-install.md || echo "0")
 
 if [ "$REGISTERED" != "$DOCUMENTED" ]; then
-  echo "FAIL: CLAUDE.md says $DOCUMENTED MCP tools, but index.ts has $REGISTERED registrations"
+  echo "FAIL: docs/llms-install.md says $DOCUMENTED MCP tools, but index.ts has $REGISTERED registrations"
   ERRORS=$((ERRORS + 1))
 else
   echo "OK: Tool count matches ($REGISTERED)"
