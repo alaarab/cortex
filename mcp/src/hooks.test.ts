@@ -4,6 +4,7 @@ import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { fileURLToPath } from "url";
 
 describe("hooks", () => {
   describe("commandExists", () => {
@@ -328,7 +329,7 @@ describe("hooks", () => {
       expect(configured).toContain("Codex");
     });
 
-    it("wrappers are written to ~/.local/bin/<tool>", () => {
+    it.skipIf(process.platform === "win32")("wrappers are written to ~/.local/bin/<tool>", () => {
       setupFakeBinaries();
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
@@ -341,7 +342,7 @@ describe("hooks", () => {
       }
     });
 
-    it("wrapper content references the real binary", () => {
+    it.skipIf(process.platform === "win32")("wrapper content references the real binary", () => {
       setupFakeBinaries();
       configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
 
@@ -390,7 +391,7 @@ describe("hooks", () => {
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
     const origPath = process.env.PATH;
-    const localEntryScript = path.join(path.dirname(new URL(import.meta.url).pathname), "index.js");
+    const localEntryScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
 
     afterEach(() => {
       process.env.HOME = origHome;

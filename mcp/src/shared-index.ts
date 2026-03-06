@@ -367,7 +367,7 @@ export function extractSnippet(content: string, query: string, lines: number = 5
 
 export function detectProject(cortexPath: string, cwd: string, profile?: string): string | null {
   const projectDirs = getProjectDirs(cortexPath, profile);
-  const cwdSegments = cwd.toLowerCase().split(path.sep);
+  const cwdSegments = cwd.toLowerCase().split(/[/\\]/);
 
   const lastSegment = cwdSegments[cwdSegments.length - 1];
   for (const dir of projectDirs) {

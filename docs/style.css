@@ -977,6 +977,13 @@ section {
 .demo-line {
   opacity: 0;
   animation: demoFadeIn 0.4s ease forwards;
+  display: flex;
+  align-items: baseline;
+}
+
+.demo-line.demo-result {
+  display: flex;
+  align-items: baseline;
 }
 
 .demo-line-1 { animation-delay: 0.6s; }
@@ -991,6 +998,8 @@ section {
   color: var(--indigo);
   opacity: 0.7;
   margin-right: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .demo-typed {
@@ -1003,7 +1012,7 @@ section {
 }
 
 .demo-result {
-  padding-left: 24px;
+  padding-left: 80px;
 }
 
 .demo-result-project {
@@ -1260,6 +1269,149 @@ section {
 
 .bento-card.in-view .token-bar-fill-before { width: 100%; }
 .bento-card.in-view .token-bar-fill-after { width: 10%; }
+
+/* --- HOOK TRACE (looks like watching the system run) --- */
+.trace-section {
+  border-top: 1px solid var(--border);
+}
+
+.trace-header {
+  margin-bottom: 56px;
+}
+
+.trace {
+  max-width: 720px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.trace-hook {
+  margin-bottom: 40px;
+}
+
+.trace-hook:last-child {
+  margin-bottom: 0;
+}
+
+.trace-hook-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.trace-bullet {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trace-bullet-start { background: var(--indigo); box-shadow: 0 0 8px rgba(58,123,174,0.5); }
+.trace-bullet-prompt { background: var(--copper); box-shadow: 0 0 8px rgba(245,200,64,0.4); }
+.trace-bullet-stop { background: #5FD87C; box-shadow: 0 0 8px rgba(95,216,124,0.4); }
+
+.trace-hook-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trace-hook-when {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.trace-steps {
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+  margin-left: 3px;
+}
+
+.trace-step {
+  padding: 2px 0;
+  color: var(--text-muted);
+}
+
+.trace-fn {
+  color: var(--indigo);
+}
+
+.trace-comment {
+  color: var(--text-dim);
+}
+
+.trace-comment::before {
+  content: '// ';
+  opacity: 0.4;
+}
+
+.trace-out {
+  padding: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-style: italic;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+}
+
+.trace-out-example {
+  color: var(--copper-mid);
+  font-style: normal;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+/* --- REFERENCE LIST (man page, not card grid) --- */
+.ref-section {
+  border-top: 1px solid var(--border);
+}
+
+.ref-header {
+  margin-bottom: 48px;
+}
+
+.ref-list {
+  max-width: 640px;
+}
+
+.ref-entry {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ref-entry:first-child {
+  padding-top: 0;
+}
+
+.ref-entry:last-child {
+  border-bottom: none;
+}
+
+.ref-entry dt {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+
+.ref-entry dd {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.ref-entry code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--copper-mid);
+  background: rgba(245,200,64,0.06);
+  border: 1px solid rgba(245,200,64,0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
 
 /* --- SELECTION --- */
 ::selection {

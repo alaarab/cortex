@@ -248,6 +248,66 @@ function configureMcpAtPath(
   return status;
 }
 
+/**
+ * Read/write a TOML config file to upsert or remove [mcp_servers.cortex].
+ * Lightweight: preserves all other content, only touches the cortex section.
+ */
+function patchTomlMcpServer(
+  filePath: string,
+  mcpEnabled: boolean,
+  cortexPath: string
+): McpConfigStatus {
+  let content = "";
+  const existed = fs.existsSync(filePath);
+  if (existed) {
+    content = fs.readFileSync(filePath, "utf8");
+  } else if (!mcpEnabled) {
+    return "already_disabled";
+  }
+
+  const cfg = buildMcpServerConfig(cortexPath);
+  const argsToml = "[" + cfg.args.map((a: string) => `"${a}"`).join(", ") + "]";
+  const newSection = `[mcp_servers.cortex]\ncommand = "${cfg.command}"\nargs = ${argsToml}`;
+
+  // Match [mcp_servers.cortex] section up to the next [header] or EOF
+  const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+  const hadSection = sectionRe.test(content);
+
+  if (mcpEnabled) {
+    if (hadSection) {
+      content = content.replace(sectionRe, newSection + "\n");
+      fs.writeFileSync(filePath, content);
+      return "already_configured";
+    }
+    // Append the section
+    if (!existed) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    }
+    const sep = content.length > 0 && !content.endsWith("\n\n") ? (content.endsWith("\n") ? "\n" : "\n\n") : "";
+    content += sep + newSection + "\n";
+    fs.writeFileSync(filePath, content);
+    return "installed";
+  }
+
+  // Disable: remove the section
+  if (!hadSection) return "already_disabled";
+  content = content.replace(sectionRe, "");
+  // Clean up extra blank lines left behind
+  content = content.replace(/\n{3,}/g, "\n\n");
+  fs.writeFileSync(filePath, content);
+  return "disabled";
+}
+
+function removeTomlMcpServer(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  let content = fs.readFileSync(filePath, "utf8");
+  const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+  if (!sectionRe.test(content)) return false;
+  content = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
+  fs.writeFileSync(filePath, content);
+  return true;
+}
+
 function removeMcpServerAtPath(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   let removed = false;
@@ -627,18 +687,25 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
   const home = os.homedir();
-  const candidates = [
+  const tomlPath = path.join(home, ".codex", "config.toml");
+  const jsonCandidates = [
     path.join(home, ".codex", "config.json"),
     path.join(home, ".codex", "mcp.json"),
     path.join(cortexPath, "codex.json"),
   ];
-  const existing = pickExistingFile(candidates);
   const codexInstalled =
-    Boolean(existing) ||
+    fs.existsSync(tomlPath) ||
+    Boolean(pickExistingFile(jsonCandidates)) ||
     fs.existsSync(path.join(home, ".codex")) ||
     commandExists("codex");
   if (!codexInstalled) return "no_codex";
-  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "mcpServers", cortexPath);
+
+  // Prefer TOML (Codex CLI's native format); fall back to JSON for compat
+  if (fs.existsSync(tomlPath) || !pickExistingFile(jsonCandidates)) {
+    return patchTomlMcpServer(tomlPath, mcpEnabled, cortexPath);
+  }
+  const existing = pickExistingFile(jsonCandidates)!;
+  return configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
 }
 
 export function logMcpTargetStatus(tool: string, status: string, phase: "Configured" | "Updated" = "Configured") {
@@ -1423,7 +1490,14 @@ export async function runUninstall() {
     } catch (err: any) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${err?.message || err}`); }
   }
 
-  // Remove from Codex MCP config
+  // Remove from Codex MCP config (TOML + JSON)
+  const codexToml = path.join(home, ".codex", "config.toml");
+  try {
+    if (removeTomlMcpServer(codexToml)) {
+      log(`  Removed cortex from Codex MCP config (${codexToml})`);
+    }
+  } catch (err: any) { debugLog(`uninstall: cleanup failed for ${codexToml}: ${err?.message || err}`); }
+
   const codexCandidates = [
     path.join(home, ".codex", "config.json"),
     path.join(home, ".codex", "mcp.json"),

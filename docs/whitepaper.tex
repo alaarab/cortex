@@ -96,10 +96,10 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \begin{tikzpicture}[
   font=\small,
   node distance=0.55cm and 0.9cm,
-  box/.style={rectangle, rounded corners=3pt, draw, fill=blue!8, minimum height=1.9em, text centered, inner sep=4pt},
-  hook/.style={rectangle, rounded corners=3pt, draw, fill=orange!15, minimum height=1.9em, text centered, inner sep=4pt},
-  store/.style={rectangle, rounded corners=3pt, draw, fill=green!12, minimum height=1.9em, text centered, inner sep=4pt},
-  gov/.style={rectangle, rounded corners=3pt, draw, fill=purple!10, minimum height=1.9em, text centered, inner sep=4pt},
+  box/.style={rectangle, rounded corners=3pt, draw, fill=blue!8, minimum height=1.9em, align=center, inner sep=4pt},
+  hook/.style={rectangle, rounded corners=3pt, draw, fill=orange!15, minimum height=1.9em, align=center, inner sep=4pt},
+  store/.style={rectangle, rounded corners=3pt, draw, fill=green!12, minimum height=1.9em, align=center, inner sep=4pt},
+  gov/.style={rectangle, rounded corners=3pt, draw, fill=purple!10, minimum height=1.9em, align=center, inner sep=4pt},
   arr/.style={-{Stealth[length=5pt]}, thick},
   dasharr/.style={-{Stealth[length=5pt]}, dashed, gray},
 ]
@@ -495,7 +495,7 @@ Multi-agent support is increasingly non-optional. As coding workflows move from 
 Managed alternatives remain strong choices where integration speed and platform convenience dominate, or where semantic retrieval quality outweighs portability concerns. The right answer depends on which constraints are binding -- and that answer should be made with eyes open on the tradeoffs documented here.
 
 \FloatBarrier
-\clearpage
+\bigskip
 \appendix
 \section*{Artifact Map}
 \small
@@ -504,8 +504,6 @@ Managed alternatives remain strong choices where integration speed and platform 
   \item Compiled PDF: \texttt{docs/whitepaper.pdf}
 \end{itemize}
 
-\FloatBarrier
-\clearpage
 \section*{References}
 \small
 \sloppy
