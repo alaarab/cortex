@@ -9,7 +9,7 @@ Quick start:
 MCP Tools (22):
 
   Search and browse:
-    search_cortex(query, type?, limit?, project?) - FTS5 search with synonym expansion
+    search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
     get_project_summary(name) - project summary card and file list
     list_projects() - all projects in active profile
     list_machines() - registered machines and their profiles
@@ -22,9 +22,9 @@ MCP Tools (22):
     update_backlog_item(project, item, updates) - change priority, context, or section
 
   Learning capture:
-    add_learning(project, learning, citation_file?, citation_line?, citation_repo?, citation_commit?) - append learning with optional citation
+    add_learning(project, learning, citation?: { file?, line?, repo?, commit? }) - append learning with optional citation
     remove_learning(project, learning) - remove by matching text
-    save_learnings(message?) - commit and push all cortex changes
+    push_changes(message?) - commit and push all cortex changes
 
   Memory governance:
     pin_memory(project, memory) - write canonical/pinned memory that bypasses decay

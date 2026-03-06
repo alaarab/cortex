@@ -84,7 +84,7 @@ cortex add-learning <project> "..."  # append a learning via CLI
 
 ## Available MCP tools
 
-- `search_cortex(query, type?, limit?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.
+- `search_knowledge(query, type?, limit?, project?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.
 - `get_project_summary(name)`: fetch the summary for a specific project
 - `list_projects()`: list all projects in your knowledge base
 - `get_backlog(project?)`: fetch open tasks for a project (or all projects)
@@ -93,4 +93,4 @@ cortex add-learning <project> "..."  # append a learning via CLI
 - `update_backlog_item(project, item, updates)`: update a task's priority, context, or section
 - `add_learning(project, insight)`: append a learning to LEARNINGS.md under today's date
 - `remove_learning(project, text)`: remove a learning by matching text
-- `save_learnings(message?)`: commit and push all cortex changes
+- `push_changes(message?)`: commit and push all cortex changes

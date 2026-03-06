@@ -268,8 +268,7 @@ Cursor, and Codex.
 - \`get_learnings\`: read recent learnings without a search query
 
 **Backlog management:**
-- \`get_backlog\`: read tasks for one or all projects
-- \`get_backlog_item\`: fetch a single backlog item by ID or text match
+- \`get_backlog\`: read tasks for one or all projects, or fetch a single item by ID or text
 - \`add_backlog_item\`: add a task to the Queue section
 - \`complete_backlog_item\`: match by text, move to Done
 - \`update_backlog_item\`: change priority, context, or section
@@ -277,15 +276,14 @@ Cursor, and Codex.
 **Learning capture:**
 - \`add_learning\`: append insight under today's date with optional citation metadata
 - \`remove_learning\`: remove a learning by matching text
-- \`save_learnings\`: commit and push all cortex changes
+- \`push_changes\`: commit and push all cortex changes
 - \`pin_memory\`: promote important memory into CANONICAL_MEMORIES.md
 - \`memory_feedback\`: record helpful/reprompt/regression outcomes
 
 **Data management:**
 - \`export_project\`: export project data as portable JSON for sharing or backup
 - \`import_project\`: import project from previously exported JSON
-- \`archive_project\`: archive a project without deleting data
-- \`unarchive_project\`: restore a previously archived project
+- \`manage_project(project, action: "archive"|"unarchive")\`: archive or restore a project
 `;
 
   const dest = path.join(cortexPath, "cortex.SKILL.md");

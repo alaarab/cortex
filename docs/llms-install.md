@@ -55,7 +55,7 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `search_cortex` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your knowledge base. Supports AND, OR, NOT, phrase matching. |
+| `search_knowledge` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your knowledge base. Supports AND, OR, NOT, phrase matching. |
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
 | `list_machines` | (none) | Shows registered machines and which profile each uses. |
@@ -74,9 +74,9 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_learning` | `project`, `learning`, `citation_file?`, `citation_line?`, `citation_repo?`, `citation_commit?` | Append an insight to LEARNINGS.md with optional source citation. |
+| `add_learning` | `project`, `learning`, `citation?: { file?, line?, repo?, commit? }` | Append an insight to LEARNINGS.md with optional source citation. |
 | `remove_learning` | `project`, `learning` | Remove a learning by text match. Use when an insight is wrong or outdated. |
-| `save_learnings` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
+| `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
 
 ### Memory Governance
 

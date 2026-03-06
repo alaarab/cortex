@@ -25,7 +25,7 @@ If no profile is set, all top-level directories in the cortex are indexed.
 
 ## Tools
 
-### search_cortex
+### search_knowledge
 
 Full-text search across all indexed markdown files.
 

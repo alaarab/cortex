@@ -141,9 +141,9 @@ Claude Code <--stdio--> cortex-mcp
           +---------------+---------------+
           |               |               |
      Search/Browse   Backlog CRUD    Learning Capture
-     - search_cortex - get_backlog   - add_learning
+     - search_knowledge - get_backlog - add_learning
      - get_project   - add_item     - remove_learning
-     - list_projects - complete     - save_learnings
+     - list_projects - complete     - push_changes
      - list_machines - update
      - list_profiles
           |

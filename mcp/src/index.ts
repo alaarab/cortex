@@ -329,7 +329,6 @@ async function main() {
     }
   );
 
-  // search_cortex is preserved as an alias for backwards compatibility
   server.registerTool(
     "search_knowledge",
     {
@@ -572,12 +571,35 @@ async function main() {
     "get_backlog",
     {
       title: "◆ cortex · backlog",
-      description: "Get the backlog for a project, or all projects if no name given. Returns active and queued items.",
+      description: "Get a project's backlog, all backlogs, or a single item. Omit all params for all projects. Pass project for that project's backlog. Pass id or item to fetch a single entry.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
+        id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
+        item: z.string().optional().describe("Exact backlog item text. Requires project."),
       }),
     },
-    async ({ project }) => {
+    async ({ project, id, item }) => {
+      // Single item lookup
+      if (id || item) {
+        if (!project) return jsonResponse({ ok: false, error: "Provide `project` when looking up a single item." });
+        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const result = readBacklog(cortexPath, project);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
+        const match = all.find((entry) =>
+          (id && entry.id.toLowerCase() === id.toLowerCase()) ||
+          (item && entry.line.trim() === item.trim())
+        );
+        if (!match) return jsonResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+        return jsonResponse({
+          ok: true,
+          message: `${match.id}: ${match.line} (${match.section})`,
+          data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
+        });
+      }
+
+      // Full backlog for one project
       if (project) {
         if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
         const result = readBacklog(cortexPath, project);
@@ -587,42 +609,12 @@ async function main() {
         return jsonResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
       }
 
+      // All projects
       const docs = readBacklogs(cortexPath, profile);
       if (!docs.length) return jsonResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
       const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
       const projectData = docs.map((doc) => ({ project: doc.project, items: doc.items, issues: doc.issues }));
       return jsonResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
-    }
-  );
-
-  server.registerTool(
-    "get_backlog_item",
-    {
-      title: "◆ cortex · task",
-      description: "Fetch a single backlog item by ID or exact text match.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        id: z.string().optional().describe("Backlog item ID like A1, Q3, D2."),
-        item: z.string().optional().describe("Exact backlog item text."),
-      }),
-    },
-    async ({ project, id, item }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      if (!id && !item) return jsonResponse({ ok: false, error: "Provide either `id` or `item`." });
-      const result = readBacklog(cortexPath, project);
-      if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-      const doc = result.data;
-      const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
-      const match = all.find((entry) =>
-        (id && entry.id.toLowerCase() === id.toLowerCase()) ||
-        (item && entry.line.trim() === item.trim())
-      );
-      if (!match) return jsonResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
-      return jsonResponse({
-        ok: true,
-        message: `${match.id}: ${match.line} (${match.section})`,
-        data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
-      });
     }
   );
 
@@ -702,22 +694,19 @@ async function main() {
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         learning: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
-        citation_file: z.string().optional().describe("Optional source file path that supports this learning."),
-        citation_line: z.number().int().positive().optional().describe("Optional 1-based line number in citation_file."),
-        citation_repo: z.string().optional().describe("Optional git repository root path for citation validation."),
-        citation_commit: z.string().optional().describe("Optional git commit SHA that supports this learning."),
+        citation: z.object({
+          file: z.string().optional().describe("Source file path that supports this learning."),
+          line: z.number().int().positive().optional().describe("1-based line number in file."),
+          repo: z.string().optional().describe("Git repository root path for citation validation."),
+          commit: z.string().optional().describe("Git commit SHA that supports this learning."),
+        }).optional().describe("Optional source citation for traceability."),
       }),
     },
-    async ({ project, learning, citation_file, citation_line, citation_repo, citation_commit }) => {
+    async ({ project, learning, citation }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
-        const result = addLearningToFile(cortexPath, project, learning, {
-          file: citation_file,
-          line: citation_line,
-          repo: citation_repo,
-          commit: citation_commit,
-        });
+        const result = addLearningToFile(cortexPath, project, learning, citation);
         await rebuildIndex();
         const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
         if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
@@ -775,7 +764,7 @@ async function main() {
   );
 
   server.registerTool(
-    "save_learnings",
+    "push_changes",
     {
       title: "◆ cortex · push",
       description:
@@ -1009,50 +998,38 @@ async function main() {
   // ── #210: Archive/Unarchive ────────────────────────────────────────────
 
   server.registerTool(
-    "archive_project",
+    "manage_project",
     {
-      title: "◆ cortex · archive",
-      description: "Archive a project: moves it out of the active index without deleting data. The project directory is renamed with an .archived suffix.",
+      title: "◆ cortex · manage project",
+      description: "Archive or unarchive a project. Archive moves it out of the active index without deleting data (renamed with .archived suffix). Unarchive restores it.",
       inputSchema: z.object({
-        project: z.string().describe("Project name to archive."),
+        project: z.string().describe("Project name."),
+        action: z.enum(["archive", "unarchive"]).describe("Action to perform."),
       }),
     },
-    async ({ project }) => {
+    async ({ project, action }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const projectDir = path.join(cortexPath, project);
       const archiveDir = path.join(cortexPath, `${project}.archived`);
 
-      if (!fs.existsSync(projectDir)) {
-        return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
+      if (action === "archive") {
+        if (!fs.existsSync(projectDir)) {
+          return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
+        }
+        if (fs.existsSync(archiveDir)) {
+          return jsonResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
+        }
+
+        fs.renameSync(projectDir, archiveDir);
+        await rebuildIndex();
+        return jsonResponse({
+          ok: true,
+          message: `Archived project "${project}". Data preserved at ${archiveDir}.`,
+          data: { project, archivePath: archiveDir },
+        });
       }
-      if (fs.existsSync(archiveDir)) {
-        return jsonResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
-      }
 
-      fs.renameSync(projectDir, archiveDir);
-      await rebuildIndex();
-      return jsonResponse({
-        ok: true,
-        message: `Archived project "${project}". Data preserved at ${archiveDir}.`,
-        data: { project, archivePath: archiveDir },
-      });
-    }
-  );
-
-  server.registerTool(
-    "unarchive_project",
-    {
-      title: "◆ cortex · unarchive",
-      description: "Restore a previously archived project back into the active index.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name to unarchive (without .archived suffix)."),
-      }),
-    },
-    async ({ project }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const projectDir = path.join(cortexPath, project);
-      const archiveDir = path.join(cortexPath, `${project}.archived`);
-
+      // unarchive
       if (fs.existsSync(projectDir)) {
         return jsonResponse({ ok: false, error: `Project "${project}" already exists as an active project.` });
       }

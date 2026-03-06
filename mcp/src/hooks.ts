@@ -225,8 +225,8 @@ function isToolHookEnabled(cortexPath: string, tool: string): boolean {
 // ── #218: Custom integration hooks ──────────────────────────────────────
 
 export type CustomHookEvent =
-  | "pre-save"      // Before save_learnings commits
-  | "post-save"     // After save_learnings pushes
+  | "pre-save"      // Before push_changes commits
+  | "post-save"     // After push_changes pushes
   | "post-search"   // After search_knowledge returns results
   | "pre-learning"  // Before a learning is written to LEARNINGS.md
   | "post-learning" // After a learning is written

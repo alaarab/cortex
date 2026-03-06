@@ -186,7 +186,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 
 | Tool | What it does |
 |------|-------------|
-| `search_cortex` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `search_knowledge` | FTS5 search with synonym expansion. Filters by project, type, limit. |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
 | `list_machines` | Registered machines and their profiles. |
@@ -207,7 +207,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 |------|-------------|
 | `add_learning` | Append under today's date with optional citation metadata. |
 | `remove_learning` | Remove by matching text. |
-| `save_learnings` | Commit and push all changes. |
+| `push_changes` | Commit and push all changes. |
 
 ### Memory management
 
