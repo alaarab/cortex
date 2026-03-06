@@ -27,9 +27,9 @@
     "vitest": "^4.0.18"
   },
   "scripts": {
-    "build": "tsc -p mcp/tsconfig.json && node -e \"require('fs').chmodSync('mcp/dist/index.js', 0o755)\"",
+    "build": "node -e \"require('fs').rmSync('mcp/dist', { recursive: true, force: true })\" && tsc -p mcp/tsconfig.json && node -e \"require('fs').chmodSync('mcp/dist/index.js', 0o755)\"",
     "dev": "tsx mcp/src/index.ts",
-    "test": "vitest run",
+    "test": "vitest run mcp/src",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

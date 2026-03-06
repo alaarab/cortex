@@ -206,7 +206,6 @@ import {
   consolidateProjectLearnings,
   recordMemoryFeedback,
   enforceCanonicalLocks,
-  getRuntimeHealth,
   getIndexPolicy,
   updateIndexPolicy,
   migrateLegacyFindings,

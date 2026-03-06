@@ -14,6 +14,7 @@
 \usepackage{hyperref}
 \usepackage{titlesec}
 \usepackage{graphicx}
+\usepackage[section]{placeins}
 
 \hypersetup{
   colorlinks=true,
@@ -127,7 +128,7 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. So a local sy
 No comparable public p95 coding-latency benchmark exists across all systems/models, so cross-system speed claims must be measured directly.
 
 \subsection{Visual Scorecard (non-empirical, architecture-level)}
-\begin{table*}[t]
+\begin{table*}[!t]
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
@@ -241,6 +242,8 @@ The decision is less about ``who retrieves best on a single prompt'' and more ab
 \subsection*{Can tradeoffs disappear?}
 Not fully. Some tradeoffs are structural (ownership vs managed convenience). But many are reducible with engineering: startup caching, tighter ranking, model-specific token budgets, and async governance paths. The practical goal is not ``zero tradeoffs''; it is a better frontier for your constraints.
 
+\FloatBarrier
+\clearpage
 \appendix
 \section*{Artifact Map}
 \small
@@ -249,6 +252,8 @@ Not fully. Some tradeoffs are structural (ownership vs managed convenience). But
   \item Compiled PDF: \texttt{docs/whitepaper.pdf}
 \end{itemize}
 
+\FloatBarrier
+\clearpage
 \section*{References}
 \small
 \sloppy

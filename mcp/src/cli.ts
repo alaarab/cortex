@@ -949,7 +949,6 @@ async function handleHookPrompt() {
         if (seen >= 1) recordMemoryFeedback(cortexPath, key, "reprompt");
       }
 
-      const changedCount = gitCtx?.changedFiles.size ?? 0;
       const prevChanged = metrics[sessionId].lastChangedCount || 0;
       const prevKeys = metrics[sessionId].lastKeys || [];
       if (changedCount > prevChanged) {
