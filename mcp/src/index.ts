@@ -349,7 +349,8 @@ async function main() {
     async ({ project, memory }) => {
       return withWriteQueue(async () => {
         const result = upsertCanonicalMemory(cortexPath, project, memory);
-        return jsonResponse({ ok: true, message: result, data: { project, memory } });
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, memory } });
       });
     }
   );
@@ -780,9 +781,9 @@ async function main() {
         runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
         const result = addLearningToFile(cortexPath, project, learning, citation);
         await rebuildIndex();
-        const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
+        const ok = result.ok && (result.data.startsWith("Added learning") || result.data.startsWith("Saved learning"));
         if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
-        return jsonResponse({ ok, message: result, data: ok ? { project, learning } : undefined });
+        return jsonResponse({ ok, message: result.ok ? result.data : result.error, data: ok ? { project, learning } : undefined });
       });
     }
   );
@@ -804,9 +805,9 @@ async function main() {
         for (const learning of learnings) {
           runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
           const result = addLearningToFile(cortexPath, project, learning, undefined);
-          const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
+          const ok = result.ok && (result.data.startsWith("Added learning") || result.data.startsWith("Saved learning"));
           if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
-          results.push({ learning, ok, message: result });
+          results.push({ learning, ok, message: result.ok ? result.data : result.error });
         }
         await rebuildIndex();
         const succeeded = results.filter((r) => r.ok).length;

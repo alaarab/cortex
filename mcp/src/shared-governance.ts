@@ -11,6 +11,10 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
+  cortexOk,
+  cortexErr,
+  CortexError,
+  type CortexResult,
 } from "./shared.js";
 
 type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
@@ -616,9 +620,9 @@ export function getAccessControl(cortexPath: string): AccessControl {
   return withDefaults(parsed, DEFAULT_ACCESS);
 }
 
-export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): AccessControl | string {
+export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): CortexResult<AccessControl> {
   const denial = checkMemoryPermission(cortexPath, "policy");
-  if (denial) return denial;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getAccessControl(cortexPath);
   const next: AccessControl = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
@@ -629,7 +633,7 @@ export function updateAccessControl(cortexPath: string, patch: AccessControlPatc
   };
   writeJsonFile(govFile(cortexPath, "access-control"), next);
   appendAuditLog(cortexPath, "update_access", JSON.stringify(next));
-  return next;
+  return cortexOk(next);
 }
 
 function can(role: MemoryRole, action: MemoryAction): boolean {
@@ -650,9 +654,9 @@ export function getMemoryPolicy(cortexPath: string): MemoryPolicy {
   return withDefaults(parsed, DEFAULT_POLICY);
 }
 
-export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPolicy>): MemoryPolicy | string {
+export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPolicy>): CortexResult<MemoryPolicy> {
   const denial = checkMemoryPermission(cortexPath, "policy");
-  if (denial) return denial;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getMemoryPolicy(cortexPath);
   const next: MemoryPolicy = {
     ...current,
@@ -664,7 +668,7 @@ export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPoli
   };
   writeJsonFile(govFile(cortexPath, "memory-policy"), next);
   appendAuditLog(cortexPath, "update_policy", JSON.stringify(next));
-  return next;
+  return cortexOk(next);
 }
 
 export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolicy {
@@ -679,9 +683,9 @@ export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolic
 export function updateMemoryWorkflowPolicy(
   cortexPath: string,
   patch: Partial<MemoryWorkflowPolicy>
-): MemoryWorkflowPolicy | string {
+): CortexResult<MemoryWorkflowPolicy> {
   const denial = checkMemoryPermission(cortexPath, "policy");
-  if (denial) return denial;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getMemoryWorkflowPolicy(cortexPath);
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
@@ -694,7 +698,7 @@ export function updateMemoryWorkflowPolicy(
   };
   writeJsonFile(govFile(cortexPath, "memory-workflow-policy"), next);
   appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
-  return next;
+  return cortexOk(next);
 }
 
 export function getIndexPolicy(cortexPath: string): IndexPolicy {
@@ -707,9 +711,9 @@ export function getIndexPolicy(cortexPath: string): IndexPolicy {
   return merged;
 }
 
-export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): IndexPolicy | string {
+export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): CortexResult<IndexPolicy> {
   const denial = checkMemoryPermission(cortexPath, "policy");
-  if (denial) return denial;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getIndexPolicy(cortexPath);
   const next: IndexPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
@@ -723,7 +727,7 @@ export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy
   };
   writeJsonFile(govFile(cortexPath, "index-policy"), next);
   appendAuditLog(cortexPath, "update_index_policy", JSON.stringify(next));
-  return next;
+  return cortexOk(next);
 }
 
 export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
@@ -860,9 +864,9 @@ export function getMemoryQualityMultiplier(cortexPath: string, key: string): num
   return Math.max(0.2, Math.min(1.5, raw));
 }
 
-export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): string {
+export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): CortexResult<string> {
   const denial = checkMemoryPermission(cortexPath, "delete");
-  if (denial) return denial;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const policy = getMemoryPolicy(cortexPath);
   const dirs = project
     ? [path.join(cortexPath, project)]
@@ -916,11 +920,11 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
 
   if (dryRun) {
     const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
-    return dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary;
+    return cortexOk(dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary);
   }
 
   appendAuditLog(cortexPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
-  return `Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
+  return cortexOk(`Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`);
 }
 
 export function enforceCanonicalLocks(cortexPath: string, project?: string): string {
@@ -954,12 +958,12 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
   return `Canonical locks checked=${checked}, restored=${restored}`;
 }
 
-export function consolidateProjectLearnings(cortexPath: string, project: string, dryRun?: boolean): string {
+export function consolidateProjectLearnings(cortexPath: string, project: string, dryRun?: boolean): CortexResult<string> {
   const denial = checkMemoryPermission(cortexPath, "delete");
-  if (denial) return denial;
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const file = path.join(cortexPath, project, "LEARNINGS.md");
-  if (!fs.existsSync(file)) return `No LEARNINGS.md found for "${project}".`;
+  if (!fs.existsSync(file)) return cortexErr(`No LEARNINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
   const raw = fs.readFileSync(file, "utf8");
   const lines = raw.split("\n");
@@ -998,7 +1002,7 @@ export function consolidateProjectLearnings(cortexPath: string, project: string,
   const duplicatesRemoved = totalBullets - uniqueBullets;
 
   if (dryRun) {
-    return `[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`;
+    return cortexOk(`[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`);
   }
 
   const out: string[] = [title, ""];
@@ -1015,7 +1019,7 @@ export function consolidateProjectLearnings(cortexPath: string, project: string,
   fs.copyFileSync(file, file + ".bak");
   fs.writeFileSync(file, out.join("\n").trimEnd() + "\n");
   appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
-  return `Consolidated learnings for ${project}.`;
+  return cortexOk(`Consolidated learnings for ${project}.`);
 }
 
 function normalizeBulletForQueue(line: string): string {
@@ -1027,17 +1031,17 @@ export function appendMemoryQueue(
   project: string,
   section: "Review" | "Stale" | "Conflicts",
   entries: string[]
-): number {
+): CortexResult<number> {
   const denial = checkMemoryPermission(cortexPath, "queue");
-  if (denial) return 0;
-  if (!isValidProjectName(project)) return 0;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return 0;
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
   const queuePath = path.join(resolvedDir, "MEMORY_QUEUE.md");
   const today = new Date().toISOString().slice(0, 10);
 
   const normalized = entries.map(normalizeBulletForQueue).filter(Boolean);
-  if (normalized.length === 0) return 0;
+  if (normalized.length === 0) return cortexOk(0);
 
   let content = "";
   if (fs.existsSync(queuePath)) {
@@ -1063,9 +1067,9 @@ export function appendMemoryQueue(
     const line = `- [${today}] ${entry}`;
     if (!existing.has(line)) toInsert.push(line);
   }
-  if (!toInsert.length) return 0;
+  if (!toInsert.length) return cortexOk(0);
 
   lines.splice(insertAt, 0, ...toInsert, "");
   fs.writeFileSync(queuePath, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
-  return toInsert.length;
+  return cortexOk(toInsert.length);
 }

@@ -82,12 +82,12 @@ export async function handleIndexPolicy(args: string[]) {
       }
     }
     const result = updateIndexPolicy(cortexPath, patch);
-    if (typeof result === "string") {
-      console.log(result);
-      if (result.startsWith("Permission denied")) process.exit(1);
+    if (!result.ok) {
+      console.log(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.data, null, 2));
     return;
   }
   console.error("Usage: cortex index-policy [get|set --include=**/*.md,.claude/skills/**/*.md --exclude=**/node_modules/**,**/.git/** --includeHidden=false]");
@@ -117,12 +117,12 @@ export async function handleMemoryPolicy(args: string[]) {
       }
     }
     const result = updateMemoryPolicy(cortexPath, patch);
-    if (typeof result === "string") {
-      console.log(result);
-      if (result.startsWith("Permission denied")) process.exit(1);
+    if (!result.ok) {
+      console.log(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.data, null, 2));
     return;
   }
   console.error("Usage: cortex memory-policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
@@ -152,12 +152,12 @@ export async function handleMemoryWorkflow(args: string[]) {
       }
     }
     const result = updateMemoryWorkflowPolicy(cortexPath, patch);
-    if (typeof result === "string") {
-      console.log(result);
-      if (result.startsWith("Permission denied")) process.exit(1);
+    if (!result.ok) {
+      console.log(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.data, null, 2));
     return;
   }
   console.error("Usage: cortex memory-workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
@@ -180,12 +180,12 @@ export async function handleMemoryAccess(args: string[]) {
       patch[k] = v.split(",").map((s) => s.trim()).filter(Boolean);
     }
     const result = updateAccessControl(cortexPath, patch);
-    if (typeof result === "string") {
-      console.log(result);
-      if (result.startsWith("Permission denied")) process.exit(1);
+    if (!result.ok) {
+      console.log(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.data, null, 2));
     return;
   }
   console.error("Usage: cortex memory-access [get|set --admins=u1,u2 --maintainers=u3 --contributors=u4 --viewers=u5]");

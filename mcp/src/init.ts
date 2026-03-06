@@ -482,14 +482,14 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     // Hooks: update to latest version when enabled, otherwise remove cortex hooks.
     if (!data.hooks) data.hooks = {};
 
-    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart", hookBody: Record<string, any>) => {
+    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart", hookBody: { type: string; command: string; timeout?: number }) => {
       if (!Array.isArray(data.hooks[eventName])) data.hooks[eventName] = [];
-      const eventHooks = data.hooks[eventName] as any[];
+      const eventHooks = data.hooks[eventName] as HookEntry[];
       const marker = eventName === "UserPromptSubmit" ? "hook-prompt" : eventName === "Stop" ? "hook-stop" : "hook-session-start";
       const legacyMarker = eventName === "Stop" ? "auto-save" : eventName === "SessionStart" ? "doctor --fix" : "hook-prompt";
       const existingIdx = eventHooks.findIndex(
-        (h: any) => h?.hooks?.some(
-          (hook: any) =>
+        (h: HookEntry) => h?.hooks?.some(
+          (hook) =>
             typeof hook?.command === "string" &&
             (
               hook.command.includes(marker) ||
@@ -521,11 +521,11 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
       });
     } else {
       for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
-        const hooks = data.hooks?.[hookEvent] as any[] | undefined;
+        const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
         if (!Array.isArray(hooks)) continue;
         data.hooks[hookEvent] = hooks.filter(
-          (h: any) => !h.hooks?.some(
-            (hook: any) => typeof hook.command === "string" && isCortexCommand(hook.command)
+          (h: HookEntry) => !h.hooks?.some(
+            (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
           )
         );
       }
@@ -771,6 +771,13 @@ export interface InitOptions {
   yes?: boolean; // Skip interactive walkthrough
   fromExisting?: string; // Path to project dir with CLAUDE.md to bootstrap from
   template?: string; // Project template name (python-project, monorepo, library, frontend)
+  /** Set by walkthrough to pass project name to init logic */
+  _walkthroughProject?: string;
+}
+
+interface HookEntry {
+  matcher?: string;
+  hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
 }
 
 const TEMPLATES_DIR = path.join(ROOT, "starter", "templates");
@@ -934,7 +941,7 @@ export async function runInit(opts: InitOptions = {}) {
     opts.mcp = opts.mcp || answers.mcp;
     if (answers.projectName) {
       // Store for use in project creation below
-      (opts as any)._walkthroughProject = answers.projectName;
+      opts._walkthroughProject = answers.projectName;
     }
   }
 
@@ -1074,7 +1081,7 @@ export async function runInit(opts: InitOptions = {}) {
 
   log("\nSetting up cortex...\n");
 
-  const walkthroughProject = (opts as any)._walkthroughProject as string | undefined;
+  const walkthroughProject = opts._walkthroughProject;
   const firstProjectName = walkthroughProject || "my-first-project";
 
   // Copy bundled starter to ~/.cortex
@@ -1353,15 +1360,15 @@ export async function runUninstall() {
 
         // Remove hooks containing cortex references
         for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
-          const hooks = data.hooks?.[hookEvent] as any[] | undefined;
+          const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
           if (!Array.isArray(hooks)) continue;
           const before = hooks.length;
           data.hooks[hookEvent] = hooks.filter(
-            (h: any) => !h.hooks?.some(
-              (hook: any) => typeof hook.command === "string" && isCortexCommand(hook.command)
+            (h: HookEntry) => !h.hooks?.some(
+              (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
             )
           );
-          const removed = before - data.hooks[hookEvent].length;
+          const removed = before - (data.hooks[hookEvent] as HookEntry[]).length;
           if (removed > 0) log(`  Removed ${removed} cortex hook(s) from ${hookEvent}`);
         }
       });
