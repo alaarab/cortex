@@ -113,7 +113,7 @@ format_mcp_status() {
   local mcp_status="$1"
   case "$mcp_status" in
     installed|already_configured)
-      echo "MCP: active (search_cortex, get_project_summary, list_projects)" ;;
+      echo "MCP: active (search_knowledge, get_project_summary, list_projects)" ;;
     not_built)
       echo "MCP: not built. Run: cd $SCRIPT_DIR/mcp && npm install && npm run build" ;;
   esac

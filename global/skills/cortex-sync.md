@@ -252,5 +252,5 @@ When two machines edit the same cortex file before syncing, `git pull` will hit 
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch
-- `add_learning()`: capture learnings via MCP (synced across machines by `save_learnings()`)
+- `add_learning()`: capture learnings via MCP (synced across machines by `push_changes()`)
 - `/cortex-consolidate`: synthesize learnings across projects

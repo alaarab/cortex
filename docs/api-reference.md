@@ -8,7 +8,7 @@ All tools return text responses. Error conditions return descriptive error messa
 
 ## Search and Browse
 
-### `search_cortex`
+### `search_knowledge`
 
 Search the user's personal knowledge base using FTS5 full-text search with synonym expansion.
 
@@ -105,10 +105,7 @@ Record a single insight to a project's LEARNINGS.md. Call this the moment you di
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `learning` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
-| `citation_file` | string | no | Source file path that supports this learning. |
-| `citation_line` | number | no | 1-based line number in citation_file. |
-| `citation_repo` | string | no | Git repository root path for citation validation. |
-| `citation_commit` | string | no | Git commit SHA that supports this learning. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit? }`. |
 
 ### `remove_learning`
 
@@ -119,7 +116,7 @@ Remove a learning from LEARNINGS.md by matching text. Use when a previously capt
 | `project` | string | yes | Project name. |
 | `learning` | string | yes | Partial text to match against existing learnings. |
 
-### `save_learnings`
+### `push_changes`
 
 Commit and push any changes in the cortex repo. Call at the end of a session or after adding multiple learnings.
 
