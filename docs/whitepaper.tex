@@ -140,6 +140,15 @@ All governance mutations (policy changes, access updates, memory approvals/rejec
 \subsection{Memory quality feedback loop}
 v2 tracks per-entry quality scores \cite{cortex-shared}: impressions (how often injected), helpful count, reprompt penalty, and regression penalty. The \texttt{quality-feedback} CLI command and \texttt{memory\_feedback} MCP tool record outcomes. Over time, entries that cause regressions or repeated reprompts lose injection priority, while frequently helpful entries gain weight. This closes the loop between injection and actual usefulness.
 
+\subsection{Migration tooling}
+Legacy projects that predate Cortex's structured memory format can import existing knowledge through \texttt{cortex maintain migrate <project>} \cite{cortex-cli}. The migration pipeline scans git history and, when \texttt{gh} is available, GitHub PR reviews, CI failures, and issue comments. Extracted candidates are scored by confidence: high-confidence entries go directly to \texttt{LEARNINGS.md}, while lower-confidence entries are routed to \texttt{MEMORY\_QUEUE.md} for human review. An optional \texttt{--pin} flag promotes entries to canonical status. The \texttt{--dry-run} flag previews what would be extracted without writing any files.
+
+\subsection{Custom integration hooks}
+Beyond the three built-in lifecycle stages, Cortex supports user-defined hooks for seven events: \texttt{pre-save}, \texttt{post-save}, \texttt{post-search}, \texttt{pre-learning}, \texttt{post-learning}, \texttt{pre-index}, and \texttt{post-index} \cite{cortex-hooks}. Custom hooks are registered in \texttt{.governance/install-preferences.json} and execute as shell commands with a configurable timeout (default 5s). Each hook receives \texttt{CORTEX\_PATH} and \texttt{CORTEX\_HOOK\_EVENT} as environment variables, plus any event-specific variables passed by the caller. This enables integrations like Slack notifications on new learnings, webhook calls after index rebuilds, or pre-save validation scripts.
+
+\subsection{Data portability}
+Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects (removing them from the active profile without deleting data) and restoring them later. This supports team onboarding, machine migration, and selective backup workflows.
+
 \section{Interactive Shell}
 v2 adds a terminal-native shell (\texttt{cortex shell}) that provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. The shell exposes six views navigable by single keystrokes:
 
@@ -179,7 +188,7 @@ These concepts are often mixed:
   \item \textbf{Local vs API} is a storage/compute decision (where memory runs).
 \end{itemize}
 
-Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The 22 MCP tools cover search, backlog management, learning capture, and the full governance surface (policy, workflow, access control, index policy).
+Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The 16 MCP tools cover search, backlog management, learning capture, data portability, and governance \cite{cortex-index}.
 
 \section{Comparative Assessment}
 \textit{Evidence window: public documentation/changelogs available as of March 6, 2026.}
@@ -197,7 +206,7 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local syste
   \item Cortex governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
   \item Trust filter defaults: decay curve \(1.0 / 0.9 / 0.75 / 0.5\) at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier \(0.8\) \cite{cortex-shared}.
   \item Access control: 4 roles (admin, maintainer, contributor, viewer) with 6 action types \cite{cortex-shared}.
-  \item MCP tool surface: 22 tools across search, backlog, learning, and governance categories \cite{cortex-index}.
+  \item MCP tool surface: 16 tools across search, backlog, learning, portability, and governance categories \cite{cortex-index}.
   \item Interactive shell: 6 views, palette commands, persistent state across invocations \cite{cortex-shell}.
   \item Claude Opus 4.6 announcement includes a 1M-token context window (beta) \cite{anthropic-opus46}.
 \end{itemize}
@@ -364,6 +373,8 @@ Not fully. Some tradeoffs are structural (ownership vs managed convenience). But
 \bibitem{cortex-index} Cortex source: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
 \bibitem{cortex-shell} Cortex source: \texttt{mcp/src/shell.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shell.ts}
 \bibitem{cortex-data} Cortex source: \texttt{mcp/src/data-access.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/data-access.ts}
+\bibitem{cortex-govern} Cortex source: \texttt{mcp/src/cli-govern.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli-govern.ts}
+\bibitem{cortex-extract} Cortex source: \texttt{mcp/src/cli-extract.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli-extract.ts}
 \end{thebibliography}
 \fussy
 

@@ -13,6 +13,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
+import { setTelemetryEnabled, isTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
 
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -35,6 +36,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigMachines();
     case "profiles":
       return handleConfigProfiles();
+    case "telemetry":
+      return handleConfigTelemetry(rest);
     default:
       console.log(`cortex config - manage settings and policies
 
@@ -44,7 +47,8 @@ Subcommands:
   cortex config access [get|set ...]     Role-based permissions (admin/maintainer/contributor/viewer)
   cortex config index [get|set ...]      Indexer include/exclude globs
   cortex config machines                 Registered machines and profiles
-  cortex config profiles                 All profiles and their projects`);
+  cortex config profiles                 All profiles and their projects
+  cortex config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
       if (sub) {
         console.error(`\nUnknown config subcommand: "${sub}"`);
         process.exit(1);
@@ -210,5 +214,26 @@ export function handleConfigProfiles() {
     console.log(`\n${p.name}`);
     for (const proj of p.projects) console.log(`  - ${proj}`);
     if (!p.projects.length) console.log("  (no projects)");
+  }
+}
+
+function handleConfigTelemetry(args: string[]) {
+  const action = args[0];
+  switch (action) {
+    case "on":
+      setTelemetryEnabled(cortexPath, true);
+      console.log("Telemetry enabled. Local usage stats will be collected.");
+      console.log("No data is sent externally. Stats are stored in .governance/telemetry.json.");
+      return;
+    case "off":
+      setTelemetryEnabled(cortexPath, false);
+      console.log("Telemetry disabled.");
+      return;
+    case "reset":
+      resetTelemetry(cortexPath);
+      console.log("Telemetry stats reset.");
+      return;
+    default:
+      console.log(getTelemetrySummary(cortexPath));
   }
 }

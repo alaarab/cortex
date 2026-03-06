@@ -15,6 +15,7 @@ import {
   listProfiles,
   listProjectCards,
   loadShellState,
+  pinBacklogItem,
   QueueItem,
   readBacklog,
   readLearnings,
@@ -28,6 +29,7 @@ import {
   setMachineProfile,
   ShellState,
   tidyBacklogDone,
+  unpinBacklogItem,
   updateBacklogItem,
   workNextBacklogItem,
 } from "./data-access.js";
@@ -224,6 +226,8 @@ function shellHelpText(): string {
     `  ${cmd(":move <task-id|match> <active|queue|done>")}    ${desc("move backlog item")}`,
     `  ${cmd(":reprioritize <task-id|match> <high|medium|low>")}`,
     `  ${cmd(":context <task-id|match> <text>")}              ${desc("append/update context")}`,
+    `  ${cmd(":pin <task-id|match>")}                          ${desc("pin backlog item for quick access")}`,
+    `  ${cmd(":unpin <task-id|match>")}                        ${desc("unpin backlog item")}`,
     `  ${cmd(":work next")}                                   ${desc("move top queue item to active")}`,
     `  ${cmd(":tidy [keep]")}                                 ${desc("archive done items (default keep=30)")}`,
     "",
@@ -467,10 +471,11 @@ export class CortexShell {
         }
       }
       const id = style.dim(item.id);
+      const pinTag = item.pinned ? ` ${style.boldCyan("[pinned]")}` : "";
       if (item.checked) {
-        lines.push(`  ${id} ${style.green("[x]")} ${style.dim(item.line)}`);
+        lines.push(`  ${id} ${style.green("[x]")} ${style.dim(item.line)}${pinTag}`);
       } else {
-        lines.push(`  ${id} [ ] ${item.line}`);
+        lines.push(`  ${id} [ ] ${item.line}${pinTag}`);
       }
       if (item.context) lines.push(`    ${style.dimItalic("Context: " + item.context)}`);
     }
@@ -932,6 +937,30 @@ export class CortexShell {
       return;
     }
 
+    if (command === "pin") {
+      const project = this.ensureProjectSelected();
+      if (!project) return;
+      if (parts.length < 2) {
+        this.setMessage("Usage: :pin <task-id|match>");
+        return;
+      }
+      const match = parts.slice(1).join(" ");
+      this.setMessage(resultMsg(pinBacklogItem(this.cortexPath, project, match)));
+      return;
+    }
+
+    if (command === "unpin") {
+      const project = this.ensureProjectSelected();
+      if (!project) return;
+      if (parts.length < 2) {
+        this.setMessage("Usage: :unpin <task-id|match>");
+        return;
+      }
+      const match = parts.slice(1).join(" ");
+      this.setMessage(resultMsg(unpinBacklogItem(this.cortexPath, project, match)));
+      return;
+    }
+
     if (command === "work" && parts[1]?.toLowerCase() === "next") {
       const project = this.ensureProjectSelected();
       if (!project) return;
@@ -1280,7 +1309,7 @@ export class CortexShell {
   private suggestCommand(input: string): string | undefined {
     const known = [
       "help", "projects", "backlog", "learnings", "memory", "machines", "health",
-      "open", "search", "add", "complete", "move", "reprioritize", "context",
+      "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
       "work next", "tidy", "learn add", "learn remove", "mq approve", "mq reject",
       "mq edit", "machine map", "profile add-project", "profile remove-project",
       "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
@@ -1393,6 +1422,8 @@ export class CortexShell {
       ":complete",
       ":move",
       ":reprioritize",
+      ":pin",
+      ":unpin",
       ":context",
       ":work next",
       ":tidy",
@@ -1434,7 +1465,7 @@ export class CortexShell {
     if (cmd === "open") {
       return listProjectCards(this.cortexPath, this.profile).map((card) => `:open ${card.name}`);
     }
-    if (cmd === "complete" || cmd === "move" || cmd === "reprioritize" || cmd === "context") {
+    if (cmd === "complete" || cmd === "move" || cmd === "reprioritize" || cmd === "context" || cmd === "pin" || cmd === "unpin") {
       return this.backlogIdCompletions().map((id) => `:${cmd} ${id}`);
     }
     if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {

@@ -17,6 +17,9 @@ import {
   getMemoryQualityMultiplier,
   memoryScoreKey,
   updateRuntimeHealth,
+  runtimeFile,
+  sessionMarker,
+  sessionsDir,
   EXEC_TIMEOUT_MS,
   type DocRow,
 } from "./shared.js";
@@ -42,7 +45,8 @@ interface GitContext {
 function runGit(cwd: string, args: string[]): string | null {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }).trim();
-  } catch {
+  } catch (err: any) {
+    debugLog(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
     return null;
   }
 }
@@ -243,7 +247,8 @@ function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMet
   if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
-  } catch {
+  } catch (err: any) {
+    debugLog(`parseSessionMetrics: failed to read ${file}: ${err?.message || err}`);
     return {};
   }
 }
@@ -259,8 +264,8 @@ function writeSessionMetrics(cortexPathLocal: string, data: Record<string, Sessi
 function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    done: path.join(cortexPathLocal, `.quality-${today}`),
-    lock: path.join(cortexPathLocal, `.quality-${today}.lock`),
+    done: runtimeFile(cortexPathLocal, `quality-${today}`),
+    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
   };
 }
 
@@ -282,7 +287,8 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
       const ageMs = Date.now() - fs.statSync(markers.lock).mtimeMs;
       if (ageMs <= 2 * 60 * 60 * 1000) return false;
       fs.unlinkSync(markers.lock);
-    } catch {
+    } catch (err: any) {
+      debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${err?.message || err}`);
       return false;
     }
   }
@@ -398,6 +404,9 @@ export async function handleHookSessionStart() {
   const doctor = await runDoctor(cortexPath, false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(cortexPath);
 
+  // Track session for telemetry (opt-in only)
+  try { const { trackSession } = await import("./telemetry.js"); trackSession(cortexPath); } catch { /* best-effort */ }
+
   updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
   appendAuditLog(
     cortexPath,
@@ -492,17 +501,22 @@ export function parseHookInput(raw: string): HookPromptInput | null {
     const prompt = data.prompt || "";
     if (!prompt.trim()) return null;
     return { prompt, cwd: data.cwd, sessionId: data.session_id };
-  } catch {
+  } catch (err: any) {
+    debugLog(`parseHookInput: failed to parse hook JSON: ${err?.message || err}`);
     return null;
   }
 }
+
+// Projects that are always visible in narrowed search scope.
+const SHARED_PROJECTS = ["shared", "org"];
 
 export function searchDocuments(
   db: any,
   safeQuery: string,
   prompt: string,
   keywords: string,
-  detectedProject: string | null
+  detectedProject: string | null,
+  searchAllProjects = false
 ): DocRow[] | null {
   let rows: DocRow[] | null = null;
 
@@ -515,11 +529,22 @@ export function searchDocuments(
   }
 
   if (!rows || rows.length < 3) {
-    const globalRows = queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
-      [safeQuery]
-    );
+    let globalRows: DocRow[] | null;
+    if (searchAllProjects || !detectedProject) {
+      globalRows = queryDocRows(
+        db,
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
+        [safeQuery]
+      );
+    } else {
+      const scopeProjects = [detectedProject, ...SHARED_PROJECTS];
+      const placeholders = scopeProjects.map(() => "?").join(", ");
+      globalRows = queryDocRows(
+        db,
+        `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project IN (${placeholders}) ORDER BY rank LIMIT 10`,
+        [safeQuery, ...scopeProjects]
+      );
+    }
     rows = mergeUniqueDocs(rows, globalRows || []);
   }
 
@@ -806,12 +831,14 @@ export async function handleHookPrompt() {
     if (!rows.length) process.exit(0);
 
     if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && sessionId && detectedProject && cwd) {
-      const marker = path.join(cortexPath, `.extracted-${sessionId}-${detectedProject}`);
+      const marker = sessionMarker(cortexPath, `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
           await handleExtractMemories(detectedProject, cwd, true);
           fs.writeFileSync(marker, "");
-        } catch { /* best effort */ }
+        } catch (err: any) {
+          debugLog(`auto-extract failed for ${detectedProject}: ${err?.message || err}`);
+        }
       }
     }
 
@@ -839,18 +866,30 @@ export async function handleHookPrompt() {
     flushMemoryScores(cortexPath);
     scheduleBackgroundMaintenance(cortexPath);
 
-    const noticeFile = sessionId ? path.join(cortexPath, `.noticed-${sessionId}`) : null;
+    const noticeFile = sessionId ? sessionMarker(cortexPath, `noticed-${sessionId}`) : null;
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
 
     if (!alreadyNoticed) {
+      // Clean up stale session markers (>24h old) from .sessions/ dir
       try {
         const cutoff = Date.now() - 86400000;
+        const sessDir = sessionsDir(cortexPath);
+        if (fs.existsSync(sessDir)) {
+          for (const f of fs.readdirSync(sessDir)) {
+            if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
+            const fp = path.join(sessDir, f);
+            if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+          }
+        }
+        // Also clean legacy markers from root
         for (const f of fs.readdirSync(cortexPath)) {
           if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
           const fp = path.join(cortexPath, f);
-          if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+          try { fs.unlinkSync(fp); } catch { /* best effort */ }
         }
-      } catch { /* best effort */ }
+      } catch (err: any) {
+        debugLog(`stale notice cleanup failed: ${err?.message || err}`);
+      }
 
       const needed = checkConsolidationNeeded(cortexPath, profile);
       if (needed.length > 0) {
@@ -871,6 +910,13 @@ export async function handleHookPrompt() {
       }
     }
 
+    const totalMs = stage.indexMs + stage.searchMs + stage.trustMs + stage.rankMs + stage.selectMs;
+    const slowThreshold = Number.parseInt(process.env.CORTEX_SLOW_FS_WARN_MS || "3000", 10) || 3000;
+    if (totalMs > slowThreshold) {
+      debugLog(`slow-fs: hook-prompt took ${totalMs}ms (index=${stage.indexMs} search=${stage.searchMs} trust=${stage.trustMs} rank=${stage.rankMs} select=${stage.selectMs})`);
+      process.stderr.write(`cortex: hook-prompt took ${totalMs}ms, check if ~/.cortex is on a slow or network filesystem\n`);
+    }
+
     console.log(parts.join("\n"));
   } catch (err: any) {
     process.stderr.write("cortex hook-prompt error: " + String(err?.message || err) + "\n");
@@ -888,8 +934,8 @@ export async function handleHookContext() {
     const input = fs.readFileSync(0, "utf-8");
     const data = JSON.parse(input);
     if (data.cwd) cwd = data.cwd;
-  } catch {
-    // No stdin or invalid JSON, fall back to process.cwd()
+  } catch (err: any) {
+    debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err?.message || err}`);
   }
 
   const project = detectProject(cortexPath, cwd, profile);

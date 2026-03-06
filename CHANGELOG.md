@@ -345,3 +345,30 @@ Initial release.
 - Profile-aware project indexing via `profiles/*.yaml`
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
+
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.10.2...HEAD
+[1.10.2]: https://github.com/alaarab/cortex/compare/v1.10.0...v1.10.2
+[1.10.0]: https://github.com/alaarab/cortex/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/alaarab/cortex/compare/v1.8.6...v1.9.0
+[1.8.6]: https://github.com/alaarab/cortex/compare/v1.8.4...v1.8.6
+[1.8.4]: https://github.com/alaarab/cortex/compare/v1.8.3...v1.8.4
+[1.8.3]: https://github.com/alaarab/cortex/compare/v1.8.2...v1.8.3
+[1.8.2]: https://github.com/alaarab/cortex/compare/v1.8.1...v1.8.2
+[1.8.1]: https://github.com/alaarab/cortex/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/alaarab/cortex/compare/v1.7.4...v1.8.0
+[1.7.4]: https://github.com/alaarab/cortex/compare/v1.7.3...v1.7.4
+[1.7.3]: https://github.com/alaarab/cortex/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/alaarab/cortex/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/alaarab/cortex/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/alaarab/cortex/compare/v1.6.4...v1.7.0
+[1.6.4]: https://github.com/alaarab/cortex/compare/v1.6.3...v1.6.4
+[1.6.3]: https://github.com/alaarab/cortex/compare/v1.6.2...v1.6.3
+[1.6.2]: https://github.com/alaarab/cortex/compare/v1.6.1...v1.6.2
+[1.6.1]: https://github.com/alaarab/cortex/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/alaarab/cortex/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/alaarab/cortex/compare/v1.3.0...v1.5.0
+[1.3.0]: https://github.com/alaarab/cortex/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/alaarab/cortex/compare/v1.1.4...v1.2.0
+[1.1.4]: https://github.com/alaarab/cortex/compare/v1.1.0...v1.1.4
+[1.1.0]: https://github.com/alaarab/cortex/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/alaarab/cortex/releases/tag/v1.0.0

@@ -470,7 +470,8 @@ function actorName(): string {
   if (envActor) return envActor;
   try {
     return os.userInfo().username;
-  } catch {
+  } catch (err: any) {
+    debugLog(`actorName: os.userInfo() failed, using "unknown": ${err?.message || err}`);
     return "unknown";
   }
 }
@@ -981,9 +982,10 @@ export function consolidateProjectLearnings(cortexPath: string, project: string,
       const key = line.trim().toLowerCase().replace(/\s+/g, " ");
       const nextLine = lines[i + 1] || "";
       const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
+      const trimmedBullet = line.trimEnd();
       const existing = byDate.get(currentDate)!.get(key);
       if (!existing) {
-        byDate.get(currentDate)!.set(key, { bullet: line, citation });
+        byDate.get(currentDate)!.set(key, { bullet: trimmedBullet, citation });
         uniqueBullets++;
       } else if (!existing.citation && citation) {
         existing.citation = citation;

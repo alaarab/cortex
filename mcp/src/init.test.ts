@@ -13,6 +13,8 @@ import {
   getHooksEnabledPreference,
   getMcpEnabledPreference,
   isVersionNewer,
+  listTemplates,
+  migrateRootFiles,
   parseMcpMode,
   resetVSCodeProbeCache,
   runInit,
@@ -431,6 +433,22 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(cortexPath, ".governance", "memory-policy.json"))).toBe(true);
   });
 
+  it("init output mentions restart requirement", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-restart-msg");
+    process.env.CORTEX_PATH = cortexPath;
+    const chunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
+    try {
+      await runInit({ yes: true });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const output = chunks.join("");
+    expect(output).toContain("Restart your coding agent");
+    expect(output).toContain("Next steps:");
+  });
+
   it("walkthrough project name renames starter default project", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-rename");
     process.env.CORTEX_PATH = cortexPath;
@@ -501,5 +519,113 @@ describe("collectNativeMemoryFiles", () => {
     const result = collectNativeMemoryFiles();
     expect(result.length).toBe(1);
     expect(result[0].project).toBe("valid");
+  });
+});
+
+describe("migrateRootFiles", () => {
+  it("moves legacy session markers to .sessions/", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
+    const cortex = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortex, { recursive: true });
+    fs.writeFileSync(path.join(cortex, ".noticed-abc123"), "");
+    fs.writeFileSync(path.join(cortex, ".extracted-abc123-proj"), "");
+
+    const moved = migrateRootFiles(cortex);
+
+    expect(moved.length).toBe(2);
+    expect(fs.existsSync(path.join(cortex, ".sessions", "noticed-abc123"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, ".sessions", "extracted-abc123-proj"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, ".noticed-abc123"))).toBe(false);
+    cleanup();
+  });
+
+  it("moves quality markers to .runtime/", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
+    const cortex = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortex, { recursive: true });
+    fs.writeFileSync(path.join(cortex, ".quality-2026-01-01"), "done");
+
+    const moved = migrateRootFiles(cortex);
+
+    expect(moved.some((m: string) => m.includes("quality"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, ".runtime", "quality-2026-01-01"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, ".quality-2026-01-01"))).toBe(false);
+    cleanup();
+  });
+
+  it("moves debug.log to .runtime/debug.log", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
+    const cortex = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortex, { recursive: true });
+    fs.writeFileSync(path.join(cortex, "debug.log"), "log content");
+
+    const moved = migrateRootFiles(cortex);
+
+    expect(moved.some((m: string) => m.includes("debug.log"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, ".runtime", "debug.log"))).toBe(true);
+    expect(fs.readFileSync(path.join(cortex, ".runtime", "debug.log"), "utf8")).toBe("log content");
+    expect(fs.existsSync(path.join(cortex, "debug.log"))).toBe(false);
+    cleanup();
+  });
+
+  it("moves link.sh to scripts/link.sh", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
+    const cortex = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortex, { recursive: true });
+    fs.writeFileSync(path.join(cortex, "link.sh"), "#!/bin/bash\necho hi");
+
+    const moved = migrateRootFiles(cortex);
+
+    expect(moved.some((m: string) => m.includes("link.sh"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, "scripts", "link.sh"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, "link.sh"))).toBe(false);
+    cleanup();
+  });
+
+  it("returns empty array when nothing to migrate", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
+    const cortex = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortex, { recursive: true });
+
+    const moved = migrateRootFiles(cortex);
+
+    expect(moved).toEqual([]);
+    cleanup();
+  });
+});
+
+describe("project templates", () => {
+  it("listTemplates returns available template names", () => {
+    const templates = listTemplates();
+    expect(templates).toContain("python-project");
+    expect(templates).toContain("monorepo");
+    expect(templates).toContain("library");
+    expect(templates).toContain("frontend");
+  });
+
+  it("runInit with --template applies template files to project", async () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-template-test-");
+    const origHome = process.env.HOME;
+    const origCortex = process.env.CORTEX_PATH;
+    process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
+    process.env.CORTEX_PATH = path.join(tmpDir, "cortex");
+    resetVSCodeProbeCache();
+
+    try {
+      await runInit({ yes: true, template: "python-project" });
+      const cortexDir = path.join(tmpDir, "cortex");
+      const claudeMd = fs.readFileSync(path.join(cortexDir, "my-first-project", "CLAUDE.md"), "utf8");
+      expect(claudeMd).toContain("Python project");
+      expect(claudeMd).toContain("pytest");
+      expect(claudeMd).not.toContain("{{project}}");
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origHome;
+      if (origCortex) process.env.CORTEX_PATH = origCortex;
+      else delete process.env.CORTEX_PATH;
+      resetVSCodeProbeCache();
+      cleanup();
+    }
   });
 });

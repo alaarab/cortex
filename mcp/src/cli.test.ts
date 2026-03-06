@@ -709,6 +709,38 @@ describe("CLI integration: maintain subcommands", () => {
     expect(stdout).toContain("Governed memories:");
   });
 
+  it("maintain govern --dry-run does not write queue files", () => {
+    const projDir = path.join(cortexDir, "gov-dry");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-dry LEARNINGS\n\n## 2020-01-01\n\n- wip\n- temp note\n");
+
+    const queuePath = path.join(projDir, "MEMORY_QUEUE.md");
+    expect(fs.existsSync(queuePath)).toBe(false);
+
+    const { stdout, exitCode } = runCli(
+      ["maintain", "govern", "gov-dry", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("[dry-run]");
+    expect(stdout).toContain("Would govern");
+    // Queue file should not have been created
+    expect(fs.existsSync(queuePath)).toBe(false);
+  });
+
+  it("maintain govern --dry-run with no project previews all", () => {
+    const projDir = path.join(cortexDir, "gov-dry2");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-dry2 LEARNINGS\n\n## 2025-01-01\n\n- useful thing\n");
+
+    const { stdout, exitCode } = runCli(
+      ["maintain", "govern", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("[dry-run]");
+  });
+
   it("maintain consolidate --dry-run does not modify files", () => {
     const projDir = path.join(cortexDir, "cons-proj");
     fs.mkdirSync(projDir, { recursive: true });
@@ -1318,6 +1350,257 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: init (subprocess-based, #96)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: init", () => {
+  let cortexDir: string;
+  let homeDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-init-cli-test-");
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    cleanup = tmp.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("init --dry-run does not create files", () => {
+    const { stdout, exitCode } = runCli(
+      ["init", "--dry-run", "-y"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout.toLowerCase()).toContain("dry run");
+    expect(fs.existsSync(cortexDir)).toBe(false);
+  });
+
+  it("init -y creates cortex directory and governance files", () => {
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(cortexDir)).toBe(true);
+    const govDir = path.join(cortexDir, ".governance");
+    expect(fs.existsSync(govDir)).toBe(true);
+  });
+
+  it("init with --machine sets machine name", () => {
+    const { exitCode } = runCli(
+      ["init", "-y", "--machine", "test-box", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    const machinesPath = path.join(cortexDir, "machines.yaml");
+    if (fs.existsSync(machinesPath)) {
+      const content = fs.readFileSync(machinesPath, "utf8");
+      expect(content).toContain("test-box");
+    }
+  });
+
+  it("init is idempotent (re-running does not fail)", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const { exitCode } = runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  it("init --mcp with invalid value exits with error", () => {
+    const { stderr, exitCode } = runCli(
+      ["init", "--mcp", "banana"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("Invalid --mcp value");
+  });
+
+  it("init --dry-run on existing install describes update plan", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const { stdout, exitCode } = runCli(
+      ["init", "--dry-run", "-y"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout.toLowerCase()).toContain("dry run");
+    expect(stdout).toContain("install detected");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: verify
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: verify", () => {
+  let cortexDir: string;
+  let homeDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-verify-cli-test-");
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    cleanup = tmp.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("verify on fresh init reports checks", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const { stdout, stderr } = runCli(
+      ["verify"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("cortex verify:");
+    expect(output).toMatch(/(pass|FAIL)/);
+  });
+
+  it("verify on empty directory reports issues", () => {
+    fs.mkdirSync(cortexDir, { recursive: true });
+    const { stdout, stderr } = runCli(
+      ["verify"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("cortex verify:");
+  });
+
+  it("verify checks fts-index and hook-entrypoint", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const { stdout, stderr } = runCli(
+      ["verify"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("fts-index");
+    expect(output).toContain("hook-entrypoint");
+  });
+
+  it("verify shows fix suggestions for failures", () => {
+    fs.mkdirSync(cortexDir, { recursive: true });
+    const { stdout, stderr } = runCli(
+      ["verify"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("issues found");
+    expect(output).toContain("fix:");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: help and health
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: help and health", () => {
+  it("--help prints usage information", () => {
+    const { stdout, exitCode } = runCli(["--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("search");
+    expect(stdout).toContain("doctor");
+  });
+
+  it("-h prints usage information", () => {
+    const { stdout, exitCode } = runCli(["-h"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cortex");
+  });
+
+  it("help prints usage information", () => {
+    const { stdout, exitCode } = runCli(["help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cortex");
+  });
+
+  it("--health exits with code 0", () => {
+    const { exitCode } = runCli(["--health"]);
+    expect(exitCode).toBe(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: detect-skills
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: detect-skills", () => {
+  let cortexDir: string;
+  let homeDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-detect-skills-test-");
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    grantAdmin(cortexDir, "cli-test");
+    cleanup = tmp.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("reports no skills directory when ~/.claude/skills/ missing", () => {
+    const { stdout, exitCode } = runCli(
+      ["detect-skills"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("No native skills directory");
+  });
+
+  it("reports all tracked when skills dir exists but all are tracked", () => {
+    const nativeSkills = path.join(homeDir, ".claude", "skills");
+    fs.mkdirSync(nativeSkills, { recursive: true });
+    fs.writeFileSync(path.join(nativeSkills, "my-skill.md"), "# My Skill\nDoes things.");
+
+    const globalSkills = path.join(cortexDir, "global", "skills");
+    fs.mkdirSync(globalSkills, { recursive: true });
+    fs.writeFileSync(path.join(globalSkills, "my-skill.md"), "# My Skill\nDoes things.");
+
+    const { stdout, exitCode } = runCli(
+      ["detect-skills"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("already tracked");
+  });
+
+  it("detects untracked skills", () => {
+    const nativeSkills = path.join(homeDir, ".claude", "skills");
+    fs.mkdirSync(nativeSkills, { recursive: true });
+    fs.writeFileSync(path.join(nativeSkills, "untracked.md"), "# Untracked\nNew skill.");
+
+    const { stdout, exitCode } = runCli(
+      ["detect-skills"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("untracked");
+    expect(stdout).toContain("--import");
+  });
+});
+
 // --- Unit tests for exported cli functions ---
 
 import { scoreMemoryCandidate, detectTaskIntent, selectSnippets } from "./cli.js";
@@ -1421,5 +1704,313 @@ describe("selectSnippets", () => {
     const { selected, usedTokens } = selectSnippets(rows, "content", 100, 6, 520);
     expect(selected.length).toBe(1);
     expect(usedTokens).toBeLessThanOrEqual(200); // first snippet is always included, possibly truncated
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: uninstall
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: uninstall", () => {
+  let cortexDir: string;
+  let homeDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-uninstall-test-");
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    grantAdmin(cortexDir, "cli-test");
+    cleanup = tmp.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("removes MCP server and hooks from Claude settings", () => {
+    runCli(
+      ["init", "-y", "--mcp", "on"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    const settingsPath = path.join(homeDir, ".claude", "settings.json");
+    expect(fs.existsSync(settingsPath)).toBe(true);
+
+    const before = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    expect(before.mcpServers?.cortex).toBeDefined();
+
+    const { stdout, exitCode } = runCli(
+      ["uninstall"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Uninstalling cortex");
+
+    const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    expect(after.mcpServers?.cortex).toBeUndefined();
+
+    for (const event of ["UserPromptSubmit", "Stop", "SessionStart"]) {
+      const hooks = after.hooks?.[event] || [];
+      const hasCortex = hooks.some(
+        (h: any) => JSON.stringify(h).includes("cortex")
+      );
+      expect(hasCortex).toBe(false);
+    }
+  });
+
+  it("preserves cortex data directory", () => {
+    const projDir = path.join(cortexDir, "test-proj");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n- test insight");
+
+    runCli(
+      ["init", "-y"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    const { exitCode, stdout } = runCli(
+      ["uninstall"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("NOT deleted");
+    expect(fs.existsSync(path.join(projDir, "LEARNINGS.md"))).toBe(true);
+  });
+
+  it("handles missing settings file gracefully", () => {
+    const { stdout, exitCode } = runCli(
+      ["uninstall"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("settings not found");
+  });
+
+  it("removes cortex from VS Code MCP config", () => {
+    const vscodeDir = path.join(homeDir, ".config", "Code", "User");
+    fs.mkdirSync(vscodeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(vscodeDir, "mcp.json"),
+      JSON.stringify({ servers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["uninstall"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Removed cortex from VS Code");
+
+    const after = JSON.parse(fs.readFileSync(path.join(vscodeDir, "mcp.json"), "utf8"));
+    expect(after.servers?.cortex).toBeUndefined();
+  });
+
+  it("removes cortex from Cursor MCP config", () => {
+    const cursorDir = path.join(homeDir, ".cursor");
+    fs.mkdirSync(cursorDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cursorDir, "mcp.json"),
+      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["uninstall"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Removed cortex from Cursor");
+
+    const after = JSON.parse(fs.readFileSync(path.join(cursorDir, "mcp.json"), "utf8"));
+    expect(after.mcpServers?.cortex).toBeUndefined();
+  });
+});
+
+describe("CLI integration: search history", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    const projDir = path.join(cortexDir, "hist-proj");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projDir, "LEARNINGS.md"),
+      "# hist-proj LEARNINGS\n\n- Cache invalidation requires full restart\n"
+    );
+  });
+
+  afterEach(() => cleanup());
+
+  it("--history shows empty history when no searches have been made", () => {
+    const { stdout, exitCode } = runCli(
+      ["search", "--history"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("No search history");
+  });
+
+  it("records search queries and --history shows them", () => {
+    // Run a search first
+    runCli(
+      ["search", "cache"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    // Check history
+    const { stdout, exitCode } = runCli(
+      ["search", "--history"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cache");
+    expect(stdout).toContain("Recent searches");
+  });
+
+  it("--from-history re-runs a previous search", () => {
+    // Run a search
+    runCli(
+      ["search", "restart"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    // Re-run from history
+    const { stdout, exitCode } = runCli(
+      ["search", "--from-history", "1"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("restart");
+  });
+
+  it("--from-history with out-of-range index exits with error", () => {
+    const { stderr, exitCode } = runCli(
+      ["search", "--from-history", "99"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("No search at position 99");
+  });
+
+  it("history stores project and type metadata", () => {
+    runCli(
+      ["search", "cache", "--project", "hist-proj", "--type", "learnings"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const historyPath = path.join(cortexDir, ".governance", "search-history.jsonl");
+    expect(fs.existsSync(historyPath)).toBe(true);
+    const lines = fs.readFileSync(historyPath, "utf8").trim().split("\n");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.query).toBe("cache");
+    expect(entry.project).toBe("hist-proj");
+    expect(entry.type).toBe("learnings");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI integration: init --from-existing
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CLI integration: init --from-existing", () => {
+  let cortexDir: string;
+  let homeDir: string;
+  let projectDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-from-existing-test-");
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    projectDir = path.join(tmp.path, "my-app");
+    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+    cleanup = tmp.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("bootstraps a project from a directory with CLAUDE.md", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "CLAUDE.md"),
+      "# my-app\n\nA web application for managing tasks.\n\n## Commands\n\n```bash\nnpm run dev\nnpm test\n```\n"
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", projectDir],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Bootstrapped project");
+    expect(stdout).toContain("my-app");
+
+    // Verify project files were created
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "LEARNINGS.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "backlog.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "summary.md"))).toBe(true);
+
+    // Verify CLAUDE.md content was copied
+    const claude = fs.readFileSync(path.join(cortexDir, "my-app", "CLAUDE.md"), "utf8");
+    expect(claude).toContain("web application for managing tasks");
+  });
+
+  it("finds CLAUDE.md in .claude/ subdirectory", () => {
+    const claudeDir = path.join(projectDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, "CLAUDE.md"),
+      "# my-app\n\nProject with nested CLAUDE.md.\n"
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", projectDir],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Bootstrapped project");
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
+  });
+
+  it("reports error when no CLAUDE.md exists", () => {
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", projectDir],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0); // init itself succeeds, bootstrap fails gracefully
+    expect(stdout).toContain("Could not bootstrap");
+    expect(stdout).toContain("No CLAUDE.md found");
+  });
+
+  it("reports error when path does not exist", () => {
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", "/tmp/nonexistent-path-xyz"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Could not bootstrap");
+    expect(stdout).toContain("does not exist");
+  });
+
+  it("works on existing cortex install (update path)", () => {
+    // First, init normally
+    runCli(
+      ["init", "-y"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    // Create a project dir with CLAUDE.md
+    fs.writeFileSync(
+      path.join(projectDir, "CLAUDE.md"),
+      "# my-app\n\nBootstrapped on update.\n"
+    );
+
+    // Run init again with --from-existing
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", projectDir],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Bootstrapped project");
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
   });
 });

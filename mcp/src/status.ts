@@ -4,6 +4,7 @@ import * as os from "os";
 import { execFileSync } from "child_process";
 import { findCortexPath, detectProject, getProjectDirs, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
+import { getTelemetrySummary } from "./telemetry.js";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -129,6 +130,11 @@ export async function runStatus() {
   } else {
     console.log(`\n  ${DIM}~/.cortex is not a git repo${RESET}`);
   }
+
+  // Telemetry
+  const telemetry = getTelemetrySummary(cortexPath);
+  const firstLine = telemetry.split("\n")[0];
+  console.log(`\n  ${BOLD}${firstLine}${RESET}`);
 
   console.log("");
 }
