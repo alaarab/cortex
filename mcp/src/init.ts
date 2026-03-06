@@ -536,15 +536,24 @@ function isCortexCommand(command: string): boolean {
 
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const claudeJsonPath = path.join(os.homedir(), ".claude.json");
   const entryScript = resolveEntryScript();
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
   const hooksEnabled = opts.hooksEnabled ?? getHooksEnabledPreference(cortexPath);
   const lifecycle = buildLifecycleCommands(cortexPath);
   let status: McpConfigStatus = "already_disabled";
 
+  // Claude Code reads MCP servers from ~/.claude.json (not settings.json)
+  if (fs.existsSync(claudeJsonPath)) {
+    patchJsonFile(claudeJsonPath, (data) => {
+      status = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
+    });
+  }
+
   patchJsonFile(settingsPath, (data) => {
-    // MCP server
-    status = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
+    // MCP server (keep in settings.json for backwards compat)
+    const settingsStatus = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
+    if (status === "already_disabled") status = settingsStatus;
 
     // Hooks: update to latest version when enabled, otherwise remove cortex hooks.
     if (!data.hooks) data.hooks = {};
@@ -1438,6 +1447,18 @@ export async function runUninstall() {
 
   const home = os.homedir();
   const settingsPath = path.join(home, ".claude", "settings.json");
+
+  // Remove from Claude Code ~/.claude.json (where MCP servers are actually read)
+  const claudeJsonPath = path.join(home, ".claude.json");
+  if (fs.existsSync(claudeJsonPath)) {
+    try {
+      if (removeMcpServerAtPath(claudeJsonPath)) {
+        log(`  Removed cortex MCP server from ~/.claude.json`);
+      }
+    } catch (e) {
+      log(`  Warning: could not update ~/.claude.json (${e})`);
+    }
+  }
 
   // Remove from Claude Code settings.json
   if (fs.existsSync(settingsPath)) {
