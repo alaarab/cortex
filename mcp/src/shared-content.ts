@@ -9,6 +9,10 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
+  cortexOk,
+  cortexErr,
+  CortexError,
+  type CortexResult,
 } from "./shared.js";
 import {
   checkMemoryPermission,
@@ -606,12 +610,12 @@ export function migrateLegacyFindings(
   cortexPath: string,
   project: string,
   opts: { pinCanonical?: boolean; dryRun?: boolean } = {}
-): string {
+): CortexResult<string> {
   const denial = checkMemoryPermission(cortexPath, "write");
-  if (denial) return denial;
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
 
   const available = new Map(
     fs.readdirSync(resolvedDir).map((name) => [name.toLowerCase(), name] as const)
@@ -619,7 +623,7 @@ export function migrateLegacyFindings(
   const files = LEGACY_FINDINGS_CANDIDATES
     .map((name) => available.get(name.toLowerCase()))
     .filter((name): name is string => Boolean(name));
-  if (!files.length) return `No legacy findings docs found for "${project}".`;
+  if (!files.length) return cortexErr(`No legacy findings docs found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
   const seen = new Set<string>();
   const extracted: Array<{ text: string; file: string; line: number }> = [];
@@ -640,11 +644,11 @@ export function migrateLegacyFindings(
   }
 
   if (!extracted.length) {
-    return `Legacy findings docs found for "${project}", but no actionable bullet entries were detected.`;
+    return cortexOk(`Legacy findings docs found for "${project}", but no actionable bullet entries were detected.`);
   }
 
   if (opts.dryRun) {
-    return `Found ${extracted.length} migratable findings in ${files.length} file(s) for "${project}".`;
+    return cortexOk(`Found ${extracted.length} migratable findings in ${files.length} file(s) for "${project}".`);
   }
 
   let migrated = 0;
@@ -669,15 +673,15 @@ export function migrateLegacyFindings(
     "migrate_findings",
     `project=${project} files=${files.length} migrated=${migrated} pinned=${pinned}`
   );
-  return `Migrated ${migrated} findings for "${project}" from ${files.length} legacy file(s)${opts.pinCanonical ? `; pinned ${pinned} canonical memories` : ""}.`;
+  return cortexOk(`Migrated ${migrated} findings for "${project}" from ${files.length} legacy file(s)${opts.pinCanonical ? `; pinned ${pinned} canonical memories` : ""}.`);
 }
 
-export function upsertCanonicalMemory(cortexPath: string, project: string, memory: string): string {
+export function upsertCanonicalMemory(cortexPath: string, project: string, memory: string): CortexResult<string> {
   const denial = checkMemoryPermission(cortexPath, "pin");
-  if (denial) return denial;
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
   const canonicalPath = path.join(resolvedDir, "CANONICAL_MEMORIES.md");
   const today = new Date().toISOString().slice(0, 10);
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
@@ -708,7 +712,7 @@ export function upsertCanonicalMemory(cortexPath: string, project: string, memor
   };
   saveCanonicalLocks(cortexPath, locks);
   appendAuditLog(cortexPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);
-  return `Pinned canonical memory in ${project}.`;
+  return cortexOk(`Pinned canonical memory in ${project}.`);
 }
 
 export function isDuplicateLearning(existingContent: string, newLearning: string, threshold = 0.6): boolean {
@@ -750,12 +754,12 @@ export function addLearningToFile(
   project: string,
   learning: string,
   citationInput?: Partial<LearningCitation>
-): string {
+): CortexResult<string> {
   const denial = checkMemoryPermission(cortexPath, "write");
-  if (denial) return denial;
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir) return `Invalid project name: "${project}".`;
+  if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
 
   const today = new Date().toISOString().slice(0, 10);
@@ -778,7 +782,7 @@ export function addLearningToFile(
   const citationComment = `  ${buildCitationComment(citation)}`;
 
   if (!fs.existsSync(learningsPath)) {
-    if (!fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
+    if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
     const newContent = `# ${project} LEARNINGS\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
     fs.writeFileSync(learningsPath, newContent);
     appendAuditLog(
@@ -786,14 +790,14 @@ export function addLearningToFile(
       "add_learning",
       `project=${project} created=true citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
     );
-    return `Created LEARNINGS.md for "${project}" and added insight.`;
+    return cortexOk(`Created LEARNINGS.md for "${project}" and added insight.`);
   }
 
   const content = fs.readFileSync(learningsPath, "utf8");
 
   if (isDuplicateLearning(content, bullet)) {
     debugLog(`add_learning: skipped duplicate for "${project}": ${bullet.slice(0, 80)}`);
-    return `Skipped duplicate learning for "${project}": already exists with similar wording.`;
+    return cortexOk(`Skipped duplicate learning for "${project}": already exists with similar wording.`);
   }
 
   const issues = validateLearningsFormat(content);
@@ -831,13 +835,13 @@ export function addLearningToFile(
   const afterContent = fs.readFileSync(learningsPath, "utf8");
   const activeCount = countActiveLearnings(afterContent);
   if (activeCount > cap) {
-    const archived = autoArchiveToKnowledge(cortexPath, project, cap);
-    if (archived > 0) {
-      debugLog(`Size cap: archived ${archived} oldest entries for "${project}" (cap=${cap})`);
+    const archiveResult = autoArchiveToKnowledge(cortexPath, project, cap);
+    if (archiveResult.ok && archiveResult.data > 0) {
+      debugLog(`Size cap: archived ${archiveResult.data} oldest entries for "${project}" (cap=${cap})`);
     }
   }
 
-  return `Added learning to ${project}: ${bullet} (with citation metadata)`;
+  return cortexOk(`Added learning to ${project}: ${bullet} (with citation metadata)`);
 }
 
 // ── Knowledge tier helpers ───────────────────────────────────────────────────
@@ -923,16 +927,16 @@ export function autoArchiveToKnowledge(
   cortexPath: string,
   project: string,
   keepCount: number,
-): number {
-  if (!isValidProjectName(project)) return 0;
+): CortexResult<number> {
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return 0;
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
   const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
-  if (!fs.existsSync(learningsPath)) return 0;
+  if (!fs.existsSync(learningsPath)) return cortexOk(0);
 
   const content = fs.readFileSync(learningsPath, "utf8");
   const entries = parseActiveEntries(content);
-  if (entries.length <= keepCount) return 0;
+  if (entries.length <= keepCount) return cortexOk(0);
 
   const toArchive = entries.slice(0, entries.length - keepCount);
   const toKeep = new Set(entries.slice(entries.length - keepCount).map(e => e.lineIndex));
@@ -1021,5 +1025,5 @@ export function autoArchiveToKnowledge(
     `project=${project} archived=${toArchive.length} topics=${[...byTopic.keys()].join(",")}`
   );
 
-  return toArchive.length;
+  return cortexOk(toArchive.length);
 }
