@@ -50,6 +50,7 @@ import {
   isCortexError,
   cortexOk,
   cortexErr,
+  resolveImports,
 } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
@@ -474,7 +475,7 @@ describe("appendAuditLog", () => {
   it("appends log entries", () => {
     const cortex = makeCortex();
     appendAuditLog(cortex, "test_event", "details=foo");
-    const logPath = path.join(cortex, ".cortex-audit.log");
+    const logPath = path.join(cortex, ".runtime", "audit.log");
     expect(fs.existsSync(logPath)).toBe(true);
     const content = fs.readFileSync(logPath, "utf8");
     expect(content).toContain("test_event");
@@ -483,7 +484,8 @@ describe("appendAuditLog", () => {
 
   it("rotates log when over 1MB", () => {
     const cortex = makeCortex();
-    const logPath = path.join(cortex, ".cortex-audit.log");
+    const logPath = path.join(cortex, ".runtime", "audit.log");
+    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
     // Seed with >1MB of data (each line ~80 chars, need ~13000 lines)
     const bigContent = Array.from({ length: 14000 }, (_, i) =>
       `[2025-01-01T00:00:00.000Z] event_${i} ${"x".repeat(60)}`
@@ -521,6 +523,28 @@ describe("consolidateProjectLearnings", () => {
     const content = fs.readFileSync(path.join(cortex, "dedupproj", "LEARNINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(2);
+  });
+
+  it("deduplicates entries that differ only by trailing whitespace", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "trailproj", {
+      "LEARNINGS.md": [
+        "# trailproj LEARNINGS",
+        "",
+        "## 2025-01-01",
+        "",
+        "- Use parameterized queries   ",
+        "- Use parameterized queries",
+        "",
+      ].join("\n"),
+    });
+
+    consolidateProjectLearnings(cortex, "trailproj");
+    const content = fs.readFileSync(path.join(cortex, "trailproj", "LEARNINGS.md"), "utf8");
+    const bullets = content.split("\n").filter(l => l.startsWith("- "));
+    expect(bullets.length).toBe(1);
+    expect(bullets[0]).toBe("- Use parameterized queries");
   });
 });
 
@@ -1687,6 +1711,17 @@ describe("getProjectDirs", () => {
     expect(names).not.toContain("templates");
   });
 
+  it("excludes global directory from project listing", () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
+
+    const dirs = getProjectDirs(cortex);
+    const names = dirs.map(d => path.basename(d));
+    expect(names).toContain("projA");
+    expect(names).not.toContain("global");
+  });
+
   it("uses profile to filter projects", () => {
     const cortex = makeCortex();
     fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
@@ -1758,6 +1793,27 @@ describe("consolidateProjectLearnings additional", () => {
     makeProject(cortex, "emptycons", { "summary.md": "# emptycons\n" });
     const result = consolidateProjectLearnings(cortex, "emptycons");
     expect(result).toContain("No LEARNINGS.md");
+  });
+
+  it("deduplicates entries that differ only by trailing whitespace", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "trailws", {
+      "LEARNINGS.md": [
+        "# trailws LEARNINGS",
+        "",
+        "## 2025-01-01",
+        "",
+        "- Use parameterized queries   ",
+        "- Use parameterized queries",
+        "- Another learning",
+        "",
+      ].join("\n"),
+    });
+    consolidateProjectLearnings(cortex, "trailws");
+    const content = fs.readFileSync(path.join(cortex, "trailws", "LEARNINGS.md"), "utf8");
+    const bullets = content.split("\n").filter(l => l.startsWith("- "));
+    expect(bullets.length).toBe(2);
   });
 
   it("preserves citation comments during dedup", () => {
@@ -2193,5 +2249,109 @@ describe("collectNativeMemoryFiles", () => {
     }
     const result = collectNativeMemoryFiles();
     expect(result).toHaveLength(2);
+  });
+});
+
+describe("resolveImports", () => {
+  let cortexDir: string;
+  let importCleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-import-test-");
+    cortexDir = tmp.path;
+    const sharedDir = path.join(cortexDir, "global", "shared");
+    fs.mkdirSync(sharedDir, { recursive: true });
+    importCleanup = tmp.cleanup;
+  });
+
+  afterEach(() => importCleanup());
+
+  it("returns content unchanged when no imports present", () => {
+    const content = "# Hello\n\nNo imports here.";
+    expect(resolveImports(content, cortexDir)).toBe(content);
+  });
+
+  it("resolves a single @import directive", () => {
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "conventions.md"),
+      "Always use snake_case."
+    );
+    const content = "# Project\n\n@import shared/conventions.md\n\nMore text.";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("Always use snake_case.");
+    expect(result).not.toContain("@import");
+  });
+
+  it("resolves multiple @import directives", () => {
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "a.md"),
+      "Content A"
+    );
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "b.md"),
+      "Content B"
+    );
+    const content = "@import shared/a.md\n@import shared/b.md";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("Content A");
+    expect(result).toContain("Content B");
+  });
+
+  it("handles nested imports recursively", () => {
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "outer.md"),
+      "Outer start\n@import shared/inner.md\nOuter end"
+    );
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "inner.md"),
+      "Inner content"
+    );
+    const content = "@import shared/outer.md";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("Outer start");
+    expect(result).toContain("Inner content");
+    expect(result).toContain("Outer end");
+  });
+
+  it("detects circular imports and inserts comment", () => {
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "loop-a.md"),
+      "@import shared/loop-b.md"
+    );
+    fs.writeFileSync(
+      path.join(cortexDir, "global", "shared", "loop-b.md"),
+      "@import shared/loop-a.md"
+    );
+    const content = "@import shared/loop-a.md";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("@import cycle:");
+  });
+
+  it("handles missing import file gracefully", () => {
+    const content = "@import shared/nonexistent.md";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("@import not found: shared/nonexistent.md");
+  });
+
+  it("blocks path traversal attempts", () => {
+    const content = "@import ../../etc/passwd";
+    const result = resolveImports(content, cortexDir);
+    expect(result).toContain("@import blocked: path traversal");
+  });
+
+  it("caps recursion depth", () => {
+    // Create a chain: d0 -> d1 -> d2 -> d3 -> d4 -> d5 (d5 should not resolve)
+    for (let i = 0; i < 6; i++) {
+      const next = i < 5 ? `@import shared/d${i + 1}.md` : "deepest";
+      fs.writeFileSync(
+        path.join(cortexDir, "global", "shared", `d${i}.md`),
+        `level-${i}\n${next}`
+      );
+    }
+    const result = resolveImports("@import shared/d0.md", cortexDir);
+    expect(result).toContain("level-0");
+    expect(result).toContain("level-4");
+    // depth 5 should not be resolved (MAX_IMPORT_DEPTH = 5)
+    expect(result).toContain("@import shared/d5.md");
   });
 });

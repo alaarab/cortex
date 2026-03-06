@@ -519,4 +519,6 @@ Cortex uses `sql.js-fts5` for local SQLite FTS5 support in Node. This dependency
 
 ---
 
-MIT License. Made by [Ala Arab](https://github.com/alaarab). Contributions welcome.
+Found a security issue? See [SECURITY.md](SECURITY.md) for responsible disclosure.
+
+MIT License. Made by [Ala Arab](https://github.com/alaarab). [Contributions welcome](CONTRIBUTING.md).

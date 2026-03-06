@@ -4,7 +4,7 @@ import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
-import { EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
+import { debugLog, EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -35,7 +35,8 @@ function readInstallPreferences(cortexPath: string): InstallPreferences {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as InstallPreferences;
     return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
+  } catch (err: any) {
+    debugLog(`readInstallPreferences: failed to parse ${file}: ${err?.message || err}`);
     return {};
   }
 }
@@ -268,6 +269,115 @@ function resolveEntryScript(): string {
   return path.join(ROOT, "mcp", "dist", "index.js");
 }
 
+/**
+ * Migrate legacy files from the cortex root into proper subdirectories.
+ * Called on every init/update to keep the root clean.
+ */
+export function migrateRootFiles(cortexPath: string): string[] {
+  const moved: string[] = [];
+
+  // Move session markers (.noticed-*, .extracted-*) to .sessions/
+  try {
+    for (const f of fs.readdirSync(cortexPath)) {
+      if (f.startsWith(".noticed-") || f.startsWith(".extracted-")) {
+        const sessDir = path.join(cortexPath, ".sessions");
+        fs.mkdirSync(sessDir, { recursive: true });
+        const src = path.join(cortexPath, f);
+        const dest = path.join(sessDir, f.slice(1)); // drop leading dot
+        try {
+          fs.renameSync(src, dest);
+          moved.push(`${f} -> .sessions/${f.slice(1)}`);
+        } catch { /* best effort */ }
+      }
+    }
+  } catch { /* best effort */ }
+
+  // Move quality markers (.quality-*) to .runtime/
+  try {
+    for (const f of fs.readdirSync(cortexPath)) {
+      if (f.startsWith(".quality-")) {
+        const rtDir = path.join(cortexPath, ".runtime");
+        fs.mkdirSync(rtDir, { recursive: true });
+        const src = path.join(cortexPath, f);
+        const dest = path.join(rtDir, f.slice(1)); // drop leading dot
+        try {
+          fs.renameSync(src, dest);
+          moved.push(`${f} -> .runtime/${f.slice(1)}`);
+        } catch { /* best effort */ }
+      }
+    }
+  } catch { /* best effort */ }
+
+  // Move debug.log to .runtime/debug.log
+  const debugLog = path.join(cortexPath, "debug.log");
+  if (fs.existsSync(debugLog)) {
+    const rtDir = path.join(cortexPath, ".runtime");
+    fs.mkdirSync(rtDir, { recursive: true });
+    const dest = path.join(rtDir, "debug.log");
+    try {
+      if (fs.existsSync(dest)) {
+        fs.appendFileSync(dest, fs.readFileSync(debugLog, "utf8"));
+        fs.unlinkSync(debugLog);
+      } else {
+        fs.renameSync(debugLog, dest);
+      }
+      moved.push("debug.log -> .runtime/debug.log");
+    } catch { /* best effort */ }
+  }
+
+  // Move .cortex-audit.log to .runtime/audit.log
+  const auditLog = path.join(cortexPath, ".cortex-audit.log");
+  if (fs.existsSync(auditLog)) {
+    const rtDir = path.join(cortexPath, ".runtime");
+    fs.mkdirSync(rtDir, { recursive: true });
+    const dest = path.join(rtDir, "audit.log");
+    try {
+      if (fs.existsSync(dest)) {
+        fs.appendFileSync(dest, fs.readFileSync(auditLog, "utf8"));
+        fs.unlinkSync(auditLog);
+      } else {
+        fs.renameSync(auditLog, dest);
+      }
+      moved.push(".cortex-audit.log -> .runtime/audit.log");
+    } catch { /* best effort */ }
+  }
+
+  // Move link.sh to scripts/link.sh
+  const linkSh = path.join(cortexPath, "link.sh");
+  if (fs.existsSync(linkSh)) {
+    const scriptsDir = path.join(cortexPath, "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const dest = path.join(scriptsDir, "link.sh");
+    if (!fs.existsSync(dest)) {
+      try {
+        fs.renameSync(linkSh, dest);
+        moved.push("link.sh -> scripts/link.sh");
+      } catch { /* best effort */ }
+    }
+  }
+
+  // Move root-level SKILL.md files to global/skills/
+  try {
+    for (const f of fs.readdirSync(cortexPath)) {
+      if (f.endsWith(".SKILL.md") || (f.endsWith(".md") && f.toLowerCase().includes("skill") && !f.startsWith("."))) {
+        const skillsDir = path.join(cortexPath, "global", "skills");
+        fs.mkdirSync(skillsDir, { recursive: true });
+        const src = path.join(cortexPath, f);
+        const skillName = f.replace(/\.SKILL\.md$/, "").replace(/\.md$/, "");
+        const dest = path.join(skillsDir, `${skillName}.md`);
+        if (!fs.existsSync(dest)) {
+          try {
+            fs.renameSync(src, dest);
+            moved.push(`${f} -> global/skills/${skillName}.md`);
+          } catch { /* best effort */ }
+        }
+      }
+    }
+  } catch { /* best effort */ }
+
+  return moved;
+}
+
 export function ensureGovernanceFiles(cortexPath: string) {
   const govDir = path.join(cortexPath, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
@@ -345,8 +455,8 @@ export function ensureGovernanceFiles(cortexPath: string) {
           );
         }
       }
-    } catch {
-      // Keep malformed runtime health file untouched for compatibility/safety.
+    } catch (err: any) {
+      debugLog(`ensureGovernanceFiles: malformed runtime health file, leaving untouched: ${err?.message || err}`);
     }
   }
 }
@@ -569,6 +679,7 @@ export interface PostInitCheck {
   name: string;
   ok: boolean;
   detail: string;
+  fix?: string;
 }
 
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
@@ -586,18 +697,20 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop") || JSON.stringify(hooks.Stop || []).includes("auto-save");
     const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start") || JSON.stringify(hooks.SessionStart || []).includes("doctor --fix");
     hooksOk = hasPrompt && hasStop && hasStart;
-  } catch {
-    // settings.json missing or unreadable
+  } catch (err: any) {
+    debugLog(`doctor: settings.json missing or unreadable: ${err?.message || err}`);
   }
   checks.push({
     name: "mcp-config",
     ok: mcpOk,
     detail: mcpOk ? "MCP server registered in Claude settings" : "MCP server not found in ~/.claude/settings.json",
+    fix: mcpOk ? undefined : "Run `npx @alaarab/cortex init` to register the MCP server",
   });
   checks.push({
     name: "hooks-registered",
     ok: hooksOk,
     detail: hooksOk ? "All lifecycle hooks registered" : "One or more hooks missing from ~/.claude/settings.json",
+    fix: hooksOk ? undefined : "Run `npx @alaarab/cortex init` to install hooks, or `cortex link` to re-register",
   });
 
   // Check ~/.cortex/global/ exists with CLAUDE.md
@@ -607,6 +720,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "global-claude",
     ok: globalOk,
     detail: globalOk ? "global/CLAUDE.md exists" : "global/CLAUDE.md missing",
+    fix: globalOk ? undefined : "Run `npx @alaarab/cortex init` to create starter files",
   });
 
   // Check governance directory
@@ -616,6 +730,32 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "config",
     ok: govOk,
     detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
+    fix: govOk ? undefined : "Run `npx @alaarab/cortex init` to create governance config",
+  });
+
+  // Check FTS index can be built (project directories exist)
+  let ftsOk = false;
+  try {
+    const entries = fs.readdirSync(cortexPath, { withFileTypes: true });
+    ftsOk = entries.some(d => d.isDirectory() && !d.name.startsWith("."));
+  } catch {
+    ftsOk = false;
+  }
+  checks.push({
+    name: "fts-index",
+    ok: ftsOk,
+    detail: ftsOk ? "Project directories found for indexing" : "No project directories found in cortex path",
+    fix: ftsOk ? undefined : "Create a project: `cortex add-learning my-project \"first insight\"`",
+  });
+
+  // Check hook entrypoint resolves
+  const distIndex = path.join(__dirname, "index.js");
+  const hookEntrypointOk = fs.existsSync(distIndex);
+  checks.push({
+    name: "hook-entrypoint",
+    ok: hookEntrypointOk,
+    detail: hookEntrypointOk ? "Hook entrypoint (dist/index.js) exists" : "Hook entrypoint missing, hooks will fail",
+    fix: hookEntrypointOk ? undefined : "Rebuild cortex: `npm run build` or reinstall the package",
   });
 
   const ok = checks.every((c) => c.ok);
@@ -629,6 +769,116 @@ export interface InitOptions {
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean; // Skip interactive walkthrough
+  fromExisting?: string; // Path to project dir with CLAUDE.md to bootstrap from
+  template?: string; // Project template name (python-project, monorepo, library, frontend)
+}
+
+const TEMPLATES_DIR = path.join(ROOT, "starter", "templates");
+
+export function listTemplates(): string[] {
+  if (!fs.existsSync(TEMPLATES_DIR)) return [];
+  return fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => d.name)
+    .sort();
+}
+
+function applyTemplate(projectDir: string, templateName: string, projectName: string): boolean {
+  const templateDir = path.join(TEMPLATES_DIR, templateName);
+  if (!fs.existsSync(templateDir)) return false;
+  fs.mkdirSync(projectDir, { recursive: true });
+  for (const entry of fs.readdirSync(templateDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const src = path.join(templateDir, entry.name);
+    const dest = path.join(projectDir, entry.name);
+    let content = fs.readFileSync(src, "utf8");
+    content = content.replace(/\{\{project\}\}/g, projectName);
+    fs.writeFileSync(dest, content);
+  }
+  return true;
+}
+
+/** Bootstrap a cortex project from an existing project directory with CLAUDE.md */
+export function bootstrapFromExisting(cortexPath: string, projectPath: string): string {
+  const resolvedPath = path.resolve(projectPath);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Path does not exist: ${resolvedPath}`);
+  }
+
+  let claudeMdPath: string | null = null;
+  const candidates = [
+    path.join(resolvedPath, "CLAUDE.md"),
+    path.join(resolvedPath, ".claude", "CLAUDE.md"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      claudeMdPath = c;
+      break;
+    }
+  }
+
+  if (!claudeMdPath) {
+    throw new Error(`No CLAUDE.md found in ${resolvedPath} or ${resolvedPath}/.claude/`);
+  }
+
+  const claudeContent = fs.readFileSync(claudeMdPath, "utf8");
+  const projectName = path.basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const projDir = path.join(cortexPath, projectName);
+  fs.mkdirSync(projDir, { recursive: true });
+
+  fs.writeFileSync(path.join(projDir, "CLAUDE.md"), claudeContent);
+
+  // Build a summary from the first heading and opening paragraph
+  const lines = claudeContent.split("\n");
+  const summaryLines: string[] = [];
+  let foundHeading = false;
+  for (const line of lines) {
+    if (line.startsWith("# ") && !foundHeading) {
+      foundHeading = true;
+      summaryLines.push(line);
+      continue;
+    }
+    if (foundHeading && line.trim() === "") {
+      if (summaryLines.length > 1) break;
+      continue;
+    }
+    if (foundHeading && summaryLines.length < 10) {
+      summaryLines.push(line);
+    }
+  }
+
+  fs.writeFileSync(
+    path.join(projDir, "summary.md"),
+    `# ${projectName}\n\n**What:** Bootstrapped from ${resolvedPath}\n**Source CLAUDE.md:** ${claudeMdPath}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
+  );
+
+  if (!fs.existsSync(path.join(projDir, "LEARNINGS.md"))) {
+    fs.writeFileSync(
+      path.join(projDir, "LEARNINGS.md"),
+      `# ${projectName} LEARNINGS\n\n<!-- Bootstrapped from ${claudeMdPath} -->\n`
+    );
+  }
+  if (!fs.existsSync(path.join(projDir, "backlog.md"))) {
+    fs.writeFileSync(
+      path.join(projDir, "backlog.md"),
+      `# ${projectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+    );
+  }
+
+  // Add project to profile if not already listed
+  const profilesDir = path.join(cortexPath, "profiles");
+  if (fs.existsSync(profilesDir)) {
+    for (const pf of fs.readdirSync(profilesDir)) {
+      if (!pf.endsWith(".yaml")) continue;
+      const pfPath = path.join(profilesDir, pf);
+      const content = fs.readFileSync(pfPath, "utf8");
+      if (!content.includes(projectName)) {
+        fs.writeFileSync(pfPath, content.trimEnd() + `\n  - ${projectName}\n`);
+      }
+    }
+  }
+
+  return projectName;
 }
 
 // Interactive walkthrough for first-time init
@@ -723,8 +973,12 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (hasExistingInstall) {
       ensureGovernanceFiles(cortexPath);
+      const migrated = migrateRootFiles(cortexPath);
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
+      if (migrated.length) {
+        log(`  Cleaned up root directory (${migrated.length} file${migrated.length === 1 ? "" : "s"} moved)`);
+      }
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
 
@@ -743,25 +997,33 @@ export async function runInit(opts: InitOptions = {}) {
       try {
         const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
         logMcpTargetStatus("VS Code", vscodeResult, "Updated");
-      } catch {}
+      } catch (err: any) {
+        debugLog(`configureVSCode failed: ${err?.message || err}`);
+      }
 
       try {
         logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch {}
+      } catch (err: any) {
+        debugLog(`configureCursorMcp failed: ${err?.message || err}`);
+      }
 
       try {
         logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch {}
+      } catch (err: any) {
+        debugLog(`configureCopilotMcp failed: ${err?.message || err}`);
+      }
 
       try {
         logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch {}
+      } catch (err: any) {
+        debugLog(`configureCodexMcp failed: ${err?.message || err}`);
+      }
 
       if (hooksEnabled) {
         try {
           const hooked = configureAllHooks(cortexPath);
           if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
-        } catch { /* best effort */ }
+        } catch (err: any) { debugLog(`configureAllHooks failed: ${err?.message || err}`); }
       } else {
         log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
       }
@@ -787,6 +1049,15 @@ export async function runInit(opts: InitOptions = {}) {
       const verify = runPostInitVerify(cortexPath);
       for (const check of verify.checks) {
         log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+      }
+
+      if (opts.fromExisting) {
+        try {
+          const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting);
+          log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
+        } catch (e: any) {
+          log(`\nCould not bootstrap from existing: ${e.message}`);
+        }
       }
 
       log(`\nDone. Restart your coding agent to pick up changes.\n`);
@@ -832,6 +1103,15 @@ export async function runInit(opts: InitOptions = {}) {
             }
           }
         }
+      }
+    }
+    if (opts.template) {
+      const targetProject = walkthroughProject || firstProjectName;
+      const projectDir = path.join(cortexPath, targetProject);
+      if (applyTemplate(projectDir, opts.template, targetProject)) {
+        log(`  Applied "${opts.template}" template to ${targetProject}`);
+      } else {
+        log(`  Template "${opts.template}" not found. Available: ${listTemplates().join(", ") || "none"}`);
       }
     }
     log(`  Created cortex v${VERSION} \u2192 ${cortexPath}`);
@@ -891,28 +1171,34 @@ export async function runInit(opts: InitOptions = {}) {
   try {
     const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
     logMcpTargetStatus("VS Code", vscodeResult, "Configured");
-  } catch {
-    // skip
+  } catch (err: any) {
+    debugLog(`configureVSCode failed: ${err?.message || err}`);
   }
 
   try {
     logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch { /* best effort */ }
+  } catch (err: any) {
+    debugLog(`configureCursorMcp failed: ${err?.message || err}`);
+  }
 
   try {
     logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch { /* best effort */ }
+  } catch (err: any) {
+    debugLog(`configureCopilotMcp failed: ${err?.message || err}`);
+  }
 
   try {
     logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch { /* best effort */ }
+  } catch (err: any) {
+    debugLog(`configureCodexMcp failed: ${err?.message || err}`);
+  }
 
   // Configure hooks for other detected AI coding tools (Copilot CLI, Cursor, Codex)
   if (hooksEnabled) {
     try {
       const hooked = configureAllHooks(cortexPath);
       if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
-    } catch { /* best effort */ }
+    } catch (err: any) { debugLog(`configureAllHooks failed: ${err?.message || err}`); }
   } else {
     log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
   }
@@ -945,6 +1231,21 @@ export async function runInit(opts: InitOptions = {}) {
   }
   log(`  4. Open a project and run /cortex-init <name> to add it`);
   log(`  5. Run \`npx @alaarab/cortex verify\` to check everything is wired up`);
+  log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
+
+  if (opts.fromExisting) {
+    try {
+      const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting);
+      log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
+      log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
+      log(`  ${cortexPath}/${projectName}/LEARNINGS.md`);
+      log(`  ${cortexPath}/${projectName}/backlog.md`);
+      log(`  ${cortexPath}/${projectName}/summary.md`);
+    } catch (e: any) {
+      log(`\nCould not bootstrap from existing: ${e.message}`);
+    }
+  }
+
   log(``);
 }
 
@@ -972,11 +1273,11 @@ export async function runMcpMode(modeArg?: string) {
   let cursorStatus: ToolStatus = "no_cursor";
   let copilotStatus: ToolStatus = "no_copilot";
   let codexStatus: ToolStatus = "no_codex";
-  try { claudeStatus = configureClaude(cortexPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch { /* best effort */ }
-  try { vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch { /* best effort */ }
-  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch { /* best effort */ }
-  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch { /* best effort */ }
-  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled: enabled }) ?? codexStatus; } catch { /* best effort */ }
+  try { claudeStatus = configureClaude(cortexPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch (err: any) { debugLog(`mcp-mode: configureClaude failed: ${err?.message || err}`); }
+  try { vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch (err: any) { debugLog(`mcp-mode: configureVSCode failed: ${err?.message || err}`); }
+  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch (err: any) { debugLog(`mcp-mode: configureCursorMcp failed: ${err?.message || err}`); }
+  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch (err: any) { debugLog(`mcp-mode: configureCopilotMcp failed: ${err?.message || err}`); }
+  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled: enabled }) ?? codexStatus; } catch (err: any) { debugLog(`mcp-mode: configureCodexMcp failed: ${err?.message || err}`); }
 
   log(`MCP mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
@@ -1010,13 +1311,13 @@ export async function runHooksMode(modeArg?: string) {
       mcpEnabled: getMcpEnabledPreference(cortexPath),
       hooksEnabled: enabled,
     }) ?? claudeStatus;
-  } catch { /* best effort */ }
+  } catch (err: any) { debugLog(`hooks-mode: configureClaude failed: ${err?.message || err}`); }
 
   if (enabled) {
     try {
       const hooked = configureAllHooks(cortexPath);
       if (hooked.length) log(`Updated hooks: ${hooked.join(", ")}`);
-    } catch { /* best effort */ }
+    } catch (err: any) { debugLog(`hooks-mode: configureAllHooks failed: ${err?.message || err}`); }
   } else {
     log("Hooks will no-op immediately via preference and Claude hooks are removed.");
   }
@@ -1074,7 +1375,7 @@ export async function runUninstall() {
       if (removeMcpServerAtPath(mcpFile)) {
         log(`  Removed cortex from VS Code MCP config (${mcpFile})`);
       }
-    } catch { /* skip */ }
+    } catch (err: any) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${err?.message || err}`); }
   }
 
   // Remove from Cursor MCP config
@@ -1089,7 +1390,7 @@ export async function runUninstall() {
       if (removeMcpServerAtPath(mcpFile)) {
         log(`  Removed cortex from Cursor MCP config (${mcpFile})`);
       }
-    } catch { /* skip */ }
+    } catch (err: any) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${err?.message || err}`); }
   }
 
   // Remove from Copilot CLI MCP config
@@ -1104,7 +1405,7 @@ export async function runUninstall() {
       if (removeMcpServerAtPath(mcpFile)) {
         log(`  Removed cortex from Copilot CLI MCP config (${mcpFile})`);
       }
-    } catch { /* skip */ }
+    } catch (err: any) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${err?.message || err}`); }
   }
 
   // Remove from Codex MCP config
@@ -1118,7 +1419,7 @@ export async function runUninstall() {
       if (removeMcpServerAtPath(mcpFile)) {
         log(`  Removed cortex from Codex MCP config (${mcpFile})`);
       }
-    } catch { /* skip */ }
+    } catch (err: any) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${err?.message || err}`); }
   }
 
   log(`\nCortex hooks and MCP config removed.`);

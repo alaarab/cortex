@@ -1,5 +1,6 @@
 import {
   ensureCortexPath,
+  debugLog,
   detectProject,
   addLearningToFile,
   appendMemoryQueue,
@@ -34,7 +35,8 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
 function runGit(cwd: string, args: string[]): string | null {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }).trim();
-  } catch {
+  } catch (err: any) {
+    debugLog(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
     return null;
   }
 }
@@ -136,7 +138,9 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
     if (Date.now() - stat.mtimeMs < GH_CACHE_MAX_AGE_MS) {
       return JSON.parse(fs.readFileSync(cacheFile, "utf8")) as Candidate[];
     }
-  } catch {}
+  } catch (err: any) {
+    debugLog(`mineGithubCandidates: cache read failed for ${cacheFile}: ${err?.message || err}`);
+  }
 
   const candidates: Candidate[] = [];
   const prLimit = clampInt(process.env.CORTEX_GH_PR_LIMIT, 40, 5, 200);
@@ -213,7 +217,9 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
 
   try {
     fs.writeFileSync(cacheFile, JSON.stringify(candidates));
-  } catch {}
+  } catch (err: any) {
+    debugLog(`mineGithubCandidates: cache write failed for ${cacheFile}: ${err?.message || err}`);
+  }
 
   return candidates;
 }

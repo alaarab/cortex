@@ -313,7 +313,8 @@ function getHeadCommit(cwd: string): string | undefined {
   try {
     const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return commit || undefined;
-  } catch {
+  } catch (err: any) {
+    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${err?.message || err}`);
     return undefined;
   }
 }
@@ -322,7 +323,8 @@ function getRepoRoot(cwd: string): string | undefined {
   try {
     const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return root || undefined;
-  } catch {
+  } catch (err: any) {
+    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${err?.message || err}`);
     return undefined;
   }
 }
@@ -363,7 +365,8 @@ function parseCitationComment(line: string): LearningCitation | null {
     if (!parsed || typeof parsed !== "object") return null;
     if (typeof parsed.created_at !== "string" || !parsed.created_at) return null;
     return parsed;
-  } catch {
+  } catch (err: any) {
+    debugLog(`parseCitationComment: malformed citation JSON: ${err?.message || err}`);
     return null;
   }
 }
@@ -375,15 +378,51 @@ function resolveCitationFile(citation: LearningCitation): string | null {
   return path.resolve(citation.file);
 }
 
+// Session-scoped caches for git I/O during citation validation.
+// Keyed by "repo\0commit" and "repo\0file\0line" respectively.
+const commitExistsCache = new Map<string, boolean>();
+const blameCache = new Map<string, string | false>();
+
+export function clearCitationCaches(): void {
+  commitExistsCache.clear();
+  blameCache.clear();
+}
+
 function commitExists(repoPath: string, commit: string): boolean {
+  const key = `${repoPath}\0${commit}`;
+  const cached = commitExistsCache.get(key);
+  if (cached !== undefined) return cached;
   try {
     execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
       cwd: repoPath,
       stdio: ["ignore", "ignore", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     });
+    commitExistsCache.set(key, true);
     return true;
-  } catch {
+  } catch (err: any) {
+    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${err?.message || err}`);
+    commitExistsCache.set(key, false);
+    return false;
+  }
+}
+
+function cachedBlame(repoPath: string, relFile: string, line: number): string | false {
+  const key = `${repoPath}\0${relFile}\0${line}`;
+  const cached = blameCache.get(key);
+  if (cached !== undefined) return cached;
+  try {
+    const out = execFileSync(
+      "git",
+      ["blame", "-L", `${line},${line}`, "--porcelain", relFile],
+      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }
+    ).trim();
+    const first = out.split("\n")[0] || "";
+    blameCache.set(key, first);
+    return first;
+  } catch (err: any) {
+    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${err?.message || err}`);
+    blameCache.set(key, false);
     return false;
   }
 }
@@ -403,17 +442,8 @@ function isCitationValid(citation: LearningCitation): boolean {
         const relFile = path.isAbsolute(resolvedFile)
           ? path.relative(citation.repo, resolvedFile)
           : resolvedFile;
-        try {
-          const out = execFileSync(
-            "git",
-            ["blame", "-L", `${citation.line},${citation.line}`, "--porcelain", relFile],
-            { cwd: citation.repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }
-          ).trim();
-          const first = out.split("\n")[0] || "";
-          if (!first.startsWith(citation.commit)) return false;
-        } catch {
-          return false;
-        }
+        const first = cachedBlame(citation.repo, relFile, citation.line);
+        if (first === false || !first.startsWith(citation.commit)) return false;
       }
     }
   }

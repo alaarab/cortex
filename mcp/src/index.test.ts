@@ -800,14 +800,14 @@ describe("debugLog", () => {
   it("does not write when CORTEX_DEBUG is unset", () => {
     delete process.env.CORTEX_DEBUG;
     debugLog("should not appear");
-    const logFile = path.join(tmpDir, ".cortex", "debug.log");
+    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(false);
   });
 
   it("writes to debug.log when CORTEX_DEBUG is set", () => {
     process.env.CORTEX_DEBUG = "1";
     debugLog("hello from test");
-    const logFile = path.join(tmpDir, ".cortex", "debug.log");
+    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(true);
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("hello from test");
@@ -817,7 +817,7 @@ describe("debugLog", () => {
     process.env.CORTEX_DEBUG = "1";
     debugLog("first");
     debugLog("second");
-    const logFile = path.join(tmpDir, ".cortex", "debug.log");
+    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("first");
     expect(contents).toContain("second");

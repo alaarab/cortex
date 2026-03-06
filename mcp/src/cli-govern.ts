@@ -10,6 +10,7 @@ import {
   migrateLegacyFindings,
   migrateGovernanceFiles,
   updateRuntimeHealth,
+  runtimeFile,
   getProjectDirs,
   GOVERNANCE_SCHEMA_VERSION,
 } from "./shared.js";
@@ -81,8 +82,8 @@ function summarizeBackupChanges(before: Map<string, number>, projects: string[])
 function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    done: path.join(cortexPathLocal, `.quality-${today}`),
-    lock: path.join(cortexPathLocal, `.quality-${today}.lock`),
+    done: runtimeFile(cortexPathLocal, `quality-${today}`),
+    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
   };
 }
 
@@ -95,7 +96,7 @@ interface GovernanceSummary {
   reviewCount: number;
 }
 
-export async function handleGovernMemories(projectArg?: string, silent: boolean = false): Promise<GovernanceSummary> {
+export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
   const policy = getMemoryPolicy(cortexPath);
   const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
   const projects = projectArg
@@ -118,27 +119,36 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
 
     const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
     const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
-    staleCount += appendMemoryQueue(cortexPath, project, "Stale", stale);
-    conflictCount += appendMemoryQueue(cortexPath, project, "Conflicts", conflicts);
+    staleCount += stale.length;
+    conflictCount += conflicts.length;
 
     const lowValue = content.split("\n")
       .filter((l) => l.startsWith("- "))
       .filter((l) => /(fixed stuff|updated things|misc|temp|wip|quick note)/i.test(l) || l.length < 16);
-    reviewCount += appendMemoryQueue(cortexPath, project, "Review", lowValue);
+    reviewCount += lowValue.length;
+
+    if (!dryRun) {
+      appendMemoryQueue(cortexPath, project, "Stale", stale);
+      appendMemoryQueue(cortexPath, project, "Conflicts", conflicts);
+      appendMemoryQueue(cortexPath, project, "Review", lowValue);
+    }
   }
 
-  appendAuditLog(
-    cortexPath,
-    "govern_memories",
-    `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
-  );
-  for (const project of projects) {
-    consolidateProjectLearnings(cortexPath, project);
+  if (!dryRun) {
+    appendAuditLog(
+      cortexPath,
+      "govern_memories",
+      `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
+    );
+    for (const project of projects) {
+      consolidateProjectLearnings(cortexPath, project);
+    }
   }
-  const lockSummary = enforceCanonicalLocks(cortexPath, projectArg);
+  const lockSummary = dryRun ? "" : enforceCanonicalLocks(cortexPath, projectArg);
   if (!silent) {
-    console.log(`Governed memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
-    console.log(lockSummary);
+    const prefix = dryRun ? "[dry-run] Would govern" : "Governed";
+    console.log(`${prefix} memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
+    if (lockSummary) console.log(lockSummary);
   }
   return {
     projects: projects.length,
@@ -323,8 +333,11 @@ export async function handleMaintain(args: string[]) {
   const sub = args[0];
   const rest = args.slice(1);
   switch (sub) {
-    case "govern":
-      return handleGovernMemories(rest[0]);
+    case "govern": {
+      const governDryRun = rest.includes("--dry-run");
+      const governProject = rest.find((a) => !a.startsWith("-"));
+      return handleGovernMemories(governProject, false, governDryRun);
+    }
     case "prune":
       return handlePruneMemories(rest);
     case "consolidate":
@@ -333,11 +346,14 @@ export async function handleMaintain(args: string[]) {
       return handleMaintainMigrate(rest);
     case "extract":
       return handleExtractMemories(rest[0]);
+    case "restore":
+      return handleRestoreBackup(rest);
     default:
       console.log(`cortex maintain - memory maintenance and governance
 
 Subcommands:
-  cortex maintain govern [project]       Queue stale/conflicting/low-value memories for review
+  cortex maintain govern [project] [--dry-run]
+                                         Queue stale/conflicting/low-value memories for review
   cortex maintain prune [project] [--dry-run]
                                          Delete expired entries by retention policy
   cortex maintain consolidate [project] [--dry-run]
@@ -348,12 +364,72 @@ Subcommands:
   cortex maintain migrate all <project> [--pin] [--dry-run]
   cortex maintain migrate <project> [--pin] [--dry-run]  (legacy alias)
                                          Promote legacy findings into LEARNINGS/CANONICAL
-  cortex maintain extract [project]      Mine git/GitHub signals into memory candidates`);
+  cortex maintain extract [project]      Mine git/GitHub signals into memory candidates
+  cortex maintain restore [project]      List and restore from .bak files`);
       if (sub) {
         console.error(`\nUnknown maintain subcommand: "${sub}"`);
         process.exit(1);
       }
   }
+}
+
+// ── Restore from backup ──────────────────────────────────────────────────────
+
+function findBackups(projects: string[]): Array<{ project: string; file: string; fullPath: string; age: string }> {
+  const results: Array<{ project: string; file: string; fullPath: string; age: string }> = [];
+  const now = Date.now();
+  for (const project of projects) {
+    const dir = path.join(cortexPath, project);
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".bak")) continue;
+      const fullPath = path.join(dir, f);
+      const stat = fs.statSync(fullPath);
+      const ageMs = now - stat.mtimeMs;
+      const ageHours = Math.floor(ageMs / 3600000);
+      const age = ageHours < 24 ? `${ageHours}h ago` : `${Math.floor(ageHours / 24)}d ago`;
+      results.push({ project, file: f, fullPath, age });
+    }
+  }
+  return results.sort((a, b) => a.project.localeCompare(b.project) || a.file.localeCompare(b.file));
+}
+
+async function handleRestoreBackup(args: string[]) {
+  const projectArg = args.find((a) => !a.startsWith("-"));
+  const projects = targetProjects(projectArg);
+  const backups = findBackups(projects);
+
+  if (!backups.length) {
+    console.log("No backup files found.");
+    return;
+  }
+
+  if (args.includes("--list") || !args.includes("--apply")) {
+    console.log("Available backups:");
+    for (const b of backups) {
+      console.log(`  ${b.project}/${b.file}  (${b.age})`);
+    }
+    console.log("\nTo restore, run: cortex maintain restore <project> --apply");
+    return;
+  }
+
+  if (!projectArg) {
+    console.error("Specify a project to restore: cortex maintain restore <project> --apply");
+    process.exit(1);
+  }
+
+  const projectBackups = backups.filter((b) => b.project === projectArg);
+  if (!projectBackups.length) {
+    console.log(`No backup files found for "${projectArg}".`);
+    return;
+  }
+
+  for (const b of projectBackups) {
+    const target = b.fullPath.replace(/\.bak$/, "");
+    fs.copyFileSync(b.fullPath, target);
+    console.log(`Restored ${b.project}/${b.file.replace(/\.bak$/, "")} from backup`);
+  }
+  appendAuditLog(cortexPath, "restore_backup", `project=${projectArg} files=${projectBackups.length}`);
 }
 
 // ── Background maintenance ───────────────────────────────────────────────────

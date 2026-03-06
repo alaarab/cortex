@@ -1,6 +1,8 @@
 ---
 name: cortex-profiles
-description: Manage which projects appear on which machines by editing profile definitions.
+description: Manage machine-to-profile and profile-to-project mappings in cortex.
+dependencies:
+  - git
 ---
 # /cortex-profiles - Manage your profiles
 

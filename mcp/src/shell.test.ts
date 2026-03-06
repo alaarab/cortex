@@ -364,6 +364,47 @@ describe("CortexShell", () => {
     expect(output).toMatch(/Relink ok.*\(\d+\.\d+s\)/);
   });
 
+  it("displays backlog subsection headers (P0, P1, etc) when present", async () => {
+    write(
+      path.join(dir, "demo", "backlog.md"),
+      [
+        "# demo backlog",
+        "",
+        "## Active",
+        "",
+        "### P0: Critical",
+        "",
+        "- [ ] fix crash on startup",
+        "",
+        "### P1: Important",
+        "",
+        "- [ ] add logging",
+        "",
+        "## Queue",
+        "",
+        "### P2: Nice to have",
+        "",
+        "- [ ] update docs",
+        "",
+        "## Done",
+        "",
+        "- [x] done item",
+        "",
+      ].join("\n")
+    );
+
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("b");
+    const output = await shell.render();
+    expect(output).toContain("P0: Critical");
+    expect(output).toContain("P1: Important");
+    expect(output).toContain("P2: Nice to have");
+    expect(output).toContain("fix crash on startup");
+    expect(output).toContain("add logging");
+    expect(output).toContain("update docs");
+  });
+
   it("per-section backlog IDs start at 1 for each section (#112)", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");

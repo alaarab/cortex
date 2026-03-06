@@ -4,15 +4,13 @@ Files in this directory contain knowledge that applies to multiple projects. Ins
 
 ## How to use
 
-> **Note:** `@import` syntax is a planned feature that is not yet implemented. For now, reference shared files manually by reading them when needed, or copy the relevant sections into your project's CLAUDE.md.
-
-The intended syntax (once implemented):
+Add an `@import` line in any indexed markdown file to pull in shared content:
 
 ```markdown
 @import shared/my-library-conventions.md
 ```
 
-This would load the shared file alongside your project config, giving it the cross-project context without you maintaining it in two places.
+The import path is relative to `~/.cortex/global/`. Imports are resolved recursively (up to 5 levels deep) during FTS indexing. Circular imports are detected and skipped.
 
 ## What goes here
 
