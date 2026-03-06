@@ -8,8 +8,8 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] 
 
 Usage:
   cortex                                 Open interactive shell
-  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--dry-run] [-y]
-                                         Set up cortex (interactive walkthrough on first run)
+  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
+                                         Set up cortex (templates: python-project, monorepo, library, frontend)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex status                          Health, active project, stats
   cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
@@ -72,6 +72,8 @@ if (process.argv[2] === "init") {
   const machineIdx = initArgs.indexOf("--machine");
   const profileIdx = initArgs.indexOf("--profile");
   const mcpIdx = initArgs.indexOf("--mcp");
+  const templateIdx = initArgs.indexOf("--template");
+  const fromExistingIdx = initArgs.indexOf("--from-existing");
   const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
   if (mcpIdx !== -1 && !mcpMode) {
     console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
@@ -81,6 +83,8 @@ if (process.argv[2] === "init") {
     machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
     profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
     mcp: mcpMode,
+    template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
+    fromExisting: fromExistingIdx !== -1 ? initArgs[fromExistingIdx + 1] : undefined,
     applyStarterUpdate: initArgs.includes("--apply-starter-update"),
     dryRun: initArgs.includes("--dry-run"),
     yes: initArgs.includes("--yes") || initArgs.includes("-y"),
@@ -107,6 +111,9 @@ if (process.argv[2] === "verify") {
   console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
   for (const check of result.checks) {
     console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+    if (!check.ok && check.fix) {
+      console.log(`       fix: ${check.fix}`);
+    }
   }
   if (!result.ok) {
     console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
@@ -207,7 +214,13 @@ const CLI_COMMANDS = [
 ];
 if (CLI_COMMANDS.includes(process.argv[2])) {
   const { runCliCommand } = await import("./cli.js");
-  await runCliCommand(process.argv[2], process.argv.slice(3));
+  const cmd = process.argv[2];
+  // Track CLI usage if telemetry is opt-in enabled
+  try {
+    const { trackCliCommand } = await import("./telemetry.js");
+    trackCliCommand(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), cmd);
+  } catch { /* telemetry is best-effort */ }
+  await runCliCommand(cmd, process.argv.slice(3));
   process.exit(0);
 }
 
@@ -286,6 +299,17 @@ async function main() {
     name: "cortex-mcp",
     version: PACKAGE_VERSION,
   });
+
+  // Track MCP tool calls for telemetry (opt-in only, best-effort)
+  const { trackToolCall } = await import("./telemetry.js");
+  const origRegisterTool = server.registerTool.bind(server);
+  server.registerTool = function (name: string, config: any, handler: any) {
+    const wrapped = async (...args: any[]) => {
+      try { trackToolCall(cortexPath, name); } catch { /* best-effort */ }
+      return handler(...args);
+    };
+    return origRegisterTool(name, config, wrapped);
+  } as typeof server.registerTool;
 
   server.registerTool(
     "pin_memory",

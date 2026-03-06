@@ -5,7 +5,7 @@ import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
-import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, migrateSkillsToFolders } from "./link.js";
+import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, migrateSkillsToFolders, updateFileChecksums, verifyFileChecksums } from "./link.js";
 
 describe("link", () => {
   describe("isVersionNewer", () => {
@@ -773,6 +773,54 @@ hooks:
 
     it("returns empty array for nonexistent directory", () => {
       expect(migrateSkillsToFolders("/tmp/nonexistent-skills-dir-xyz")).toEqual([]);
+    });
+  });
+
+  describe("file checksums", () => {
+    let tmp: ReturnType<typeof makeTempDir>;
+    let cortex: string;
+
+    beforeEach(() => {
+      tmp = makeTempDir("cortex-checksum-test-");
+      cortex = tmp.path;
+      fs.mkdirSync(path.join(cortex, "testproj"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.writeFileSync(path.join(cortex, "testproj", "LEARNINGS.md"), "# LEARNINGS\n\n- Test learning\n");
+      fs.writeFileSync(path.join(cortex, "testproj", "backlog.md"), "# backlog\n\n## Queue\n\n- Item\n");
+    });
+
+    afterEach(() => { tmp.cleanup(); });
+
+    it("updateFileChecksums creates checksum store", () => {
+      const result = updateFileChecksums(cortex);
+      expect(result.updated).toBe(2);
+      const storePath = path.join(cortex, ".governance", "file-checksums.json");
+      expect(fs.existsSync(storePath)).toBe(true);
+      const store = JSON.parse(fs.readFileSync(storePath, "utf8"));
+      expect(store["testproj/LEARNINGS.md"]).toBeDefined();
+      expect(store["testproj/LEARNINGS.md"].sha256).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    it("verifyFileChecksums returns ok for unchanged files", () => {
+      updateFileChecksums(cortex);
+      const results = verifyFileChecksums(cortex);
+      expect(results.every((r) => r.status === "ok")).toBe(true);
+    });
+
+    it("verifyFileChecksums detects modified files", () => {
+      updateFileChecksums(cortex);
+      fs.writeFileSync(path.join(cortex, "testproj", "LEARNINGS.md"), "# LEARNINGS\n\n- Modified\n");
+      const results = verifyFileChecksums(cortex);
+      const learnings = results.find((r) => r.file.includes("LEARNINGS"));
+      expect(learnings?.status).toBe("mismatch");
+    });
+
+    it("verifyFileChecksums detects deleted files", () => {
+      updateFileChecksums(cortex);
+      fs.unlinkSync(path.join(cortex, "testproj", "LEARNINGS.md"));
+      const results = verifyFileChecksums(cortex);
+      const learnings = results.find((r) => r.file.includes("LEARNINGS"));
+      expect(learnings?.status).toBe("missing");
     });
   });
 });

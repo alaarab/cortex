@@ -5,6 +5,8 @@ import {
   completeBacklogItem,
   updateBacklogItem,
   workNextBacklogItem,
+  pinBacklogItem,
+  unpinBacklogItem,
   tidyBacklogDone,
   readMemoryQueue,
   approveMemoryQueueItem,
@@ -316,6 +318,79 @@ describe("backlog mutation helpers", () => {
     const archiveContent = fs.readFileSync(archive, "utf8");
     expect(archiveContent).toContain("done B");
     expect(archiveContent).toContain("done C");
+  });
+});
+
+describe("pin/unpin backlog items", () => {
+  it("pins an item and persists the [pinned] tag", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    expect(resultMsg(msg)).toContain("Pinned");
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (!after.ok) return;
+    const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
+    expect(item?.pinned).toBe(true);
+
+    const raw = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    expect(raw).toContain("[pinned]");
+  });
+
+  it("unpins a pinned item", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    const msg = unpinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    expect(resultMsg(msg)).toContain("Unpinned");
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (!after.ok) return;
+    const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
+    expect(item?.pinned).toBeUndefined();
+
+    const raw = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    expect(raw).not.toContain("[pinned]");
+  });
+
+  it("returns already-pinned message for double pin", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    const msg = pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    expect(resultMsg(msg)).toContain("Already pinned");
+  });
+
+  it("returns not-pinned message for unpin on unpinned item", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = unpinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    expect(resultMsg(msg)).toContain("Not pinned");
+  });
+
+  it("parses existing [pinned] tags from backlog file", () => {
+    const content = `# testproject backlog
+
+## Active
+
+- [ ] Implement auth middleware [high] [pinned]
+
+## Queue
+
+- [ ] Add rate limiting
+
+## Done
+
+- [x] Set up CI pipeline
+`;
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
+    const result = readBacklog(tmpDir, PROJECT);
+    if (!result.ok) return;
+    expect(result.data.items.Active[0].pinned).toBe(true);
+    expect(result.data.items.Active[0].priority).toBe("high");
+    expect(result.data.items.Queue[0].pinned).toBeUndefined();
+  });
+
+  it("pin works with item ID", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = pinBacklogItem(tmpDir, PROJECT, "Q1");
+    expect(resultMsg(msg)).toContain("Pinned");
   });
 });
 

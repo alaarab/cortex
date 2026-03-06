@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
@@ -22,6 +23,7 @@ import {
 import { buildLifecycleCommands, configureAllHooks, detectInstalledTools } from "./hooks.js";
 import {
   buildIndex,
+  debugLog,
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
@@ -31,8 +33,19 @@ import {
   validateLearningsFormat,
 } from "./shared.js";
 
-const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
+const LEGACY_MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
+const CORTEX_MACHINE_FILE = path.join(os.homedir(), ".cortex", ".machine-id");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
+
+function machineFilePath(): string {
+  // Prefer legacy location if it exists (backwards compat)
+  if (fs.existsSync(LEGACY_MACHINE_FILE)) return LEGACY_MACHINE_FILE;
+  // Prefer inside cortex dir (works on Windows without dotfile issues)
+  if (fs.existsSync(CORTEX_MACHINE_FILE)) return CORTEX_MACHINE_FILE;
+  // On Windows (non-WSL), use cortex dir to avoid dotfile issues
+  if (process.platform === "win32") return CORTEX_MACHINE_FILE;
+  return LEGACY_MACHINE_FILE;
+}
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const DEFAULT_SEARCH_PATHS = [
@@ -50,7 +63,8 @@ function safeUsername(): string {
 }
 
 function getMachineName(): string {
-  if (fs.existsSync(MACHINE_FILE)) return fs.readFileSync(MACHINE_FILE, "utf8").trim();
+  const mf = machineFilePath();
+  if (fs.existsSync(mf)) return fs.readFileSync(mf, "utf8").trim();
   // On WSL, prefer the Windows hostname for consistency with native Windows.
   if (process.env.WSL_DISTRO_NAME && process.env.COMPUTERNAME) {
     return process.env.COMPUTERNAME.toLowerCase();
@@ -111,7 +125,9 @@ function findProjectDir(name: string): string | null {
     const candidate = path.join(base, name);
     try {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch { /* skip */ }
+    } catch (err: any) {
+      debugLog(`findProjectDir: failed to check ${candidate}: ${err?.message || err}`);
+    }
   }
   return null;
 }
@@ -127,7 +143,8 @@ function currentPackageVersion(): string | null {
     const pkgPath = path.join(ROOT, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
     return pkg.version || null;
-  } catch {
+  } catch (err: any) {
+    debugLog(`currentPackageVersion: failed to read package.json: ${err?.message || err}`);
     return null;
   }
 }
@@ -143,8 +160,8 @@ function maybeOfferStarterTemplateUpdate(cortexPath: string) {
       log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
       log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
     }
-  } catch {
-    // best effort
+  } catch (err: any) {
+    debugLog(`checkStarterVersionUpdate: failed to read preferences: ${err?.message || err}`);
   }
 }
 
@@ -166,7 +183,9 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
   if (!findProfileFile(cortexPath, profile)) throw new Error(`No profile named '${profile}' found.`);
 
   // Write machine file
-  fs.writeFileSync(MACHINE_FILE, machine);
+  const machineFile = machineFilePath();
+  fs.mkdirSync(path.dirname(machineFile), { recursive: true });
+  fs.writeFileSync(machineFile, machine);
 
   // Append to machines.yaml
   const machinesFile = path.join(cortexPath, "machines.yaml");
@@ -190,12 +209,14 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch { return; } // Not a git repo
 
-  const alwaysInclude = ["profiles", "machines.yaml", "global", "link.sh", "README.md", ".gitignore"];
+  const alwaysInclude = ["profiles", "machines.yaml", "global", "scripts", "link.sh", "README.md", ".gitignore"];
   const paths = [...alwaysInclude, ...projects];
   try {
     execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
     execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-  } catch { /* best effort */ }
+  } catch (err: any) {
+    debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${err?.message || err}`);
+  }
 }
 
 function symlinkFile(src: string, dest: string) {
@@ -214,7 +235,8 @@ function getPackageVersion(): string {
     const pkgPath = path.join(ROOT, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return pkg.version || "1.0.0";
-  } catch {
+  } catch (err: any) {
+    debugLog(`getPackageVersion: failed to read package.json: ${err?.message || err}`);
     return "1.0.0";
   }
 }
@@ -348,7 +370,8 @@ export function parseSkillFrontmatter(content: string): { frontmatter: Record<st
   try {
     const parsed = yaml.load(match[1]) as Record<string, unknown>;
     return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
-  } catch {
+  } catch (err: any) {
+    debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${err?.message || err}`);
     return { frontmatter: null, body: content };
   }
 }
@@ -864,9 +887,74 @@ function isWrapperActive(tool: string): boolean {
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
     return path.resolve(resolved) === path.resolve(wrapperPath);
-  } catch {
+  } catch (err: any) {
+    debugLog(`isWrapperActive: which ${tool} failed: ${err?.message || err}`);
     return false;
   }
+}
+
+// ── File checksum helpers ────────────────────────────────────────────────────
+
+function fileChecksum(filePath: string): string {
+  const content = fs.readFileSync(filePath);
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+interface ChecksumStore {
+  [relativePath: string]: { sha256: string; updatedAt: string };
+}
+
+function checksumStorePath(cortexPath: string): string {
+  return path.join(cortexPath, ".governance", "file-checksums.json");
+}
+
+function loadChecksums(cortexPath: string): ChecksumStore {
+  const file = checksumStorePath(cortexPath);
+  if (!fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveChecksums(cortexPath: string, store: ChecksumStore): void {
+  const file = checksumStorePath(cortexPath);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(store, null, 2) + "\n");
+}
+
+export function updateFileChecksums(cortexPath: string, profileName?: string): { updated: number; files: string[] } {
+  const store = loadChecksums(cortexPath);
+  const now = new Date().toISOString();
+  const tracked: string[] = [];
+  const dirs = getProjectDirs(cortexPath, profileName);
+  for (const dir of dirs) {
+    for (const name of ["LEARNINGS.md", "backlog.md", "CANONICAL.md"]) {
+      const full = path.join(dir, name);
+      if (!fs.existsSync(full)) continue;
+      const rel = path.relative(cortexPath, full);
+      store[rel] = { sha256: fileChecksum(full), updatedAt: now };
+      tracked.push(rel);
+    }
+  }
+  saveChecksums(cortexPath, store);
+  return { updated: tracked.length, files: tracked };
+}
+
+export function verifyFileChecksums(cortexPath: string): Array<{ file: string; status: "ok" | "mismatch" | "missing" }> {
+  const store = loadChecksums(cortexPath);
+  const results: Array<{ file: string; status: "ok" | "mismatch" | "missing" }> = [];
+  for (const [rel, entry] of Object.entries(store)) {
+    const full = path.join(cortexPath, rel);
+    if (!fs.existsSync(full)) {
+      results.push({ file: rel, status: "missing" });
+      continue;
+    }
+    const current = fileChecksum(full);
+    results.push({ file: rel, status: current === entry.sha256 ? "ok" : "mismatch" });
+  }
+  return results;
 }
 
 export async function runDoctor(cortexPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
@@ -896,6 +984,28 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     detail: projects.length ? `${projects.length} projects in profile` : "no projects listed",
   });
 
+  // Filesystem speed check: write + read a small temp file
+  const fsBenchFile = path.join(cortexPath, ".fs-bench-tmp");
+  let fsMs = 0;
+  try {
+    const t0 = Date.now();
+    fs.writeFileSync(fsBenchFile, "cortex-fs-check");
+    fs.readFileSync(fsBenchFile, "utf8");
+    fs.unlinkSync(fsBenchFile);
+    fsMs = Date.now() - t0;
+  } catch {
+    fsMs = -1;
+    try { fs.unlinkSync(fsBenchFile); } catch { /* ignore */ }
+  }
+  const fsSlow = fsMs > 500 || fsMs < 0;
+  checks.push({
+    name: "filesystem-speed",
+    ok: !fsSlow,
+    detail: fsMs < 0
+      ? "could not benchmark filesystem, check ~/.cortex permissions"
+      : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.cortex is on a network mount)" : ""}`,
+  });
+
   const contextFile = path.join(os.homedir(), ".cortex-context.md");
   checks.push({
     name: "context-file",
@@ -922,7 +1032,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   let globalLinkOk = false;
   try {
     globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
-  } catch {
+  } catch (err: any) {
+    debugLog(`doctor: global CLAUDE.md symlink check failed: ${err?.message || err}`);
     globalLinkOk = false;
   }
   checks.push({
@@ -945,7 +1056,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       let ok = false;
       try {
         ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(src);
-      } catch {
+      } catch (err: any) {
+        debugLog(`doctor: symlink check failed for ${dest}: ${err?.message || err}`);
         ok = false;
       }
       checks.push({
@@ -969,7 +1081,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const stopHookOk = stopHooks.includes("hook-stop") || stopHooks.includes("auto-save");
     const startHookOk = startHooks.includes("hook-session-start") || startHooks.includes("doctor --fix");
     lifecycleOk = stopHookOk && startHookOk;
-  } catch {
+  } catch (err: any) {
+    debugLog(`doctor: failed to read Claude settings for hook check: ${err?.message || err}`);
     hookOk = false;
     lifecycleOk = false;
   }
@@ -1164,6 +1277,24 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         ok: manifestResult.valid,
         detail: manifestResult.valid ? "cortex.SKILL.md frontmatter valid" : manifestResult.errors.join("; "),
       });
+    }
+
+    // Verify file checksums
+    const checksumResults = verifyFileChecksums(cortexPath);
+    const mismatches = checksumResults.filter((r) => r.status === "mismatch");
+    const missing = checksumResults.filter((r) => r.status === "missing");
+    if (checksumResults.length > 0) {
+      checks.push({
+        name: "data:file-checksums",
+        ok: mismatches.length === 0 && missing.length === 0,
+        detail: mismatches.length || missing.length
+          ? `${mismatches.length} mismatch(es), ${missing.length} missing`
+          : `${checksumResults.length} file(s) verified`,
+      });
+    }
+
+    if (fix) {
+      updateFileChecksums(cortexPath, profile);
     }
   }
 

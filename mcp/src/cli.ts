@@ -88,12 +88,78 @@ interface SearchOptions {
   limit: number;
   project?: string;
   type?: string;
+  showHistory?: boolean;
+  fromHistory?: number;
+  searchAll?: boolean;
+}
+
+// ── Search history ───────────────────────────────────────────────────────────
+
+const MAX_HISTORY = 20;
+
+interface SearchHistoryEntry {
+  query: string;
+  project?: string;
+  type?: string;
+  ts: string;
+}
+
+function historyFile(): string {
+  return path.join(cortexPath, ".governance", "search-history.jsonl");
+}
+
+function readSearchHistory(): SearchHistoryEntry[] {
+  const file = historyFile();
+  if (!fs.existsSync(file)) return [];
+  try {
+    return fs.readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as SearchHistoryEntry);
+  } catch {
+    return [];
+  }
+}
+
+function recordSearchQuery(opts: SearchOptions) {
+  if (!opts.query) return;
+  const file = historyFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const entry: SearchHistoryEntry = {
+    query: opts.query,
+    ...(opts.project && { project: opts.project }),
+    ...(opts.type && { type: opts.type }),
+    ts: new Date().toISOString(),
+  };
+  let entries = readSearchHistory();
+  entries.push(entry);
+  if (entries.length > MAX_HISTORY) entries = entries.slice(-MAX_HISTORY);
+  fs.writeFileSync(file, entries.map(e => JSON.stringify(e)).join("\n") + "\n");
+}
+
+function printSearchHistory() {
+  const entries = readSearchHistory();
+  if (!entries.length) {
+    console.log("No search history.");
+    return;
+  }
+  console.log("Recent searches:\n");
+  entries.forEach((e, i) => {
+    const scope = [
+      e.project ? `--project ${e.project}` : "",
+      e.type ? `--type ${e.type}` : "",
+    ].filter(Boolean).join(" ");
+    const ts = e.ts.slice(0, 16).replace("T", " ");
+    console.log(`  ${i + 1}. "${e.query}"${scope ? " " + scope : ""}  (${ts})`);
+  });
 }
 
 function printSearchUsage() {
   console.error("Usage:");
   console.error("  cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]");
   console.error("  cortex search --project <name> [--type <type>] [--limit <n>] [--all]");
+  console.error("  cortex search --history                    Show recent searches");
+  console.error("  cortex search --from-history <n>           Re-run search #n from history");
   console.error("  type: claude|summary|learnings|knowledge|backlog|changelog|canonical|memory-queue|skill|other");
 }
 
@@ -102,6 +168,9 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
   let project: string | undefined;
   let type: string | undefined;
   let limit = 10;
+  let showHistory = false;
+  let fromHistory: number | undefined;
+  let searchAll = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -111,8 +180,14 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
       return null;
     }
 
+    if (arg === "--history") {
+      showHistory = true;
+      continue;
+    }
+
     if (arg === "--all") {
       limit = 100;
+      searchAll = true;
       continue;
     }
 
@@ -146,6 +221,15 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
       limit = parsed;
       continue;
     }
+    if (flag === "--from-history") {
+      const parsed = Number.parseInt(readValue(), 10);
+      if (Number.isNaN(parsed) || parsed < 1) {
+        console.error("Invalid --from-history value. Use a positive integer.");
+        process.exit(1);
+      }
+      fromHistory = parsed;
+      continue;
+    }
 
     if (arg.startsWith("-")) {
       console.error(`Unknown search flag: ${arg}`);
@@ -154,6 +238,25 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
     }
 
     queryParts.push(arg);
+  }
+
+  if (showHistory) {
+    return { query: "", limit, showHistory: true };
+  }
+
+  if (fromHistory !== undefined) {
+    const history = readSearchHistory();
+    if (fromHistory > history.length || fromHistory < 1) {
+      console.error(`No search at position ${fromHistory}. History has ${history.length} entries.`);
+      process.exit(1);
+    }
+    const entry = history[fromHistory - 1];
+    return {
+      query: entry.query,
+      limit,
+      project: entry.project,
+      type: entry.type,
+    };
   }
 
   if (project && !isValidProjectName(project)) {
@@ -183,6 +286,7 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
     limit,
     project,
     type: normalizedType,
+    searchAll,
   };
 }
 
@@ -261,6 +365,12 @@ export async function runCliCommand(command: string, args: string[]) {
 // ── Simple command handlers (kept in cli.ts) ─────────────────────────────────
 
 async function handleSearch(opts: SearchOptions) {
+  if (opts.showHistory) {
+    printSearchHistory();
+    return;
+  }
+
+  recordSearchQuery(opts);
   const db = await buildIndex(cortexPath, profile);
 
   try {

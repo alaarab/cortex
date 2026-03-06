@@ -61,11 +61,34 @@ export function parseCortexErrorCode(msg: string): CortexErrorCode | undefined {
   return undefined;
 }
 
-// Debug logger - writes to ~/.cortex/debug.log when CORTEX_DEBUG=1
+// Centralized runtime path helpers. All ephemeral/runtime files go in
+// subdirectories to keep the cortex root clean.
+export function runtimeDir(cortexPath: string): string {
+  return path.join(cortexPath, ".runtime");
+}
+
+export function sessionsDir(cortexPath: string): string {
+  return path.join(cortexPath, ".sessions");
+}
+
+export function runtimeFile(cortexPath: string, name: string): string {
+  const dir = runtimeDir(cortexPath);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, name);
+}
+
+export function sessionMarker(cortexPath: string, name: string): string {
+  const dir = sessionsDir(cortexPath);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, name);
+}
+
+// Debug logger - writes to ~/.cortex/.runtime/debug.log when CORTEX_DEBUG=1
 export function debugLog(msg: string): void {
   if (!process.env.CORTEX_DEBUG) return;
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  const logFile = path.join(home, ".cortex", "debug.log");
+  const cortexPath = process.env.CORTEX_PATH || path.join(home, ".cortex");
+  const logFile = runtimeFile(cortexPath, "debug.log");
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch { /* debug log is best-effort; logging errors about logging would recurse */ }
@@ -186,7 +209,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   }
 
   return fs.readdirSync(cortexPath, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith(".") && d.name !== "profiles" && d.name !== "templates")
+    .filter(d => d.isDirectory() && !d.name.startsWith(".") && d.name !== "profiles" && d.name !== "templates" && d.name !== "global")
     .map(d => path.join(cortexPath, d.name));
 }
 
@@ -216,7 +239,14 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
 }
 
 export function appendAuditLog(cortexPath: string, event: string, details: string): void {
-  const logPath = path.join(cortexPath, ".cortex-audit.log");
+  // Migrate: check old location, use new .runtime/ path
+  const legacyPath = path.join(cortexPath, ".cortex-audit.log");
+  const newPath = runtimeFile(cortexPath, "audit.log");
+  // One-time migration: move old audit log to new location
+  if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
+    try { fs.renameSync(legacyPath, newPath); } catch { /* best effort */ }
+  }
+  const logPath = newPath;
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
   try {
     fs.appendFileSync(logPath, line);
@@ -281,6 +311,7 @@ export {
   queryRows,
   extractSnippet,
   detectProject,
+  resolveImports,
 } from "./shared-index.js";
 
 export {
@@ -301,4 +332,5 @@ export {
   migrateLegacyFindings,
   upsertCanonicalMemory,
   addLearningToFile,
+  clearCitationCaches,
 } from "./shared-content.js";

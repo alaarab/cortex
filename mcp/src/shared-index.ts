@@ -35,6 +35,50 @@ function classifyFile(filename: string, relPath: string): string {
   return "other";
 }
 
+const IMPORT_RE = /^@import\s+(.+)$/gm;
+const MAX_IMPORT_DEPTH = 5;
+
+/**
+ * Resolve `@import shared/file.md` directives in document content.
+ * The import path is resolved relative to the cortex root (e.g. `shared/foo.md` -> `~/.cortex/global/shared/foo.md`).
+ * Circular imports are detected and skipped. Depth is capped to prevent runaway recursion.
+ */
+export function resolveImports(
+  content: string,
+  cortexPath: string,
+  seen?: Set<string>,
+  depth?: number,
+): string {
+  const currentSeen = seen ?? new Set<string>();
+  const currentDepth = depth ?? 0;
+  if (currentDepth >= MAX_IMPORT_DEPTH) return content;
+
+  return content.replace(IMPORT_RE, (_match, importPath: string) => {
+    const trimmed = importPath.trim();
+    const resolved = path.join(cortexPath, "global", trimmed);
+    const normalized = path.resolve(resolved);
+
+    if (currentSeen.has(normalized)) {
+      return `<!-- @import cycle: ${trimmed} -->`;
+    }
+
+    if (!normalized.startsWith(path.resolve(cortexPath))) {
+      return `<!-- @import blocked: path traversal -->`;
+    }
+
+    try {
+      if (!fs.existsSync(normalized)) {
+        return `<!-- @import not found: ${trimmed} -->`;
+      }
+      currentSeen.add(normalized);
+      const imported = fs.readFileSync(normalized, "utf-8");
+      return resolveImports(imported, cortexPath, currentSeen, currentDepth + 1);
+    } catch {
+      return `<!-- @import error: ${trimmed} -->`;
+    }
+  });
+}
+
 function findWasmBinary(): Buffer | undefined {
   try {
     const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
@@ -156,6 +200,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
       try {
         const raw = fs.readFileSync(fullPath, "utf-8");
         let content = raw.replace(/<details>[\s\S]*?<\/details>/gi, "");
+        content = resolveImports(content, cortexPath);
         if (type === "backlog") {
           content = stripBacklogDoneSection(content);
         }

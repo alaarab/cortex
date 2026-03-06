@@ -6,7 +6,7 @@ import * as querystring from "querystring";
 import {
   CortexError,
   getProjectDirs,
-
+  runtimeDir,
 } from "./shared.js";
 import {
   approveMemoryQueueItem,
@@ -29,7 +29,9 @@ function recentUsage(cortexPath: string): string[] {
 }
 
 function recentAccepted(cortexPath: string): string[] {
-  const audit = path.join(cortexPath, ".cortex-audit.log");
+  const newAudit = path.join(runtimeDir(cortexPath), "audit.log");
+  const legacyAudit = path.join(cortexPath, ".cortex-audit.log");
+  const audit = fs.existsSync(newAudit) ? newAudit : legacyAudit;
   if (!fs.existsSync(audit)) return [];
   const lines = fs.readFileSync(audit, "utf8").split("\n").filter((l) => l.includes("approve_memory"));
   return lines.slice(-40).reverse();

@@ -71,6 +71,7 @@ export interface BacklogItem {
   checked: boolean;
   priority?: "high" | "medium" | "low";
   context?: string;
+  pinned?: boolean;
 }
 
 export interface BacklogDoc {
@@ -123,9 +124,17 @@ const SHELL_STATE_VERSION = 1;
 const BACKLOG_SECTIONS: BacklogSection[] = ["Active", "Queue", "Done"];
 
 function normalizePriority(text: string): "high" | "medium" | "low" | undefined {
-  const m = text.match(/\[(high|medium|low)\]\s*$/i);
+  const m = text.replace(/\s*\[pinned\]/gi, "").match(/\[(high|medium|low)\]\s*$/i);
   if (!m) return undefined;
   return m[1].toLowerCase() as "high" | "medium" | "low";
+}
+
+function detectPinned(text: string): boolean {
+  return /\[pinned\]/i.test(text);
+}
+
+function stripPinnedTag(text: string): string {
+  return text.replace(/\s*\[pinned\]/gi, "").trim();
 }
 
 function stripBulletPrefix(line: string): { checked: boolean; body: string } {
@@ -163,8 +172,9 @@ function backlogFilePath(cortexPath: string, project: string): string | null {
 }
 
 function normalizeBacklogItemLine(item: BacklogItem): string {
-  let text = item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "").trim();
+  let text = stripPinnedTag(item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "")).trim();
   if (item.priority) text = `${text} [${item.priority}]`;
+  if (item.pinned) text = `${text} [pinned]`;
   const prefix = item.checked || item.section === "Done" ? "- [x] " : "- [ ] ";
   return `${prefix}${text}`;
 }
@@ -197,6 +207,7 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
     if (!line.startsWith("- ")) continue;
 
     const parsed = stripBulletPrefix(line);
+    const pinned = detectPinned(parsed.body);
     const priority = normalizePriority(parsed.body);
     const context = parseContext(lines, i);
     const sectionPrefix = section === "Active" ? "A" : section === "Queue" ? "Q" : "D";
@@ -208,6 +219,7 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
       checked: parsed.checked || section === "Done",
       priority,
       context: context.context,
+      pinned: pinned || undefined,
     });
     i += context.consume;
   }
@@ -407,6 +419,48 @@ export function updateBacklogItem(
 
     writeBacklogDoc(parsed.data);
     return cortexOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
+  });
+}
+
+export function pinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error);
+    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+
+    const item = parsed.data.items[found.match.section][found.match.index];
+    if (item.pinned) return cortexOk(`Already pinned in ${project}: ${item.line}`);
+    item.pinned = true;
+    item.line = stripPinnedTag(item.line);
+    writeBacklogDoc(parsed.data);
+    return cortexOk(`Pinned in ${project}: ${item.line}`);
+  });
+}
+
+export function unpinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error);
+    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+
+    const item = parsed.data.items[found.match.section][found.match.index];
+    if (!item.pinned) return cortexOk(`Not pinned in ${project}: ${item.line}`);
+    item.pinned = undefined;
+    item.line = stripPinnedTag(item.line);
+    writeBacklogDoc(parsed.data);
+    return cortexOk(`Unpinned in ${project}: ${item.line}`);
   });
 }
 
