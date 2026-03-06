@@ -12,6 +12,7 @@ import {
   EXEC_TIMEOUT_MS,
 } from "./shared.js";
 import { commandExists } from "./hooks.js";
+import { runGit as runGitShared, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -20,25 +21,8 @@ import { execFileSync } from "child_process";
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
-function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
-  const raw = process.env[envName];
-  if (!raw) return defaultValue;
-  return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());
-}
-
-function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-  const parsed = Number.parseInt(raw || "", 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
 function runGit(cwd: string, args: string[]): string | null {
-  try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }).trim();
-  } catch (err: any) {
-    debugLog(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
-    return null;
-  }
+  return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);
 }
 
 function shouldRetryGh(err: unknown): boolean {
@@ -299,7 +283,8 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
       });
       accepted++;
     } else {
-      queued += appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      const qr1 = appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      if (qr1.ok) queued += qr1.data;
     }
   }
 
@@ -317,7 +302,8 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
       });
       accepted++;
     } else {
-      queued += appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      const qr2 = appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      if (qr2.ok) queued += qr2.data;
     }
   }
 

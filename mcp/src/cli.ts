@@ -480,7 +480,7 @@ async function handleAddLearning(project: string, learning: string) {
   }
 
   const result = addLearningToFile(cortexPath, project, learning);
-  console.log(result);
+  console.log(result.ok ? result.data : result.error);
 }
 
 async function handlePinMemory(project: string, memory: string) {
@@ -489,7 +489,7 @@ async function handlePinMemory(project: string, memory: string) {
     process.exit(1);
   }
   const result = upsertCanonicalMemory(cortexPath, project, memory);
-  console.log(result);
+  console.log(result.ok ? result.data : result.error);
 }
 
 async function handleDoctor(args: string[]) {

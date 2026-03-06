@@ -561,7 +561,7 @@ export function addLearning(cortexPath: string, project: string, learning: strin
   if (!resolved) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolved, "LEARNINGS.md");
 
-  return withFileLock(learningsPath, () => cortexOk(addLearningToFile(cortexPath, project, learning)));
+  return withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, learning));
 }
 
 export function removeLearning(cortexPath: string, project: string, match: string): CortexResult<string> {
@@ -696,7 +696,7 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
     }
 
     const learningsPath = path.join(ensured.data, "LEARNINGS.md");
-    const add = withFileLock(learningsPath, () => cortexOk(addLearningToFile(cortexPath, project, found.data.item.text)));
+    const add = withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, found.data.item.text));
     if (!add.ok) return forwardErr(add);
 
     found.data.all.splice(found.data.index, 1);

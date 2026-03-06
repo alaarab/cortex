@@ -99,7 +99,9 @@ describe("autoArchiveToKnowledge", () => {
 `;
     makeProject(cortex, "myapp", { "LEARNINGS.md": learnings });
 
-    const archived = autoArchiveToKnowledge(cortex, "myapp", 2);
+    const result = autoArchiveToKnowledge(cortex, "myapp", 2);
+    expect(result.ok).toBe(true);
+    const archived = result.ok ? result.data : 0;
     expect(archived).toBe(3);
 
     // Check that knowledge/ dir was created
@@ -131,8 +133,9 @@ describe("autoArchiveToKnowledge", () => {
 `;
     makeProject(cortex, "myapp", { "LEARNINGS.md": learnings });
 
-    const archived = autoArchiveToKnowledge(cortex, "myapp", 5);
-    expect(archived).toBe(0);
+    const result = autoArchiveToKnowledge(cortex, "myapp", 5);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toBe(0);
   });
 
   it("appends to existing knowledge files", () => {

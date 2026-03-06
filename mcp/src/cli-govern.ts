@@ -164,8 +164,12 @@ export async function handlePruneMemories(args: string[] = []) {
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
   const result = pruneDeadMemories(cortexPath, projectArg, dryRun);
-  console.log(result);
-  if (dryRun || /^permission denied/i.test(result)) return;
+  if (!result.ok) {
+    console.log(result.error);
+    return;
+  }
+  console.log(result.data);
+  if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
   if (!backups.length) return;
   console.log(`Updated backups (${backups.length}): ${backups.join(", ")}`);
@@ -177,7 +181,7 @@ export async function handleConsolidateMemories(args: string[] = []) {
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
   const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p, dryRun));
-  console.log(results.join("\n"));
+  console.log(results.map((r) => r.ok ? r.data : r.error).join("\n"));
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
   if (!backups.length) return;
@@ -193,7 +197,7 @@ export async function handleMigrateFindings(args: string[]) {
   const pinCanonical = args.includes("--pin");
   const dryRun = args.includes("--dry-run");
   const result = migrateLegacyFindings(cortexPath, project, { pinCanonical, dryRun });
-  console.log(result);
+  console.log(result.ok ? result.data : result.error);
 }
 
 // ── Maintain migrate ─────────────────────────────────────────────────────────
@@ -321,7 +325,7 @@ export async function handleMaintainMigrate(args: string[]) {
       pinCanonical: parsed.pinCanonical,
       dryRun: parsed.dryRun,
     });
-    lines.push(`Data migration (${parsed.project}): ${result}`);
+    lines.push(`Data migration (${parsed.project}): ${result.ok ? result.data : result.error}`);
   }
 
   console.log(lines.join("\n"));
@@ -440,12 +444,13 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
   try {
     const governance = await handleGovernMemories(projectArg, true);
     const pruneResult = pruneDeadMemories(cortexPath, projectArg);
+    const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
     fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
     updateRuntimeHealth(cortexPath, {
       lastGovernance: {
         at: startedAt,
         status: "ok",
-        detail: `projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}; ${pruneResult}`,
+        detail: `projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}; ${pruneMsg}`,
       },
     });
     appendAuditLog(

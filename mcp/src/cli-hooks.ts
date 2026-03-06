@@ -23,7 +23,7 @@ import {
   EXEC_TIMEOUT_MS,
   type DocRow,
 } from "./shared.js";
-import { buildRobustFtsQuery, extractKeywords, STOP_WORDS } from "./utils.js";
+import { buildRobustFtsQuery, extractKeywords, STOP_WORDS, runGit, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, spawn } from "child_process";
@@ -42,35 +42,15 @@ interface GitContext {
   changedFiles: Set<string>;
 }
 
-function runGit(cwd: string, args: string[]): string | null {
-  try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }).trim();
-  } catch (err: any) {
-    debugLog(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
-    return null;
-  }
-}
-
-function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
-  const raw = process.env[envName];
-  if (!raw) return defaultValue;
-  return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());
-}
-
-function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-  const parsed = Number.parseInt(raw || "", 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
 function getGitContext(cwd?: string): GitContext | null {
   if (!cwd) return null;
-  const branch = runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const git = (args: string[]) => runGit(cwd, args, EXEC_TIMEOUT_MS, debugLog);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
   if (!branch) return null;
   const changedFiles = new Set<string>();
   for (const changed of [
-    runGit(cwd, ["diff", "--name-only"]),
-    runGit(cwd, ["diff", "--name-only", "--cached"]),
+    git(["diff", "--name-only"]),
+    git(["diff", "--name-only", "--cached"]),
   ]) {
     if (!changed) continue;
     for (const line of changed.split("\n").map((s) => s.trim()).filter(Boolean)) {

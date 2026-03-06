@@ -296,7 +296,7 @@ describe("memory workflow policy", () => {
       lowConfidenceThreshold: 0.55,
       riskySections: ["Review", "Conflicts"],
     });
-    expect(typeof updated).not.toBe("string");
+    expect(updated.ok).toBe(true);
     const policy = getMemoryWorkflowPolicy(cortexDir);
     expect(policy.requireMaintainerApproval).toBe(false);
     expect(policy.lowConfidenceThreshold).toBe(0.55);
@@ -335,7 +335,7 @@ describe("index policy", () => {
       excludeGlobs: ["**/.git/**", "**/tmp/**"],
       includeHidden: true,
     });
-    expect(typeof updated).not.toBe("string");
+    expect(updated.ok).toBe(true);
     const policy = getIndexPolicy(cortexDir);
     expect(policy.includeGlobs).toContain("notes/**/*.md");
     expect(policy.excludeGlobs).toContain("**/tmp/**");
@@ -363,10 +363,12 @@ describe("legacy findings migration", () => {
     );
 
     const dryRun = migrateLegacyFindings(tmp.path, project, { dryRun: true });
-    expect(dryRun).toContain("migratable");
+    expect(dryRun.ok).toBe(true);
+    if (dryRun.ok) expect(dryRun.data).toContain("migratable");
 
     const result = migrateLegacyFindings(tmp.path, project, { pinCanonical: true });
-    expect(result).toContain("Migrated");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toContain("Migrated");
 
     const learningsPath = path.join(projectDir, "LEARNINGS.md");
     const canonicalPath = path.join(projectDir, "CANONICAL_MEMORIES.md");
@@ -693,7 +695,8 @@ describe("addLearningToFile", () => {
       line: 12,
       commit: "abc123",
     });
-    expect(result).toContain("added insight");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toContain("added insight");
 
     const learnings = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
     expect(learnings).toContain("<!-- cortex:cite");
@@ -738,7 +741,8 @@ describe("memory maintenance", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
 
     const result = pruneDeadMemories(cortexDir, project);
-    expect(result).toContain("Pruned");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toContain("Pruned");
     const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
     expect(next).not.toContain("- Old bullet");
     expect(next).toContain("- Fresh bullet");
@@ -770,7 +774,8 @@ describe("memory maintenance", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
 
     const result = consolidateProjectLearnings(cortexDir, project);
-    expect(result).toContain("Consolidated");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toContain("Consolidated");
     const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
     expect((next.match(/- Same bullet/g) || []).length).toBe(1);
     expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);

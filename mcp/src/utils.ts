@@ -1,4 +1,30 @@
 import * as path from "path";
+import { execFileSync } from "child_process";
+
+// ── Shared Git helper ────────────────────────────────────────────────────────
+
+export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogFn?: (msg: string) => void): string | null {
+  try {
+    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: timeoutMs }).trim();
+  } catch (err: any) {
+    if (debugLogFn) debugLogFn(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
+    return null;
+  }
+}
+
+// ── Feature flag and clamping helpers ────────────────────────────────────────
+
+export function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
+  const raw = process.env[envName];
+  if (!raw) return defaultValue;
+  return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());
+}
+
+export function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(raw || "", 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
 
 // Synonym map for fuzzy search expansion
 const SYNONYMS: Record<string, string[]> = {

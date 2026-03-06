@@ -27,11 +27,20 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
+  isRecord,
   queryRows,
   validateBacklogFormat,
   validateGovernanceJson,
   validateLearningsFormat,
 } from "./shared.js";
+
+interface ProfileData {
+  name?: string;
+  description?: string;
+  projects?: string[];
+}
+
+type MachinesConfig = Record<string, string>;
 
 const LEGACY_MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CORTEX_MACHINE_FILE = path.join(os.homedir(), ".cortex", ".machine-id");
@@ -75,8 +84,10 @@ function getMachineName(): string {
 function lookupProfile(cortexPath: string, machine: string): string {
   const machinesFile = path.join(cortexPath, "machines.yaml");
   if (!fs.existsSync(machinesFile)) return "";
-  const data = yaml.load(fs.readFileSync(machinesFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as Record<string, any>;
-  return data?.[machine] ?? "";
+  const data = yaml.load(fs.readFileSync(machinesFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+  if (!isRecord(data)) return "";
+  const value = data[machine];
+  return typeof value === "string" ? value : "";
 }
 
 function listProfiles(cortexPath: string): Array<{ name: string; description: string }> {
@@ -85,7 +96,7 @@ function listProfiles(cortexPath: string): Array<{ name: string; description: st
   return fs.readdirSync(profilesDir)
     .filter(f => f.endsWith(".yaml"))
     .map(f => {
-      const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
+      const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
       return { name: data?.name ?? "", description: data?.description ?? "" };
     })
     .filter(p => p.name);
@@ -96,14 +107,14 @@ function findProfileFile(cortexPath: string, profileName: string): string | null
   if (!fs.existsSync(profilesDir)) return null;
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
+    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
     if (data?.name === profileName) return path.join(profilesDir, f);
   }
   return null;
 }
 
 function getProfileProjects(profileFile: string): string[] {
-  const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
+  const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
   return Array.isArray(data?.projects) ? data.projects : [];
 }
 
@@ -113,7 +124,7 @@ function allKnownProjects(cortexPath: string): string[] {
   const projects = new Set<string>();
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
+    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
     for (const p of (data?.projects ?? [])) projects.add(p);
   }
   return [...projects].sort();

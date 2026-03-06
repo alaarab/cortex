@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execFileSync } from "child_process";
 import { findCortexPath, detectProject, getProjectDirs, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
+import { runGit as runGitShared } from "./utils.js";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -30,16 +30,7 @@ function countQueueItems(cortexPath: string, project: string): number {
 }
 
 function runGit(cwd: string, args: string[]): string | null {
-  try {
-    return execFileSync("git", args, {
-      cwd,
-      encoding: "utf8",
-      timeout: EXEC_TIMEOUT_QUICK_MS,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
+  return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS);
 }
 
 export async function runStatus() {
