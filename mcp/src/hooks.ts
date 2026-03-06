@@ -7,7 +7,8 @@ import { EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 
 export function commandExists(cmd: string): boolean {
   try {
-    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
+    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
   } catch { return false; }
 }
@@ -29,7 +30,9 @@ export function detectInstalledTools(): Set<string> {
 function resolveToolBinary(tool: string): string | null {
   try {
     const wrapperPath = path.resolve(path.join(os.homedir(), ".local", "bin", tool));
-    const raw = execFileSync("which", ["-a", tool], {
+    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+    const whichArgs = process.platform === "win32" ? [tool] : ["-a", tool];
+    const raw = execFileSync(whichCmd, whichArgs, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,

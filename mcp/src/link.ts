@@ -42,6 +42,19 @@ interface ProfileData {
 
 type MachinesConfig = Record<string, string>;
 
+// Cross-platform home directory helper: respects HOME / USERPROFILE overrides
+// (important for tests and Windows CI where os.homedir() may not reflect env overrides).
+function homeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
+
+// Claude Code derives its project key from the home dir with path separators replaced by dashes.
+// On Windows the drive letter introduces a colon (e.g. C:\Users\... -> C:-Users-...) which is
+// illegal in directory names, so we strip colons too.
+function claudeProjectKey(): string {
+  return homeDir().replace(/[/\\:]/g, "-").replace(/^-/, "");
+}
+
 const LEGACY_MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CORTEX_MACHINE_FILE = path.join(os.homedir(), ".cortex", ".machine-id");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
@@ -670,8 +683,8 @@ function writeContextClean(machine: string, profile: string, mcpStatus: string, 
 }
 
 function readBackNativeMemory(cortexPath: string, projects: string[]) {
-  const projectKey = os.homedir().replace(/[/\\]/g, "-").replace(/^-/, "");
-  const memoryDir = path.join(os.homedir(), ".claude", "projects", projectKey, "memory");
+  const projectKey = claudeProjectKey();
+  const memoryDir = path.join(homeDir(), ".claude", "projects", projectKey, "memory");
   if (!fs.existsSync(memoryDir)) return;
 
   for (const project of projects) {
@@ -701,8 +714,8 @@ function readBackNativeMemory(cortexPath: string, projects: string[]) {
 function rebuildMemory(cortexPath: string, projects: string[]) {
   // Claude Code uses CWD with path separators replaced by dashes as the project key.
   // The root memory lives under the home directory's project key.
-  const projectKey = os.homedir().replace(/[/\\]/g, "-").replace(/^-/, "");
-  const memoryDir = path.join(os.homedir(), ".claude", "projects", projectKey, "memory");
+  const projectKey = claudeProjectKey();
+  const memoryDir = path.join(homeDir(), ".claude", "projects", projectKey, "memory");
   const memoryFile = path.join(memoryDir, "MEMORY.md");
 
   const hasSummaries = projects.some(p =>
@@ -944,7 +957,8 @@ export function updateFileChecksums(cortexPath: string, profileName?: string): {
     for (const name of ["LEARNINGS.md", "backlog.md", "CANONICAL.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
-      const rel = path.relative(cortexPath, full);
+      // Normalize to forward slashes for consistent keys across platforms
+      const rel = path.relative(cortexPath, full).replace(/\\/g, "/");
       store[rel] = { sha256: fileChecksum(full), updatedAt: now };
       tracked.push(rel);
     }

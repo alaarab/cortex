@@ -778,8 +778,10 @@ describe("file locking", () => {
   it("allows concurrent backlog writes from two processes without data loss", async () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
 
+    // Use forward slashes in import paths for Windows compatibility
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (item: string) =>
-      `import { addBacklogItem } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
+      `import { addBacklogItem } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
       `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
@@ -800,8 +802,10 @@ describe("file locking", () => {
   });
 
   it("allows concurrent learning writes from two processes without data loss", async () => {
+    // Use forward slashes in import paths for Windows compatibility
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (text: string) =>
-      `import { addLearning } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
+      `import { addLearning } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
       `const out=addLearning(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;

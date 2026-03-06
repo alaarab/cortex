@@ -73,7 +73,8 @@ function summarizeBackupChanges(before: Map<string, number>, projects: string[])
     const current = fs.statSync(backup).mtimeMs;
     const previous = before.get(backup);
     if (previous === undefined || current !== previous) {
-      changed.push(path.relative(cortexPath, backup));
+      // Normalize to forward slashes for consistent output across platforms
+      changed.push(path.relative(cortexPath, backup).replace(/\\/g, "/"));
     }
   }
   return changed.sort();

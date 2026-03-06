@@ -3,6 +3,7 @@ import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { fileURLToPath } from "url";
 import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init.js";
 
@@ -33,7 +34,7 @@ describe.sequential("1.10.x release hardening gates", () => {
   });
 
   it("keeps package and MCP server versions consistent", () => {
-    const root = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
     const indexTs = fs.readFileSync(path.join(root, "mcp", "src", "index.ts"), "utf8");
 
     // Version is now read dynamically from package.json at runtime, not hardcoded
