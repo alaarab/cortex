@@ -923,7 +923,6 @@ export class CortexShell {
       Learnings:     [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
       "Memory Queue":[`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
       Health:        [`${k("↑↓")} ${d("scroll")}`],
-      "Machines/Profiles": [`${k(":")} ${d(":machine map")}`, `${k(":")} ${d(":profile add-project")}`],
     };
 
     const extra = viewHints[this.state.view] ?? [];

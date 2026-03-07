@@ -30,7 +30,7 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `CORTEX_MEMORY_TTL_DAYS` | integer | `120` | How many days before a learning is considered stale. Overrides the value in `memory-policy.json`. |
 | `CORTEX_MEMORY_AUTO_ACCEPT` | float | `0.75` | Confidence threshold for auto-accepting extracted memories. Below this, entries go to MEMORY_QUEUE.md for review. |
 | `CORTEX_MEMORY_EXTRACT_WINDOW_DAYS` | integer | `30` | How far back (in days) the `extract-memories` command looks in git and GitHub history. |
-| `CORTEX_LEARNINGS_CAP` | integer | `15` | Maximum learnings in LEARNINGS.md before auto-consolidation moves old entries to `knowledge/`. |
+| `CORTEX_LEARNINGS_CAP` | integer | `20` | Maximum learnings in LEARNINGS.md before auto-archival moves old entries to `knowledge/`. |
 
 ## File Locking
 
