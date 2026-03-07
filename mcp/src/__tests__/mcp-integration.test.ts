@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { buildIndex, type SqlJsDatabase } from "../shared-index.js";
+import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared-index.js";
 import { register as registerSearch } from "../mcp-search.js";
 import { register as registerFinding } from "../mcp-finding.js";
 import { register as registerBacklog } from "../mcp-backlog.js";
@@ -159,5 +159,65 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
       finding: "Should fail",
     }));
     expect(res.ok).toBe(false);
+  });
+});
+
+describe("MCP integration: backlog immediately searchable after add", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-backlog-search-");
+    grantAdmin(tmp.path);
+    const dir = path.join(tmp.path, "search-proj");
+    fs.mkdirSync(dir, { recursive: true });
+    writeFile(path.join(dir, "summary.md"), "# search-proj\nSearch visibility test project.");
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {
+        db.close();
+        db = await buildIndex(tmp.path);
+      },
+      updateFileInIndex: (filePath: string) => {
+        try { updateFileInIndex(db, filePath, tmp.path); } catch { /* best effort */ }
+      },
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    registerSearch(server as any, ctx);
+    registerBacklog(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("add_backlog_item is visible to search_cortex after index refresh", async () => {
+    const addRes = parseResult(await server.call("add_backlog_item", {
+      project: "search-proj",
+      item: "Implement zymurgy fermentation tracking algorithm for brew optimization",
+    }));
+    expect(addRes.ok).toBe(true);
+
+    // Rebuild to guarantee visibility (tests the add → file write → index round-trip)
+    db.close();
+    db = await buildIndex(tmp.path);
+
+    const searchRes = parseResult(await server.call("search_cortex", {
+      query: "zymurgy fermentation",
+      project: "search-proj",
+    }));
+    expect(searchRes.ok).toBe(true);
+    expect(searchRes.data.results.length).toBeGreaterThan(0);
+    const texts = searchRes.data.results.map((r: any) => r.snippet || r.text || "").join(" ");
+    expect(texts.toLowerCase()).toContain("zymurgy");
   });
 });

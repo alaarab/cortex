@@ -223,7 +223,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           const commitMsg = message || `cortex: save ${files.length} file(s) across ${projectNames.length} project(s)`;
 
           runCustomHooks(cortexPath, "pre-save");
-          runGit(["add", "-A"]);
+          // Restrict to known cortex file types to avoid staging .env or credential files
+          runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
           runGit(["commit", "-m", commitMsg]);
 
           let hasRemote = false;

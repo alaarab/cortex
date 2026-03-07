@@ -337,8 +337,11 @@ export function addFindingToFile(
 
     const content = fs.readFileSync(learningsPath, "utf8");
     const legacyHistory = opts?.skipLegacyDedup ? "" : readLegacyHistoryContent(resolvedDir);
-    // When superseding, strip the old finding from history so dedup doesn't block the intentionally similar replacement
-    const historyForDedup = supersedesText
+    // When superseding, strip the old finding from history so dedup doesn't block the intentionally similar replacement.
+    // Skip the strip if new finding is identical to the superseded one (self-supersession should still be blocked by dedup).
+    const isSelfSupersession = supersedesText &&
+      learning.trim().toLowerCase().slice(0, 60) === supersedesText.trim().toLowerCase().slice(0, 60);
+    const historyForDedup = (supersedesText && !isSelfSupersession)
       ? (legacyHistory ? `${content}\n${legacyHistory}` : content)
           .split("\n")
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
