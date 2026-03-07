@@ -321,7 +321,18 @@ export function rankResults(
     if (entityBoost.has(docKey)) entityBoostPaths.add(doc.path);
   }
 
+  // Single composite sort — file-match boost is highest priority so relevant files
+  // are not excluded by the slice. All criteria in one pass for deterministic ordering.
+  const FILE_MATCH_BOOST = 1.5;
   ranked.sort((a, b) => {
+    // Highest priority: currently-changed files / branch-matching docs
+    if (gitCtx && gitCtx.changedFiles.size > 0) {
+      const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
+      const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
+      const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
+      if (scoreDiff !== 0) return scoreDiff;
+    }
+
     const isFindingsA = a.type === "findings";
     const isFindingsB = b.type === "findings";
     if (isFindingsA !== isFindingsB) return isFindingsA ? 1 : -1;
@@ -364,17 +375,6 @@ export function rankResults(
 
   if (intent !== "build") {
     ranked = ranked.filter((r) => r.type !== "backlog");
-  }
-
-  if (gitCtx && gitCtx.changedFiles.size > 0) {
-    const FILE_MATCH_BOOST = 1.5;
-    ranked.sort((a, b) => {
-      const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
-      const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
-      const aScore = aMatch ? FILE_MATCH_BOOST : 1;
-      const bScore = bMatch ? FILE_MATCH_BOOST : 1;
-      return bScore - aScore;
-    });
   }
 
   return ranked;

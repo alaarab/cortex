@@ -166,7 +166,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             }
           } catch (err: unknown) { debugLog(`rowid dedup query failed: ${err instanceof Error ? err.message : String(err)}`); }
 
-          const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length);
+          const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length)
+            .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
           if (cosineResults.length > 0) {
             const cosineRows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
             rows = [...rows, ...cosineRows];
@@ -176,7 +177,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         // Also try cosine fallback when FTS5 returns null (0 results)
         if (!rows) {
-          const cosineResults = cosineFallback(db, query, new Set<number>(), maxResults);
+          const cosineResults = cosineFallback(db, query, new Set<number>(), maxResults)
+            .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
           if (cosineResults.length > 0) {
             rows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
             usedFallback = true;
