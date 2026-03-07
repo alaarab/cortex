@@ -211,27 +211,21 @@ export function queryCrossProjectEntities(
 }
 
 export function getEntityBoostDocs(db: SqlJsDatabase, query: string, _cortexPath: string): Set<string> {
-  const entityNames: string[] = [];
+  const normalizedQuery = query.toLowerCase();
   try {
-    const rows = db.exec("SELECT name FROM entities WHERE length(name) > 2")[0]?.values ?? [];
-    for (const [name] of rows) {
-      if (typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())) {
-        entityNames.push(name);
-      }
-    }
-  } catch { return new Set(); }
+    const rows = db.exec(
+      `SELECT DISTINCT el.source_doc
+       FROM entity_links el
+       JOIN entities e ON el.target_id = e.id
+       WHERE length(e.name) > 2
+         AND ? LIKE '%' || lower(e.name) || '%'`,
+      [normalizedQuery]
+    )[0]?.values ?? [];
 
-  const boostDocs = new Set<string>();
-  for (const name of entityNames) {
-    try {
-      const rows = db.exec(
-        "SELECT DISTINCT el.source_doc FROM entity_links el JOIN entities e ON el.target_id = e.id WHERE e.name = ? COLLATE NOCASE",
-        [name]
-      )[0]?.values ?? [];
-      for (const [doc] of rows) {
-        if (typeof doc === 'string') boostDocs.add(doc);
-      }
-    } catch { /* skip */ }
-  }
-  return boostDocs;
+    const boostDocs = new Set<string>();
+    for (const [doc] of rows) {
+      if (typeof doc === "string") boostDocs.add(doc);
+    }
+    return boostDocs;
+  } catch { return new Set(); }
 }

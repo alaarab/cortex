@@ -153,7 +153,7 @@ export function cosineFallback(
         const ftsRowIds = new Set(ftsRows.map(r => Number(r[0])));
         const remaining = COSINE_CANDIDATE_CAP - ftsRows.length;
         try {
-          const sampleRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs ORDER BY rowid LIMIT ${remaining}`);
+          const sampleRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs ORDER BY RANDOM() LIMIT ${remaining}`);
           if (sampleRes?.length && sampleRes[0]?.values?.length) {
             for (const r of sampleRes[0].values) {
               if (!ftsRowIds.has(Number(r[0]))) ftsRows.push(r);
@@ -170,14 +170,12 @@ export function cosineFallback(
   }
 
   // Separate rowids, DocRows, and content strings for scoring
-  const rowids: number[] = [];
   const docContents: string[] = [];
   const docMeta: { project: string; filename: string; type: string; content: string; path: string }[] = [];
 
   for (const row of allRows ?? []) {
     const rowid = Number(row[0]);
     if (excludeRowids.has(rowid)) continue;
-    rowids.push(rowid);
     const content = String(row[4]);
     docContents.push(content);
     docMeta.push({

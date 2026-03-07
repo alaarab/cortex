@@ -2,13 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
-import * as path from "path";
 import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { readFindings } from "./data-access.js";
 import {
   debugLog,
-  runtimeDir,
   runtimeFile,
 } from "./shared.js";
 import {
@@ -48,39 +46,6 @@ export function logSearchMiss(cortexPath: string, query: string, project?: strin
     fs.appendFileSync(missFile, entry + "\n");
   } catch { /* best-effort */ }
 }
-
-interface FeedbackScoreEntry {
-  key: string;
-  weight: number;
-  timestamp: string;
-}
-
-const MS_PER_DAY = 86_400_000;
-
-function loadFeedbackScores(cortexPath: string): Map<string, { score: number; lastFeedback: string }> {
-  const scoresFile = path.join(runtimeDir(cortexPath), "scores.jsonl");
-  const result = new Map<string, { score: number; lastFeedback: string }>();
-  if (!fs.existsSync(scoresFile)) return result;
-  try {
-    const lines = fs.readFileSync(scoresFile, "utf-8").split("\n").filter(Boolean);
-    for (const line of lines) {
-      const entry = JSON.parse(line) as FeedbackScoreEntry;
-      const existing = result.get(entry.key);
-      const currentScore = existing ? existing.score + entry.weight : entry.weight;
-      result.set(entry.key, { score: currentScore, lastFeedback: entry.timestamp });
-    }
-  } catch (err: unknown) { debugLog(`feedback scores parse error: ${err instanceof Error ? err.message : String(err)}`); }
-  return result;
-}
-
-function computeFeedbackMultiplier(score: number, lastFeedbackTs: string): number {
-  const daysSince = Math.max(0, (Date.now() - new Date(lastFeedbackTs).getTime()) / MS_PER_DAY);
-  const decayed = score * Math.pow(0.95, daysSince);
-  const multiplier = 1.0 + decayed * 0.2;
-  return Math.max(0.3, Math.min(2.0, multiplier));
-}
-
-
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile } = ctx;
