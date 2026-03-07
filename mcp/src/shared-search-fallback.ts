@@ -18,6 +18,27 @@ let dfCacheGeneration = 0;
 export function invalidateDfCache(): void {
   dfCacheGeneration++;
   dfCache.clear();
+  tokenCache.clear();
+}
+
+// Module-level cache for tokenized document content.
+// Keyed by a short content hash so the same document content is only tokenized once per server lifetime.
+// Cleared on full rebuild (same lifecycle as dfCache). Max 2000 entries to bound memory.
+const MAX_TOKEN_CACHE = 2000;
+const tokenCache = new Map<string, string[]>();
+
+function cachedTokenize(text: string): string[] {
+  // Use first 16 chars + length as a cheap key (avoids hashing cost for most cases)
+  const key = `${text.length}:${text.slice(0, 32)}`;
+  const hit = tokenCache.get(key);
+  if (hit) return hit;
+  const tokens = tokenize(text);
+  if (tokenCache.size >= MAX_TOKEN_CACHE) {
+    // Evict oldest entry
+    tokenCache.delete(tokenCache.keys().next().value ?? "");
+  }
+  tokenCache.set(key, tokens);
+  return tokens;
 }
 
 /**
@@ -40,10 +61,10 @@ function tfidfCosine(docs: string[], query: string): number[] {
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return docs.map(() => 0);
 
-  // Collect all unique terms from query + all docs
+  // Collect all unique terms from query + all docs (use cached tokenization for repeated content)
   const allTokens = new Set<string>(queryTokens);
   const docTokenLists: string[][] = docs.map(d => {
-    const tokens = tokenize(d);
+    const tokens = cachedTokenize(d);
     for (const t of tokens) allTokens.add(t);
     return tokens;
   });
