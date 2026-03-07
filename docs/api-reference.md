@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 19 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 20 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 

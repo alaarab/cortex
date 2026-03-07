@@ -839,8 +839,7 @@ export function addLearningToFile(
   // Size cap: auto-archive oldest entries when LEARNINGS.md exceeds the cap
   const DEFAULT_LEARNINGS_CAP = 20;
   const cap = Number.parseInt(process.env.CORTEX_LEARNINGS_CAP || "", 10) || DEFAULT_LEARNINGS_CAP;
-  const afterContent = fs.readFileSync(learningsPath, "utf8");
-  const activeCount = countActiveLearnings(afterContent);
+  const activeCount = countActiveLearnings(updated);
   if (activeCount > cap) {
     const archiveResult = autoArchiveToKnowledge(cortexPath, project, cap);
     if (archiveResult.ok && archiveResult.data > 0) {
@@ -941,17 +940,23 @@ export function autoArchiveToKnowledge(
   const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
   if (!fs.existsSync(learningsPath)) return cortexOk(0);
 
-  // Consolidation lock to prevent concurrent runs
+  // Consolidation lock to prevent concurrent runs (atomic create via wx flag)
+  const STALE_LOCK_MS = 600_000; // 10 min
   const lockFile = runtimeFile(cortexPath, "consolidation.lock");
-  if (fs.existsSync(lockFile)) {
-    try {
-      const stat = fs.statSync(lockFile);
-      if (Date.now() - stat.mtimeMs < 600000) { // 10 min
-        return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
-      }
-    } catch { /* stale lock check is best-effort */ }
+  try {
+    fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
+  } catch (e: any) {
+    if (e?.code === "EEXIST") {
+      try {
+        const stat = fs.statSync(lockFile);
+        if (Date.now() - stat.mtimeMs < STALE_LOCK_MS) {
+          return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+        }
+        // Stale lock, overwrite it
+        fs.writeFileSync(lockFile, String(Date.now()));
+      } catch { return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT); }
+    } else { throw e; }
   }
-  fs.writeFileSync(lockFile, String(Date.now()));
 
   try {
   const content = fs.readFileSync(learningsPath, "utf8");

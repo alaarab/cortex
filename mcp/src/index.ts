@@ -277,6 +277,8 @@ function textResponse(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+const STALE_LOCK_MS = 600_000; // 10 min — shared with consolidation lock in shared-content.ts
+
 function cleanStaleLocks(cortexPath: string): void {
   const dir = runtimeDir(cortexPath);
   try {
@@ -286,7 +288,7 @@ function cleanStaleLocks(cortexPath: string): void {
       const lockPath = path.join(dir, entry);
       try {
         const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > 600_000) {
+        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
           fs.unlinkSync(lockPath);
           debugLog(`Cleaned stale lock: ${entry}`);
         }
@@ -342,6 +344,7 @@ async function main() {
       }),
     },
     async ({ project, learnings }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const results: { learning: string; ok: boolean; message: string }[] = [];
         for (const learning of learnings) {

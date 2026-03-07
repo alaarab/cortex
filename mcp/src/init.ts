@@ -1020,7 +1020,7 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
 
   const projectAnswer = (await ask(`\nFirst project name (or press Enter to use "my-first-project"): `)).trim();
   if (projectAnswer && !isValidProjectName(projectAnswer)) {
-    log(`Invalid project name "${projectAnswer}". Use lowercase letters, numbers, and hyphens (max 100 chars).`);
+    log(`Invalid project name "${projectAnswer}". Avoid path separators, "..", and null bytes.`);
     rl.close();
     process.exit(1);
   }

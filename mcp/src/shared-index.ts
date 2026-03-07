@@ -259,10 +259,15 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<any
 }
 
 export async function buildIndex(cortexPath: string, profile?: string): Promise<any> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000)
-  );
-  return Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
+  });
+  try {
+    return await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 export interface DocRow {

@@ -6,36 +6,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
-- `add_backlog_items` bulk MCP tool
+- `add_backlog_items` bulk MCP tool (20 tools total)
 - Consolidation lock file to prevent concurrent runs
 - `@import` path traversal security check
-- CI workflow with publish dry-run
+- CI workflow with `npm publish --dry-run` gate
+- TUI shell: confirmation step for Memory Queue approve/reject
+- TUI shell: toggle backlog items between Active and Queue
+- Starter template consolidation markers
+- `utils.test.ts` with FTS5 sanitizer, keyword extraction, and project name tests
+- Docs: API reference, environment variables, knowledge tiers, versioning, migration guide
 
 ### Fixed
-- Windows CI: PATH delimiter, .cmd wrappers, SQLite WAL temp file cleanup
-- Scroll header visibility when learning text wraps multiple terminal rows
-- d-key delete using text match instead of UI-computed ID
-
-## [1.12.x] - Recent
-
-### Added
-- Bulk MCP tools: `add_learnings`, `complete_backlog_items`, `remove_learnings`
-- Interactive TUI shell with Backlog, Learnings, Memory Queue, Health tabs
-- Tiered knowledge: `knowledge/` subdirectories indexed separately
-- Starter templates: `python-project`, `monorepo`, `library`, `frontend`
-- FTS5 full-text search with synonym expansion and keyword extraction
-- Multi-agent governance with role-based access control
-
-### Fixed
-- Windows CI: PATH delimiter, .cmd wrappers, SQLite WAL temp file cleanup
-- Scroll header visibility when learning text wraps multiple terminal rows
-- d-key delete using text match instead of UI-computed ID
+- Consolidation lock race condition (now uses atomic file create)
+- `buildIndex` timeout timer leak (cleared on success)
+- `remove_learnings` missing project name validation
+- Redundant file re-read after writing LEARNINGS.md
+- Scroll percentage using wrong denominator in Backlog view
+- "Memory" label inconsistencies (now "Memory Queue" everywhere)
+- Node engine bumped to >=20.0.0 to match CI matrix
+- CONTRIBUTING.md tool count and Node version alignment
 
 ## [1.11.1] - 2026-03-06
 
 ### Added
 - Bulk MCP operations: `complete_backlog_items`, `add_learnings`, `remove_learnings` accept arrays and process all items in one call. FTS index rebuilds once at the end instead of per-item.
-- Tiered knowledge system: auto-consolidation moves old LEARNINGS.md entries into `knowledge/{topic}.md` when cap exceeded (default 15 entries).
+- Tiered knowledge system: auto-archival moves old LEARNINGS.md entries into `knowledge/{topic}.md` when cap exceeded (default 20 entries).
 - Injection budget: `CORTEX_MAX_INJECT_TOKENS` env var (default 2000) with priority ordering (learnings > search results > knowledge).
 - Backlog priority filtering: only HIGH/MEDIUM items injected by default, configurable via `CORTEX_BACKLOG_PRIORITY`.
 - Duplicate learning detection: >60% word overlap check before appending to LEARNINGS.md.

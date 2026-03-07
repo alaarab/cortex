@@ -106,9 +106,10 @@ export function extractKeywords(text: string): string {
   return result.join(" ");
 }
 
-// Validate a project name: no path separators, no dot-dot segments, no null bytes
+// Validate a project name: no path separators, no dot-dot segments, no null bytes, max 100 chars
 export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
+  if (name.length > 100) return false;
   if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
   return true;
 }

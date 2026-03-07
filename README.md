@@ -207,7 +207,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 ## Interactive shell
 
-`cortex` in a terminal opens the shell. Six views, single-key navigation:
+`cortex` in a terminal opens the shell. Five views, single-key navigation:
 
 | Key | View |
 |-----|------|
