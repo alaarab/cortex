@@ -42,7 +42,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(indexTs).not.toMatch(/version:\s*"[\d.]+/);
   });
 
-  it("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {
+  it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {
     const fakeBin = path.join(tmpRoot, "bin");
     fs.mkdirSync(fakeBin, { recursive: true });
 
