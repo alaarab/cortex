@@ -8,10 +8,17 @@ const COSINE_SIMILARITY_MIN = 0.15;
 const COSINE_MAX_CORPUS = 10000;
 export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
 
-// Module-level cache for TF-IDF document frequencies, keyed by "N:term" where N = corpus size.
-// Invalidated automatically when corpus size changes (simplest stable proxy for corpus identity).
+// Module-level cache for TF-IDF document frequencies.
+// Keyed by generation counter, which is only incremented on full index rebuilds (not incremental updates).
+// This prevents every incremental add_finding from flushing the entire DF cache.
 const dfCache = new Map<string, Map<string, number>>();
-const dfCacheCorpusSize = { value: -1 };
+let dfCacheGeneration = 0;
+
+/** Invalidate the DF cache. Call after a full index rebuild (not incremental file updates). */
+export function invalidateDfCache(): void {
+  dfCacheGeneration++;
+  dfCache.clear();
+}
 
 /**
  * Tokenize text into non-stop-word tokens for TF-IDF computation, with stemming.
@@ -47,13 +54,9 @@ function tfidfCosine(docs: string[], query: string): number[] {
   const terms = [...allTokens];
   const N = docs.length;
 
-  // Compute document frequency for each term, using module-level cache keyed by corpus size.
-  // When N changes, all cached DF values are from a different corpus — evict and recompute.
-  if (dfCacheCorpusSize.value !== N) {
-    dfCache.clear();
-    dfCacheCorpusSize.value = N;
-  }
-  const cacheKey = `${N}`;
+  // Compute document frequency for each term, using generation-keyed cache.
+  // Cache survives individual file adds/removes; only full rebuilds bump the generation.
+  const cacheKey = `gen:${dfCacheGeneration}`;
   const cachedDf = dfCache.get(cacheKey);
   const df: Map<string, number> = cachedDf ?? new Map<string, number>();
   // Compute DF for any terms not yet in cache
@@ -105,9 +108,9 @@ export function cosineFallback(
   excludeRowids: Set<number>,
   limit: number
 ): DocRow[] {
-  // Feature flag guard — default off
+  // Feature flag guard — default ON; set CORTEX_FEATURE_HYBRID_SEARCH=0 to disable
   const flagVal = process.env[HYBRID_SEARCH_FLAG];
-  if (!flagVal || ["0", "false", "off", "no"].includes(flagVal.trim().toLowerCase())) {
+  if (flagVal !== undefined && ["0", "false", "off", "no"].includes(flagVal.trim().toLowerCase())) {
     return [];
   }
 
