@@ -80,8 +80,15 @@ function stripAnsi(s: string): string {
 }
 
 function padToWidth(s: string, width: number): string {
-  const len = stripAnsi(s).length;
-  return s + " ".repeat(Math.max(0, width - len));
+  const visible = stripAnsi(s);
+  if (visible.length > width) return visible.slice(0, width - 1) + "…";
+  return s + " ".repeat(width - visible.length);
+}
+
+function truncateLine(s: string, cols: number): string {
+  const visible = stripAnsi(s);
+  if (visible.length <= cols) return s;
+  return visible.slice(0, cols - 1) + "…";
 }
 
 // ── Tab layout ──────────────────────────────────────────────────────────────
@@ -1098,11 +1105,12 @@ export class CortexShell {
 
       let row = `    ${idStr} ${check} ${lineText}${pinTag}${prioTag}`;
       if (isSelected && !isDone) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
+      else row = truncateLine(row, cols);
       allLines.push(row);
 
       if (item.context) {
         const ctx = `       ${style.dimItalic("→ " + item.context)}`;
-        allLines.push(isSelected && !isDone ? `\x1b[7m${padToWidth(ctx, cols)}${RESET}` : ctx);
+        allLines.push(isSelected && !isDone ? `\x1b[7m${padToWidth(ctx, cols)}${RESET}` : truncateLine(ctx, cols));
       }
 
       if (isSelected) cursorLastLine = allLines.length - 1;
@@ -1157,11 +1165,12 @@ export class CortexShell {
 
       let row = `  ${idStr}  ${dateStr}  ${item.text}`;
       if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
+      else row = truncateLine(row, cols);
       allLines.push(row);
 
       if (item.citation) {
         const cite = `              ${style.italic(style.blue("↗ " + item.citation))}`;
-        allLines.push(isSelected ? `\x1b[7m${padToWidth(cite, cols)}${RESET}` : cite);
+        allLines.push(isSelected ? `\x1b[7m${padToWidth(cite, cols)}${RESET}` : truncateLine(cite, cols));
       }
 
       if (isSelected) cursorLastLine = allLines.length - 1;
@@ -1236,6 +1245,9 @@ export class CortexShell {
       if (isSelected) {
         metaRow = `\x1b[7m${padToWidth(metaRow, cols)}${RESET}`;
         textRow = `\x1b[7m${padToWidth(textRow, cols)}${RESET}`;
+      } else {
+        metaRow = truncateLine(metaRow, cols);
+        textRow = truncateLine(textRow, cols);
       }
 
       allLines.push(metaRow);
