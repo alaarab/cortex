@@ -8,6 +8,8 @@ import { readFindings } from "./data-access.js";
 import {
   debugLog,
   runtimeFile,
+  DOC_TYPES,
+  FINDING_TAGS,
 } from "./shared.js";
 import {
   queryRows,
@@ -98,10 +100,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
         limit: z.number().min(1).max(20).optional().describe("Max results to return (1-20, default 5)"),
         project: z.string().optional().describe("Filter by project name."),
-        type: z.enum(["claude", "findings", "reference", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"])
+        type: z.enum(DOC_TYPES)
           .optional()
           .describe("Filter by document type: claude, findings, reference, summary, backlog, skill"),
-        tag: z.enum(["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"])
+        tag: z.enum(FINDING_TAGS)
           .optional()
           .describe("Filter findings by type tag (decision, pitfall, pattern are canonical; tradeoff, architecture, bug are legacy aliases)."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
@@ -292,8 +294,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             if (mtime > thirtyDaysAgo) boost = 1.2;
           } catch { /* file may not exist on disk */ }
 
+          const scoreKey = entryScoreKey(rowProject, filename, content);
           const snippet = extractSnippet(content, query);
-          const scoreKey = entryScoreKey(rowProject, filename, snippet);
           boost *= getQualityMultiplier(cortexPath, scoreKey);
 
           return { row, rank: (rows!.length - idx) * boost };

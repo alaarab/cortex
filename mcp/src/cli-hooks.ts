@@ -94,7 +94,11 @@ import {
 } from "./cli-hooks-session.js";
 import { approximateTokens } from "./cli-hooks-retrieval.js";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 async function readStdin(): Promise<string> {
@@ -139,24 +143,24 @@ export async function handleHookPrompt() {
 
   const { prompt, cwd, sessionId } = input;
 
-  if (!getHooksEnabledPreference(cortexPath)) {
-    appendAuditLog(cortexPath, "hook_prompt", "status=disabled");
+  if (!getHooksEnabledPreference(getCortexPath())) {
+    appendAuditLog(getCortexPath(), "hook_prompt", "status=disabled");
     process.exit(0);
   }
 
-  updateRuntimeHealth(cortexPath, { lastPromptAt: new Date().toISOString() });
+  updateRuntimeHealth(getCortexPath(), { lastPromptAt: new Date().toISOString() });
 
   const keywords = extractKeywords(prompt);
   if (!keywords) process.exit(0);
   debugLog(`hook-prompt keywords: "${keywords}"`);
 
   const tIndex0 = Date.now();
-  const db = await buildIndex(cortexPath, profile);
+  const db = await buildIndex(getCortexPath(), profile);
   stage.indexMs = Date.now() - tIndex0;
 
   const gitCtx = getGitContext(cwd);
   const intent = detectTaskIntent(prompt);
-  const detectedProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
+  const detectedProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
 
   const safeQuery = buildRobustFtsQuery(keywords);
@@ -169,12 +173,12 @@ export async function handleHookPrompt() {
     if (!rows || !rows.length) process.exit(0);
 
     const tTrust0 = Date.now();
-    const policy = getRetentionPolicy(cortexPath);
+    const policy = getRetentionPolicy(getCortexPath());
     const memoryTtlDays = Number.parseInt(
       process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
     rows = applyTrustFilter(
-      rows, cortexPath,
+      rows, getCortexPath(),
       Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
       policy.minInjectConfidence, policy.decay
     );
@@ -182,7 +186,7 @@ export async function handleHookPrompt() {
     if (!rows.length) process.exit(0);
 
     if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && sessionId && detectedProject && cwd) {
-      const marker = sessionMarker(cortexPath, `extracted-${sessionId}-${detectedProject}`);
+      const marker = sessionMarker(getCortexPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
           await handleExtractMemories(detectedProject, cwd, true);
@@ -194,7 +198,7 @@ export async function handleHookPrompt() {
     }
 
     const tRank0 = Date.now();
-    rows = rankResults(rows, intent, gitCtx, detectedProject, cortexPath, db, cwd, keywords);
+    rows = rankResults(rows, intent, gitCtx, detectedProject, getCortexPath(), db, cwd, keywords);
     stage.rankMs = Date.now() - tRank0;
     if (!rows.length) process.exit(0);
 
@@ -234,7 +238,7 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
-    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, cortexPath, sessionId);
+    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getCortexPath(), sessionId);
     // Add budget info to trace
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));
@@ -245,20 +249,20 @@ export async function handleHookPrompt() {
 
     const changedCount = gitCtx?.changedFiles.size ?? 0;
     if (sessionId) {
-      trackSessionMetrics(cortexPath, sessionId, selected, changedCount);
+      trackSessionMetrics(getCortexPath(), sessionId, selected, changedCount);
     }
 
-    flushEntryScores(cortexPath);
-    scheduleBackgroundMaintenance(cortexPath);
+    flushEntryScores(getCortexPath());
+    scheduleBackgroundMaintenance(getCortexPath());
 
-    const noticeFile = sessionId ? sessionMarker(cortexPath, `noticed-${sessionId}`) : null;
+    const noticeFile = sessionId ? sessionMarker(getCortexPath(), `noticed-${sessionId}`) : null;
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
 
     if (!alreadyNoticed) {
       // Clean up stale session markers (>24h old) from .sessions/ dir
       try {
         const cutoff = Date.now() - 86400000;
-        const sessDir = sessionsDir(cortexPath);
+        const sessDir = sessionsDir(getCortexPath());
         if (fs.existsSync(sessDir)) {
           for (const f of fs.readdirSync(sessDir)) {
             if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
@@ -267,16 +271,16 @@ export async function handleHookPrompt() {
           }
         }
         // Also clean legacy markers from root
-        for (const f of fs.readdirSync(cortexPath)) {
+        for (const f of fs.readdirSync(getCortexPath())) {
           if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
-          const fp = `${cortexPath}/${f}`;
+          const fp = `${getCortexPath()}/${f}`;
           try { fs.unlinkSync(fp); } catch { /* best effort */ }
         }
       } catch (err: unknown) {
         debugLog(`stale notice cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      const needed = checkConsolidationNeeded(cortexPath, profile);
+      const needed = checkConsolidationNeeded(getCortexPath(), profile);
       if (needed.length > 0) {
         const notices = needed.map((n) => {
           const since = n.lastConsolidated ? ` since ${n.lastConsolidated}` : "";

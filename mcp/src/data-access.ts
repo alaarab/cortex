@@ -14,6 +14,7 @@ import {
   checkPermission,
   getWorkflowPolicy,
   getRuntimeHealth,
+  withFileLock as withFileLockRaw,
 } from "./shared-governance.js";
 import {
   addFindingToFile,
@@ -22,47 +23,14 @@ import {
 import { isValidProjectName, queueFilePath, safeProjectPath } from "./utils.js";
 
 function withFileLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
-  const lockPath = filePath + ".lock";
-  const maxWait = Number.parseInt(process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
-  const pollInterval = Number.parseInt(process.env.CORTEX_FILE_LOCK_POLL_MS || "100", 10) || 100;
-  const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
-  const waiter = new Int32Array(new SharedArrayBuffer(4));
-  const sleep = (ms: number) => Atomics.wait(waiter, 0, 0, ms);
-
-  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  let waited = 0;
-  let hasLock = false;
-  while (waited < maxWait) {
-    try {
-      fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
-      hasLock = true;
-      break;
-    } catch {
-      try {
-        const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > staleThreshold) {
-          fs.unlinkSync(lockPath);
-          continue;
-        }
-      } catch {
-        sleep(pollInterval);
-        waited += pollInterval;
-        continue;
-      }
-      // Block this thread without spin-looping CPU while waiting to retry lock acquisition.
-      sleep(pollInterval);
-      waited += pollInterval;
-    }
-  }
-
-  if (!hasLock) return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}" within ${maxWait}ms. Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
-
   try {
-    return fn();
-  } finally {
-    if (hasLock) {
-      try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+    return withFileLockRaw(filePath, fn);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("could not acquire lock")) {
+      return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
     }
+    throw err;
   }
 }
 

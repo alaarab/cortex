@@ -83,7 +83,7 @@ cortex hook-context                  # project context for cwd (used after compa
 cortex add-finding <project> "..."   # append a finding via CLI
 ```
 
-## Available MCP tools (19)
+## Available MCP tools (29)
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?, project?)`: full-text search across all project data. `type` filter: `claude`, `findings`, `reference`, `summary`, `backlog`, `skill`.
@@ -113,3 +113,15 @@ cortex add-finding <project> "..."   # append a finding via CLI
 - `export_project(project)`: export project data as portable JSON
 - `import_project(data)`: import project from exported JSON
 - `manage_project(project, action)`: archive or unarchive a project
+
+**Entity graph:**
+- `search_entities(name)`: find entities and related docs by name
+- `get_related_docs(entity)`: get docs linked to a named entity
+- `read_graph(project?)`: read the entity graph for a project or all projects
+- `link_findings(project, finding_text, entity, relation?)`: manually link a finding to an entity
+- `cross_project_entities()`: find entities shared across multiple projects
+
+**Session management:**
+- `session_start(project?)`: mark session start, returns prior summary + recent findings + active backlog
+- `session_end(summary?)`: mark session end, save summary for next session
+- `session_context()`: get current session state

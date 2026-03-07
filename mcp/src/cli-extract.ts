@@ -20,7 +20,11 @@ import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 function runGit(cwd: string, args: string[]): string | null {
@@ -34,7 +38,7 @@ function shouldRetryGh(err: unknown): boolean {
 
 function inferProject(arg?: string): string | null {
   if (arg) return arg;
-  return detectProject(cortexPath, process.cwd(), profile);
+  return detectProject(getCortexPath(), process.cwd(), profile);
 }
 
 // ── Git log parsing ──────────────────────────────────────────────────────────
@@ -266,7 +270,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   }
 
   const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
-  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getRetentionPolicy(cortexPath).autoAcceptThreshold));
+  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getRetentionPolicy(getCortexPath()).autoAcceptThreshold));
   const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
   const ghCandidates = isFeatureEnabled("CORTEX_FEATURE_GH_MINING", false)
     ? await mineGithubCandidates(repoRoot)
@@ -279,13 +283,13 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     if (!candidate) continue;
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
     if (candidate.score >= threshold) {
-      addFindingToFile(cortexPath, project, line, {
+      addFindingToFile(getCortexPath(), project, line, {
         repo: repoRoot,
         commit: rec.hash,
       });
       accepted++;
     } else {
-      const qr1 = appendReviewQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      const qr1 = appendReviewQueue(getCortexPath(), project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -294,22 +298,22 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, "FINDINGS.md", line);
-      recordFeedback(cortexPath, key, "regression");
+      recordFeedback(getCortexPath(), key, "regression");
     }
     if (c.score >= threshold) {
-      addFindingToFile(cortexPath, project, line, {
+      addFindingToFile(getCortexPath(), project, line, {
         repo: repoRoot,
         commit: c.commit,
         file: c.file,
       });
       accepted++;
     } else {
-      const qr2 = appendReviewQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      const qr2 = appendReviewQueue(getCortexPath(), project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
       if (qr2.ok) queued += qr2.data;
     }
   }
 
-  flushEntryScores(cortexPath);
-  appendAuditLog(cortexPath, "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
+  flushEntryScores(getCortexPath());
+  appendAuditLog(getCortexPath(), "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
   if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
 }

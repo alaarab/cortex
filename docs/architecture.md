@@ -133,7 +133,7 @@ Stop
 
 ## MCP Server
 
-The MCP server exposes tools organized into four categories.
+The MCP server exposes tools organized into seven categories.
 
 ```
 Claude Code <--stdio--> cortex-mcp
@@ -142,7 +142,7 @@ Claude Code <--stdio--> cortex-mcp
           |               |               |
      Search/Browse   Backlog CRUD       Finding Capture
      - search_cortex    - get_backlog   - add_finding(s)
-     - get_project      - add_item     - remove_finding(s)
+     - get_project_summary      - add_item     - remove_finding(s)
      - list_projects    - complete(s)  - push_changes
      - get_findings     - update
           |
@@ -150,6 +150,13 @@ Claude Code <--stdio--> cortex-mcp
      - pin_memory       - export_project
      - memory_feedback  - import_project
                         - manage_project
+
+     Entity Graph         Session Management
+     - search_entities    - session_start
+     - get_related_docs   - session_end
+     - read_graph         - session_context
+     - link_findings
+     - cross_project_entities
 
      Governance (CLI-only: `cortex config` and `cortex maintain`)
 ```

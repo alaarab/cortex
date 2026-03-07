@@ -5,26 +5,74 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.14.0] - 2026-03-07
+
 ### Added
-- `add_backlog_items` bulk MCP tool (20 tools total)
+- Centralized finding taxonomy constants: `FINDING_TYPES`, `FINDING_TAGS`, `DOC_TYPES` exported from `shared.ts`
+- 6 new consistency tests for taxonomy and scoring key stability (1191 tests total)
+
+### Fixed
+- Double glob traversal on cold start: `globAllFiles()` helper replaces two independent `globSync()` calls with one pass
+- Quality scoring key mismatch: search and hook-injection paths now both key off full document content, so feedback accumulates correctly
+- `withFileLock` consolidated into shared-governance version with adapter in data-access.ts preserving `CortexResult` return contract
+- Module-level `ensureCortexPath()` side effects: all 6 CLI modules now use lazy `getCortexPath()` getter
+- MCP server imports moved to top of `index.ts` (standard ESM convention)
+- Stale backward-compat alias docs removed from `link-skills.ts`
+
+### Docs
+- Whitepaper: tool count updated from 19 to 29 in all three references
+- `docs/architecture.md`: MCP diagram updated to show all 7 tool categories including entity graph and session management
+- `docs/llms-full.txt`: tool count 28 -> 29, added `cross_project_entities`, fixed tag parameter reference
+- `CLAUDE.md`: updated tool count in Key Files table
+
+## [1.13.6] - 2026-03-07
+
+### Added
+- Entity graph: `search_entities`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_entities` (29 tools total)
+- Session management: `session_start`, `session_end`, `session_context` for agents without lifecycle hooks
+- `get_memory_detail` for progressive disclosure (Layer 3)
+- `add_backlog_items` bulk MCP tool
 - Consolidation lock file to prevent concurrent runs
 - `@import` path traversal security check
 - CI workflow with `npm publish --dry-run` gate
-- TUI shell: confirmation step for Memory Queue approve/reject
-- TUI shell: toggle backlog items between Active and Queue
+- TUI shell: confirmation step for Memory Queue approve/reject, toggle backlog items between Active/Queue
+- Porter stemming for FTS5 tokenizer
+- Hybrid search (cosine fallback) enabled by default
+- Local ONNX embedding via @xenova/transformers (no API key required)
+- Per-project finding cap with auto-consolidation trigger
+- Smooth confidence decay (continuous curve replacing staircase)
+- Conversation memory capture (auto-distill conversation turns into findings)
+- Cross-project knowledge graph
 - Starter template consolidation markers
-- `utils.test.ts` with FTS5 sanitizer, keyword extraction, and project name tests
-- Docs: API reference, environment variables, knowledge tiers, versioning, migration guide
+- Docs: API reference, environment variables, knowledge tiers, versioning, migration guide, benchmark harness
+- 1185 tests across 46 test files
 
 ### Fixed
 - Consolidation lock race condition (now uses atomic file create)
 - `buildIndex` timeout timer leak (cleared on success)
-- `remove_learnings` missing project name validation
-- Redundant file re-read after writing LEARNINGS.md
+- `remove_findings` missing project name validation
+- Redundant file re-read after writing FINDINGS.md
 - Scroll percentage using wrong denominator in Backlog view
+- Race condition in upsertCanonical (content read outside lock)
+- Conflict annotation write uses .tmp-then-rename pattern
+- writeQueue counter decrement happens before promise resolves
+- computeCortexHash now includes global/*.md and policy files
+- Synchronous stdin read in hook-prompt no longer blocks event loop
 - "Memory" label inconsistencies (now "Memory Queue" everywhere)
 - Node engine bumped to >=20.0.0 to match CI matrix
-- CONTRIBUTING.md tool count and Node version alignment
+- timing-safe auth token comparison in memory-ui
+- push_changes restricted to known file types
+- secret scanning expanded (GitHub PATs, Slack tokens, Stripe keys, GCP, npm tokens)
+
+### Changed
+- LEARNINGS.md renamed to FINDINGS.md across the project
+- `knowledge/` directories renamed to `reference/`
+- `add_learning` renamed to `add_finding` (old names still work as aliases)
+- shared.ts split into shared.ts, shared-content.ts, shared-governance.ts, shared-index.ts
+- shell.ts split into shell-input.ts, shell-view.ts, and core orchestrator
+- CortexResult<T> standardized across all modules
 
 ## [1.11.1] - 2026-03-06
 
@@ -414,7 +462,9 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.13.6...HEAD
+[1.13.6]: https://github.com/alaarab/cortex/compare/v1.11.1...v1.13.6
+[1.11.1]: https://github.com/alaarab/cortex/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/alaarab/cortex/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/alaarab/cortex/compare/v1.10.0...v1.10.2
 [1.10.0]: https://github.com/alaarab/cortex/compare/v1.9.0...v1.10.0

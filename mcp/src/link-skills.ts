@@ -244,12 +244,6 @@ Cursor, Codex, and more.
 - \`import_project\`: import project from previously exported JSON
 - \`manage_project(project, action: "archive"|"unarchive")\`: archive or restore a project
 
-**Graph and session:**
-- \`get_learnings\`: alias for browsing findings/learnings
-- \`add_learning\`: alias for add_finding (backward compat)
-- \`add_learnings\`: alias for add_findings (backward compat)
-- \`remove_learning\`: alias for remove_finding (backward compat)
-- \`remove_learnings\`: alias for remove_findings (backward compat)
 `;
 
   const dest = path.join(cortexPath, "cortex.SKILL.md");

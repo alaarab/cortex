@@ -47,7 +47,7 @@ export CORTEX_FEATURE_DAILY_MAINTENANCE=0
 
 When enabled, the `hook-prompt` lifecycle hook uses a 3-layer progressive disclosure strategy instead of injecting full memory snippets verbatim.
 
-**Layer 1 (always injected):** A compact memory index — one line per result with a `mem:project/filename` ID and a one-line summary (truncated at 80 chars). Injected into every hook-prompt response when 3 or more results are found.
+**Layer 1 (always injected):** A compact memory index: one line per result with a `mem:project/filename` ID and a one-line summary (truncated at 80 chars). Injected into every hook-prompt response when 3 or more results are found.
 
 **Layer 2 (on-demand):** Full snippet injection. Still used automatically when 1-2 results are found (targeted queries don't need the index).
 
@@ -91,7 +91,7 @@ export CORTEX_EMBEDDING_MODEL=text-embedding-3-small  # optional
 
 When enabled, cortex uses an LLM call to detect paraphrase duplicates that Jaccard similarity misses. For example, "restart the server after env changes" and "reboot the app when environment variables update" are semantically equivalent but score low on word overlap.
 
-The LLM check only runs when Jaccard similarity is between 0.3 and 0.65 — overlapping enough to be worth checking, but not an obvious duplicate. Results are cached in `.runtime/dedup-cache.json` with a 24-hour TTL.
+The LLM check only runs when Jaccard similarity is between 0.3 and 0.65, overlapping enough to be worth checking but not an obvious duplicate. Results are cached in `.runtime/dedup-cache.json` with a 24-hour TTL.
 
 **Requires:** `CORTEX_LLM_KEY` (or `OPENAI_API_KEY`) to be set.
 

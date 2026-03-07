@@ -2,6 +2,26 @@
 
 import { parseMcpMode, runInit } from "./init.js";
 import * as os from "os";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+import {
+  findCortexPathWithArg,
+  debugLog,
+  runtimeDir,
+} from "./shared.js";
+import { buildIndex, updateFileInIndex as updateFileInIndexFn } from "./shared-index.js";
+import { runCustomHooks } from "./hooks.js";
+import { register as registerSearch } from "./mcp-search.js";
+import { register as registerBacklog } from "./mcp-backlog.js";
+import { register as registerFinding } from "./mcp-finding.js";
+import { register as registerMemory } from "./mcp-memory.js";
+import { register as registerData } from "./mcp-data.js";
+import { register as registerGraph } from "./mcp-graph.js";
+import { register as registerSession } from "./mcp-session.js";
+import type { McpContext } from "./mcp-types.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
   console.log(`cortex - Long-term memory for Claude Code
@@ -227,27 +247,6 @@ if (CLI_COMMANDS.includes(process.argv[2])) {
   await runCliCommand(cmd, process.argv.slice(3));
   process.exit(0);
 }
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
-import {
-  findCortexPathWithArg,
-  debugLog,
-  runtimeDir,
-} from "./shared.js";
-import { buildIndex, updateFileInIndex as updateFileInIndexFn } from "./shared-index.js";
-import { runCustomHooks } from "./hooks.js";
-import { register as registerSearch } from "./mcp-search.js";
-import { register as registerBacklog } from "./mcp-backlog.js";
-import { register as registerFinding } from "./mcp-finding.js";
-import { register as registerMemory } from "./mcp-memory.js";
-import { register as registerData } from "./mcp-data.js";
-import { register as registerGraph } from "./mcp-graph.js";
-import { register as registerSession } from "./mcp-session.js";
-import type { McpContext } from "./mcp-types.js";
 
 // MCP mode: first non-flag arg is the cortex path
 const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));

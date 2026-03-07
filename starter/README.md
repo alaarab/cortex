@@ -1,6 +1,6 @@
 # My Cortex
 
-Your personal project store for [cortex](https://github.com/alaarab/cortex) 1.11.1, which gives Claude Code persistent context across sessions and machines.
+Your personal project store for [cortex](https://github.com/alaarab/cortex), which gives Claude Code persistent context across sessions and machines.
 
 ## Structure
 
@@ -67,7 +67,7 @@ work-desktop: work
 home-laptop: personal
 ```
 
-Each profile in `profiles/` lists which projects that machine should see. After cloning on a new machine, run `/cortex:sync` to pull everything in.
+Each profile in `profiles/` lists which projects that machine should see. After cloning on a new machine, run `/cortex-sync` to pull everything in.
 
 ## Troubleshooting
 

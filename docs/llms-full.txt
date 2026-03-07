@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Restart your agent after init. Context injection starts immediately.
 
-MCP Tools (28):
+MCP Tools (29):
 
   Search and browse:
     search_cortex(query, type?, limit?, project?) - FTS5 search with synonym expansion
@@ -35,6 +35,7 @@ MCP Tools (28):
     get_related_docs(entity) - get docs linked to a named entity
     read_graph(project?) - read the entity graph for a project or all projects
     link_findings(project, finding_text, entity, relation?) - manually link a finding to an entity
+    cross_project_entities() - find entities shared across multiple projects
 
   Session management (for agents without hooks):
     session_start(project?) - mark session start, retrieve prior session context
@@ -123,7 +124,7 @@ Finding Tags:
     [pitfall]  bug or gotcha to avoid
     [pattern]  reusable approach that works well
   Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
-  Tags are filterable in search_cortex via the type parameter.
+  Tags are filterable in search_cortex via the tag parameter.
 
 Agent Support:
 
