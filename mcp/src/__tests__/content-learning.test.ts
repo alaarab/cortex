@@ -134,3 +134,38 @@ describe("error path: invalid project name", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("supersession: failed add does not mutate original finding", () => {
+  it("when new finding is a duplicate, old finding is NOT marked superseded", () => {
+    const oldFinding = "Use connection pooling for database efficiency";
+    addFindingToFile(tmp.path, PROJECT, oldFinding);
+
+    const content1 = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content1).toContain("connection pooling");
+    expect(content1).not.toContain("superseded_by");
+
+    // Attempt to add the exact same finding as the new one — should be skipped as duplicate
+    const r = addFindingToFile(tmp.path, PROJECT, oldFinding, {
+      supersedes: oldFinding,
+    });
+
+    const content2 = fs.readFileSync(findingsPath(), "utf-8");
+    // Old finding must NOT be marked superseded since the new one was rejected
+    expect(content2).not.toContain("superseded_by");
+    // The result should indicate skipped or ok (not an error crash)
+    expect(r.ok).toBe(true);
+  });
+
+  it("when new finding targets nonexistent project, nothing is written", () => {
+    const r = addFindingToFile(tmp.path, "nonexistent-proj", "Some insight", {
+      supersedes: "An old insight",
+    });
+    expect(r.ok).toBe(false);
+    // Original project FINDINGS.md should be unaffected
+    const p = path.join(tmp.path, PROJECT, "FINDINGS.md");
+    if (fs.existsSync(p)) {
+      const content = fs.readFileSync(p, "utf-8");
+      expect(content).not.toContain("superseded_by");
+    }
+  });
+});

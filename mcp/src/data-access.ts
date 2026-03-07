@@ -412,7 +412,7 @@ export function completeBacklogItem(cortexPath: string, project: string, match: 
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error);
+    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
     if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
 
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
@@ -438,7 +438,7 @@ export function updateBacklogItem(
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error);
+    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
     if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -486,7 +486,7 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error);
+    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
     if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -507,7 +507,7 @@ export function unpinBacklogItem(cortexPath: string, project: string, match: str
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error);
+    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
     if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
 
     const item = parsed.data.items[found.match.section][found.match.index];
