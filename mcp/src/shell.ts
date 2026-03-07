@@ -563,12 +563,12 @@ export class CortexShell {
       case "Learnings":
         if (key === "a") {
           this.startInput("learn-add", "");
-        } else if ((key === "d" || key === "\x7f") && item?.id) {
+        } else if ((key === "d" || key === "\x7f") && item?.text) {
           if (!project) { this.setMessage("Select a project first."); return; }
           this.confirmThen(`Delete learning ${style.dim(item.id)}?`, () => {
             const file = path.join(this.cortexPath, project!, "LEARNINGS.md");
             this.snapshotForUndo(`remove learning ${item.id}`, file);
-            const r = removeLearning(this.cortexPath, project!, item.id);
+            const r = removeLearning(this.cortexPath, project!, item.text);
             this.setMessage(`  ${resultMsg(r)}`);
             this.setCursor(Math.max(0, cursor - 1));
           });
