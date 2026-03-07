@@ -88,6 +88,22 @@ function branchTokens(branch: string): string[] {
     .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
 }
 
+// ── Cache eviction helper ────────────────────────────────────────────────────
+
+const CACHE_MAX = 1000;
+const CACHE_EVICT = 100;
+
+function capCache<K, V>(cache: Map<K, V>): void {
+  if (cache.size > CACHE_MAX) {
+    const it = cache.keys();
+    for (let i = 0; i < CACHE_EVICT; i++) {
+      const k = it.next();
+      if (k.done) break;
+      cache.delete(k.value);
+    }
+  }
+}
+
 // ── Glob matching and project frontmatter ────────────────────────────────────
 
 const projectGlobCache = new Map<string, string[] | null>();
@@ -131,6 +147,7 @@ function parseProjectGlobs(cortexPathLocal: string, project: string): string[] |
     // best effort
   }
   projectGlobCache.set(project, globs);
+  capCache(projectGlobCache);
   return globs;
 }
 
@@ -230,6 +247,7 @@ export function validateCitation(citation: ParsedCitation): boolean {
   }
 
   citationValidCache.set(key, valid);
+  capCache(citationValidCache);
   return valid;
 }
 
@@ -959,7 +977,7 @@ export function buildHookOutput(
     // Layer 1: compact index only — inject IDs + one-liners, at most 8 entries
     const indexEntries = selected.slice(0, 8);
     const indexLines = buildCompactIndex(indexEntries, cortexPathLocal);
-    parts.push("Context index (use get_detail to expand any entry):");
+    parts.push("Context index (use get_memory_detail to expand any entry):");
     for (const line of indexLines) {
       parts.push(line);
     }
