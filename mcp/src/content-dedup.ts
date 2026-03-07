@@ -6,43 +6,110 @@ import { safeProjectPath } from "./utils.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
+const MAX_CACHE_ENTRIES = 500;
+
+type TimestampedCacheEntry<T> = {
+  result: T;
+  ts: number;
+  timestamp?: number;
+  cachedAt?: number;
+};
+
+function getCacheEntryTimestamp<T>(entry: TimestampedCacheEntry<T> | undefined): number {
+  if (!entry) return 0;
+  if (typeof entry.ts === "number") return entry.ts;
+  if (typeof entry.timestamp === "number") return entry.timestamp;
+  if (typeof entry.cachedAt === "number") return entry.cachedAt;
+  return 0;
+}
+
+function loadCache<T>(cachePath: string): Record<string, TimestampedCacheEntry<T>> {
+  if (!fs.existsSync(cachePath)) return {};
+  const raw = JSON.parse(fs.readFileSync(cachePath, "utf8")) as Record<string, TimestampedCacheEntry<T>>;
+  const now = Date.now();
+
+  for (const entry of Object.values(raw)) {
+    const ts = getCacheEntryTimestamp(entry) || now;
+    entry.ts = ts;
+  }
+
+  return raw;
+}
+
+function trimCache<T>(cache: Record<string, TimestampedCacheEntry<T>>): void {
+  const entries = Object.entries(cache);
+  if (entries.length <= MAX_CACHE_ENTRIES) return;
+
+  entries
+    .sort(([, a], [, b]) => getCacheEntryTimestamp(a) - getCacheEntryTimestamp(b))
+    .slice(0, entries.length - MAX_CACHE_ENTRIES)
+    .forEach(([key]) => {
+      delete cache[key];
+    });
+}
+
+function persistCache<T>(cachePath: string, cache: Record<string, TimestampedCacheEntry<T>>): void {
+  trimCache(cache);
+  fs.writeFileSync(cachePath, JSON.stringify(cache));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 async function callLlm(prompt: string): Promise<string> {
   const endpoint = process.env.CORTEX_LLM_ENDPOINT;
   const key = process.env.CORTEX_LLM_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || "";
   const model = process.env.CORTEX_LLM_MODEL;
 
   if (endpoint) {
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(key ? { "Authorization": `Bearer ${key}` } : {}),
-      },
-      body: JSON.stringify({
-        model: model || "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 10,
-        temperature: 0,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch(`${endpoint.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { "Authorization": `Bearer ${key}` } : {}),
+        },
+        body: JSON.stringify({
+          model: model || "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 10,
+          temperature: 0,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!response.ok) throw new Error(`LLM API error: ${response.status}`);
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content?.trim() ?? "";
   } else {
     // Anthropic REST API fallback (no SDK required)
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: model || "claude-haiku-4-5-20251001",
-        max_tokens: 10,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: model || "claude-haiku-4-5-20251001",
+          max_tokens: 10,
+          messages: [{ role: "user", content: prompt }],
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
     const data = await response.json() as { content?: Array<{ type: string; text?: string }> };
     const block = data.content?.[0];
@@ -325,11 +392,11 @@ async function semanticDedup(a: string, b: string, cortexPath: string): Promise<
 
   // Check cache
   try {
-    if (fs.existsSync(cachePath)) {
-      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
-      if (cache[key] && Date.now() - cache[key].ts < 86400000) {
-        return cache[key].result;
-      }
+    const cache = loadCache<boolean>(cachePath);
+    if (cache[key] && Date.now() - getCacheEntryTimestamp(cache[key]) < 86400000) {
+      cache[key].ts = Date.now();
+      persistCache(cachePath, cache);
+      return cache[key].result;
     }
   } catch { /* ignore */ }
 
@@ -339,15 +406,14 @@ async function semanticDedup(a: string, b: string, cortexPath: string): Promise<
 
     // Cache result
     try {
-      const cache = fs.existsSync(cachePath)
-        ? JSON.parse(fs.readFileSync(cachePath, "utf8"))
-        : {};
+      const cache = loadCache<boolean>(cachePath);
       cache[key] = { result, ts: Date.now() };
-      fs.writeFileSync(cachePath, JSON.stringify(cache));
+      persistCache(cachePath, cache);
     } catch { /* non-fatal */ }
 
     return result;
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) return false;
     return false; // fallback: not a duplicate
   }
 }
@@ -401,11 +467,11 @@ async function llmConflictCheck(
 
   // 7-day cache
   try {
-    if (fs.existsSync(cachePath)) {
-      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
-      if (cache[key] && Date.now() - cache[key].ts < 7 * 86400000) {
-        return cache[key].result;
-      }
+    const cache = loadCache<"CONFLICT" | "OK">(cachePath);
+    if (cache[key] && Date.now() - getCacheEntryTimestamp(cache[key]) < 7 * 86400000) {
+      cache[key].ts = Date.now();
+      persistCache(cachePath, cache);
+      return cache[key].result;
     }
   } catch { /* ignore */ }
 
@@ -417,15 +483,14 @@ async function llmConflictCheck(
 
     // Cache
     try {
-      const cache = fs.existsSync(cachePath)
-        ? JSON.parse(fs.readFileSync(cachePath, "utf8"))
-        : {};
+      const cache = loadCache<"CONFLICT" | "OK">(cachePath);
       cache[key] = { result, ts: Date.now() };
-      fs.writeFileSync(cachePath, JSON.stringify(cache));
+      persistCache(cachePath, cache);
     } catch { /* non-fatal */ }
 
     return result;
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) return "OK";
     return "OK";
   }
 }
