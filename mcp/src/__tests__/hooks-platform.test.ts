@@ -170,6 +170,7 @@ describe("hooks platform compatibility", () => {
     });
 
     it("runCustomHooks sets CORTEX_PATH and CORTEX_HOOK_EVENT env vars", () => {
+      if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe treats $VAR as literal
       const envFile = path.join(cortexPath, "env-vars.txt");
       const govDir = path.join(cortexPath, ".governance");
       fs.mkdirSync(govDir, { recursive: true });
@@ -206,6 +207,7 @@ describe("hooks platform compatibility", () => {
     });
 
     it("runCustomHooks runs multiple matching hooks in sequence", () => {
+      if (process.platform === "win32") return; // shell >> append redirect unreliable in cmd.exe via Node stdio:ignore
       const outputFile = path.join(cortexPath, "multi-hook.txt");
       const govDir = path.join(cortexPath, ".governance");
       fs.mkdirSync(govDir, { recursive: true });
