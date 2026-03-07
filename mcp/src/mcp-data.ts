@@ -10,6 +10,28 @@ function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; me
   return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
 }
 
+const importPayloadSchema = z.object({
+  project: z.string(),
+  overwrite: z.boolean().optional(),
+  summary: z.string().optional(),
+  claudeMd: z.string().optional(),
+  learnings: z
+    .array(
+      z.object({
+        text: z.string(),
+      }).passthrough()
+    )
+    .optional(),
+  backlog: z
+    .object({
+      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
+      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
+      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
+    })
+    .partial()
+    .optional(),
+}).passthrough();
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, withWriteQueue, rebuildIndex } = ctx;
 
@@ -56,73 +78,126 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ data: rawData }) => {
       return withWriteQueue(async () => {
-        let parsed: Record<string, unknown>;
+        let decoded: unknown;
         try {
-          parsed = JSON.parse(rawData) as Record<string, unknown>;
+          decoded = JSON.parse(rawData);
         } catch {
           return jsonResponse({ ok: false, error: "Invalid JSON input." });
         }
 
-        if (!parsed.project || typeof parsed.project !== "string") {
-          return jsonResponse({ ok: false, error: "Missing 'project' field in import data." });
+        const parsedResult = importPayloadSchema.safeParse(decoded);
+        if (!parsedResult.success) {
+          return jsonResponse({ ok: false, error: `Invalid import payload: ${parsedResult.error.issues[0]?.message ?? "schema validation failed"}` });
         }
+
+        const parsed = parsedResult.data;
         if (!isValidProjectName(parsed.project)) {
           return jsonResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
         }
 
         const projectDir = path.join(cortexPath, parsed.project);
-        fs.mkdirSync(projectDir, { recursive: true });
+        const overwrite = parsed.overwrite === true;
+        if (fs.existsSync(projectDir) && !overwrite) {
+          return jsonResponse({
+            ok: false,
+            error: `Project "${parsed.project}" already exists. Re-run with "overwrite": true to replace it.`,
+          });
+        }
+
+        const stagingRoot = fs.mkdtempSync(path.join(cortexPath, `.cortex-import-${parsed.project}-`));
+        const stagedProjectDir = path.join(stagingRoot, parsed.project);
         const imported: string[] = [];
+        const cleanupDir = (dir: string) => {
+          if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+        };
 
-        if (parsed.summary && typeof parsed.summary === "string") {
-          fs.writeFileSync(path.join(projectDir, "summary.md"), parsed.summary);
-          imported.push("summary.md");
-        }
-
-        if (parsed.claudeMd && typeof parsed.claudeMd === "string") {
-          fs.writeFileSync(path.join(projectDir, "CLAUDE.md"), parsed.claudeMd);
-          imported.push("CLAUDE.md");
-        }
-
-        if (Array.isArray(parsed.learnings) && parsed.learnings.length > 0) {
+        const buildFindingsContent = () => {
+          if (!parsed.learnings || parsed.learnings.length === 0) return null;
           const date = new Date().toISOString().slice(0, 10);
           const lines = [`# ${parsed.project} Findings`, "", `## ${date}`, ""];
           for (const item of parsed.learnings) {
-            if (item && typeof item.text === "string") {
-              lines.push(`- ${item.text}`);
-            }
+            lines.push(`- ${item.text}`);
           }
           lines.push("");
-          fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), lines.join("\n"));
-          imported.push("FINDINGS.md");
-        }
+          return lines.join("\n");
+        };
 
-        if (parsed.backlog && typeof parsed.backlog === "object") {
+        const buildBacklogContent = () => {
+          if (!parsed.backlog) return null;
           const sections = ["Active", "Queue", "Done"] as const;
           const lines = [`# ${parsed.project} backlog`, ""];
           for (const section of sections) {
             lines.push(`## ${section}`, "");
-            const items = (parsed.backlog as Record<string, unknown>)[section];
-            if (Array.isArray(items)) {
+            const items = parsed.backlog[section];
+            if (items) {
               for (const item of items) {
-                if (item && typeof item.line === "string") {
-                  const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
-                  lines.push(`${prefix}${item.line}`);
-                  if (item.context) lines.push(`  Context: ${item.context}`);
-                }
+                const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
+                lines.push(`${prefix}${item.line}`);
+                if (item.context) lines.push(`  Context: ${item.context}`);
               }
             }
             lines.push("");
           }
-          fs.writeFileSync(path.join(projectDir, "backlog.md"), lines.join("\n"));
-          imported.push("backlog.md");
+          return lines.join("\n");
+        };
+
+        try {
+          fs.mkdirSync(stagedProjectDir, { recursive: true });
+
+          if (parsed.summary) {
+            fs.writeFileSync(path.join(stagedProjectDir, "summary.md"), parsed.summary);
+            imported.push("summary.md");
+          }
+
+          if (parsed.claudeMd) {
+            fs.writeFileSync(path.join(stagedProjectDir, "CLAUDE.md"), parsed.claudeMd);
+            imported.push("CLAUDE.md");
+          }
+
+          const findingsContent = buildFindingsContent();
+          if (findingsContent) {
+            fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), findingsContent);
+            imported.push("FINDINGS.md");
+          }
+
+          const backlogContent = buildBacklogContent();
+          if (backlogContent) {
+            fs.writeFileSync(path.join(stagedProjectDir, "backlog.md"), backlogContent);
+            imported.push("backlog.md");
+          }
+
+          const backupDir = overwrite ? path.join(cortexPath, `${parsed.project}.import-backup-${Date.now()}`) : null;
+
+          try {
+            if (overwrite && fs.existsSync(projectDir)) {
+              fs.renameSync(projectDir, backupDir!);
+            }
+            fs.renameSync(stagedProjectDir, projectDir);
+            cleanupDir(stagingRoot);
+            if (backupDir) cleanupDir(backupDir);
+          } catch (error) {
+            if (backupDir && fs.existsSync(backupDir) && !fs.existsSync(projectDir)) {
+              fs.renameSync(backupDir, projectDir);
+            }
+            cleanupDir(stagingRoot);
+            return jsonResponse({
+              ok: false,
+              error: error instanceof Error ? `Failed to finalize import: ${error.message}` : "Failed to finalize import.",
+            });
+          }
+        } catch (error) {
+          cleanupDir(stagingRoot);
+          return jsonResponse({
+            ok: false,
+            error: error instanceof Error ? `Failed to stage import: ${error.message}` : "Failed to stage import.",
+          });
         }
 
         await rebuildIndex();
         return jsonResponse({
           ok: true,
           message: `Imported project "${parsed.project}": ${imported.join(", ")}`,
-          data: { project: parsed.project, files: imported },
+          data: { project: parsed.project, files: imported, overwrite },
         });
       });
     }
