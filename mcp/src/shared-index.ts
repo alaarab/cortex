@@ -14,7 +14,7 @@ import {
 } from "./shared.js";
 import { getIndexPolicy } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
-import { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
+import { cosineFallback, COSINE_CANDIDATE_CAP, invalidateDfCache } from "./shared-search-fallback.js";
 import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs } from "./shared-entity-graph.js";
 
 // Re-export for backward compatibility
@@ -636,7 +636,10 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
     timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
   });
   try {
-    return await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
+    const db = await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
+    // Invalidate TF-IDF DF cache on full rebuild — incremental updates don't bump the generation
+    invalidateDfCache();
+    return db;
   } finally {
     clearTimeout(timer!);
   }

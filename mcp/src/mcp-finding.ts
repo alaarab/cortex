@@ -123,8 +123,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
           incrementSessionFindings(cortexPath, added.length);
+          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
+          updateFileInIndex(findingsPath);
         }
-        await rebuildIndex();
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
         return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`, data: { project, added, skipped, rejected } });
       });
@@ -146,7 +147,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, finding }) => {
       return withWriteQueue(async () => {
         const result = removeFindingCore(cortexPath, project, finding);
-        await rebuildIndex();
+        if (result.ok) {
+          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
+          updateFileInIndex(findingsPath);
+        }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
         return mcpResponse({ ok: true, message: result.message, data: result.data });
       });
@@ -166,7 +170,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, findings }) => {
       return withWriteQueue(async () => {
         const result = removeFindingsCore(cortexPath, project, findings);
-        await rebuildIndex();
+        if (result.ok) {
+          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
+          updateFileInIndex(findingsPath);
+        }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
         return mcpResponse({ ok: result.ok, message: result.message, data: result.data });
       });
