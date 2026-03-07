@@ -92,7 +92,7 @@ LoCoMo (Long-Context Memory) is a benchmark for evaluating long-term memory retr
 ### Running
 
 ```bash
-# Toy dataset (3 sessions, built-in) — good for CI
+# Toy dataset (3 sessions, built-in), good for CI
 npm run bench
 
 # Full LoCoMo dataset (download from GitHub first)

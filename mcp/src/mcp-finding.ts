@@ -11,6 +11,7 @@ import {
 import {
   debugLog,
   EXEC_TIMEOUT_MS,
+  FINDING_TYPES,
 } from "./shared.js";
 import {
   addFindingToFile,
@@ -46,7 +47,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
         }).optional().describe("Optional source citation for traceability."),
-        findingType: z.enum(["decision", "pitfall", "pattern"])
+        findingType: z.enum(FINDING_TYPES)
           .optional()
           .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or gotcha to avoid), 'pattern' (reusable approach that works well)."),
       }),

@@ -21,7 +21,7 @@ Supports Claude Code, Copilot CLI, Cursor, and Codex.
 
 Project knowledge, field findings, task queues. Stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
 
-> **Quick start:** `npx @alaarab/cortex init` -- takes 30 seconds, no account needed.
+> **Quick start:** `npx @alaarab/cortex init` takes 30 seconds, no account needed.
 
 <br>
 </div>
@@ -98,7 +98,7 @@ On a new machine: clone, run init, done.
 
 ## What's new
 
-- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Memory Queue, and Health — no agent needed
+- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Memory Queue, and Health. No agent needed
 - **Synonym search**: type "throttling" and find "rate limit" and "429". You don't need to remember what you called it
 - **Bulk operations**: `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch work
 - **Memory quality**: confidence scoring, age decay, and a feedback loop. Stale or low-signal entries stop appearing
@@ -123,11 +123,11 @@ On a new machine: clone, run init, done.
 
 ## What lives in your cortex
 
-`cortex init` creates your project store with starter templates. Each project gets its own directory — add files as the project grows.
+`cortex init` creates your project store with starter templates. Each project gets its own directory. Add files as the project grows.
 
 | File | What it's for |
 |------|--------------|
-| `summary.md` | Five-line card: what, stack, status, how to run, the finding |
+| `summary.md` | Five-line card: what, stack, status, how to run, key insight |
 | `CLAUDE.md` | Full context: architecture, commands, conventions |
 | `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
 | `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
@@ -209,6 +209,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `get_related_docs` | Get docs linked to a named entity. |
 | `read_graph` | Read the entity graph for a project or all projects. |
 | `link_findings` | Manually link a finding to an entity. Persists to manual-links.json and survives rebuilds. |
+| `cross_project_entities` | Find entities shared across multiple projects. |
 
 ### Session management
 

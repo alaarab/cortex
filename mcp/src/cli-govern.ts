@@ -23,7 +23,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -31,7 +35,7 @@ const profile = process.env.CORTEX_PROFILE || "";
 function targetProjects(projectArg?: string): string[] {
   return projectArg
     ? [projectArg]
-    : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+    : getProjectDirs(getCortexPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
 }
 
 function parseProjectDryRunArgs(
@@ -63,7 +67,7 @@ function parseProjectDryRunArgs(
 function captureFindingBackups(projects: string[]): Map<string, number> {
   const snapshots = new Map<string, number>();
   for (const project of projects) {
-    const backup = path.join(cortexPath, project, "FINDINGS.md.bak");
+    const backup = path.join(getCortexPath(), project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     snapshots.set(backup, fs.statSync(backup).mtimeMs);
   }
@@ -73,13 +77,13 @@ function captureFindingBackups(projects: string[]): Map<string, number> {
 function summarizeBackupChanges(before: Map<string, number>, projects: string[]): string[] {
   const changed: string[] = [];
   for (const project of projects) {
-    const backup = path.join(cortexPath, project, "FINDINGS.md.bak");
+    const backup = path.join(getCortexPath(), project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     const current = fs.statSync(backup).mtimeMs;
     const previous = before.get(backup);
     if (previous === undefined || current !== previous) {
       // Normalize to forward slashes for consistent output across platforms
-      changed.push(path.relative(cortexPath, backup).replace(/\\/g, "/"));
+      changed.push(path.relative(getCortexPath(), backup).replace(/\\/g, "/"));
     }
   }
   return changed.sort();
@@ -103,18 +107,18 @@ interface GovernanceSummary {
 }
 
 export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
-  const policy = getRetentionPolicy(cortexPath);
+  const policy = getRetentionPolicy(getCortexPath());
   const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
   const projects = projectArg
     ? [projectArg]
-    : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+    : getProjectDirs(getCortexPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
 
   let staleCount = 0;
   let conflictCount = 0;
   let reviewCount = 0;
 
   for (const project of projects) {
-    const learningsPath = path.join(cortexPath, project, "FINDINGS.md");
+    const learningsPath = path.join(getCortexPath(), project, "FINDINGS.md");
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const trust = filterTrustedFindingsDetailed(content, {
@@ -134,23 +138,23 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
     reviewCount += lowValue.length;
 
     if (!dryRun) {
-      appendReviewQueue(cortexPath, project, "Stale", stale);
-      appendReviewQueue(cortexPath, project, "Conflicts", conflicts);
-      appendReviewQueue(cortexPath, project, "Review", lowValue);
+      appendReviewQueue(getCortexPath(), project, "Stale", stale);
+      appendReviewQueue(getCortexPath(), project, "Conflicts", conflicts);
+      appendReviewQueue(getCortexPath(), project, "Review", lowValue);
     }
   }
 
   if (!dryRun) {
     appendAuditLog(
-      cortexPath,
+      getCortexPath(),
       "govern_memories",
       `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
     );
     for (const project of projects) {
-      consolidateProjectFindings(cortexPath, project);
+      consolidateProjectFindings(getCortexPath(), project);
     }
   }
-  const lockSummary = dryRun ? "" : enforceCanonicalLocks(cortexPath, projectArg);
+  const lockSummary = dryRun ? "" : enforceCanonicalLocks(getCortexPath(), projectArg);
   if (!silent) {
     const prefix = dryRun ? "[dry-run] Would govern" : "Governed";
     console.log(`${prefix} memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
@@ -169,7 +173,7 @@ export async function handlePruneMemories(args: string[] = []) {
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "prune-memories", usage);
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
-  const result = pruneDeadMemories(cortexPath, projectArg, dryRun);
+  const result = pruneDeadMemories(getCortexPath(), projectArg, dryRun);
   if (!result.ok) {
     console.log(result.error);
     return;
@@ -177,13 +181,13 @@ export async function handlePruneMemories(args: string[] = []) {
   console.log(result.data);
 
   // TTL enforcement: move entries older than ttlDays that haven't been retrieved recently
-  const policy = getRetentionPolicy(cortexPath);
+  const policy = getRetentionPolicy(getCortexPath());
   const ttlDays = policy.ttlDays;
   const retrievalGraceDays = Math.floor(ttlDays / 2);
   const now = Date.now();
 
   // Load retrieval log once for all projects
-  const retrievalLogPath = path.join(cortexPath, ".runtime", "retrieval-log.jsonl");
+  const retrievalLogPath = path.join(getCortexPath(), ".runtime", "retrieval-log.jsonl");
   let retrievalEntries: Array<{ file: string; section: string; retrievedAt: string }> = [];
   if (fs.existsSync(retrievalLogPath)) {
     try {
@@ -208,7 +212,7 @@ export async function handlePruneMemories(args: string[] = []) {
 
   let ttlExpired = 0;
   for (const project of projects) {
-    const learningsPath = path.join(cortexPath, project, "FINDINGS.md");
+    const learningsPath = path.join(getCortexPath(), project, "FINDINGS.md");
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const lines = content.split("\n");
@@ -240,7 +244,7 @@ export async function handlePruneMemories(args: string[] = []) {
     }
 
     if (expiredEntries.length > 0 && !dryRun) {
-      appendReviewQueue(cortexPath, project, "Stale", expiredEntries);
+      appendReviewQueue(getCortexPath(), project, "Stale", expiredEntries);
     }
     if (expiredEntries.length > 0 && dryRun) {
       for (const entry of expiredEntries) {
@@ -265,7 +269,7 @@ export async function handleConsolidateMemories(args: string[] = []) {
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "consolidate-memories", usage);
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
-  const results = projects.map((p) => consolidateProjectFindings(cortexPath, p, dryRun));
+  const results = projects.map((p) => consolidateProjectFindings(getCortexPath(), p, dryRun));
   console.log(results.map((r) => r.ok ? r.data : r.error).join("\n"));
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
@@ -281,7 +285,7 @@ export async function handleMigrateFindings(args: string[]) {
   }
   const pinCanonical = args.includes("--pin");
   const dryRun = args.includes("--dry-run");
-  const result = migrateLegacyFindings(cortexPath, project, { pinCanonical, dryRun });
+  const result = migrateLegacyFindings(getCortexPath(), project, { pinCanonical, dryRun });
   console.log(result.ok ? result.data : result.error);
 }
 
@@ -360,7 +364,7 @@ function parseMaintainMigrationArgs(args: string[]): ParsedMaintainMigrationArgs
 }
 
 function describeGovernanceMigrationPlan(): Array<{ file: string; from: number; to: number }> {
-  const govDir = path.join(cortexPath, ".governance");
+  const govDir = path.join(getCortexPath(), ".governance");
   if (!fs.existsSync(govDir)) return [];
   const files = [
     "memory-policy.json",
@@ -393,7 +397,7 @@ function runGovernanceMigration(dryRun: boolean): string {
     const details = pending.map((entry) => `${entry.file} (${entry.from} -> ${entry.to})`).join(", ");
     return `[dry-run] Would migrate ${pending.length} governance file(s): ${details}`;
   }
-  const migrated = migrateGovernanceFiles(cortexPath);
+  const migrated = migrateGovernanceFiles(getCortexPath());
   if (!migrated.length) return "Governance files are already up to date.";
   return `Migrated ${migrated.length} governance file(s): ${migrated.join(", ")}`;
 }
@@ -406,7 +410,7 @@ export async function handleMaintainMigrate(args: string[]) {
     lines.push(`Governance migration: ${runGovernanceMigration(parsed.dryRun)}`);
   }
   if (parsed.kind === "data" || parsed.kind === "all") {
-    const result = migrateLegacyFindings(cortexPath, parsed.project!, {
+    const result = migrateLegacyFindings(getCortexPath(), parsed.project!, {
       pinCanonical: parsed.pinCanonical,
       dryRun: parsed.dryRun,
     });
@@ -468,7 +472,7 @@ function findBackups(projects: string[]): Array<{ project: string; file: string;
   const results: Array<{ project: string; file: string; fullPath: string; age: string }> = [];
   const now = Date.now();
   for (const project of projects) {
-    const dir = path.join(cortexPath, project);
+    const dir = path.join(getCortexPath(), project);
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".bak")) continue;
@@ -518,20 +522,20 @@ async function handleRestoreBackup(args: string[]) {
     fs.copyFileSync(b.fullPath, target);
     console.log(`Restored ${b.project}/${b.file.replace(/\.bak$/, "")} from backup`);
   }
-  appendAuditLog(cortexPath, "restore_backup", `project=${projectArg} files=${projectBackups.length}`);
+  appendAuditLog(getCortexPath(), "restore_backup", `project=${projectArg} files=${projectBackups.length}`);
 }
 
 // ── Background maintenance ───────────────────────────────────────────────────
 
 export async function handleBackgroundMaintenance(projectArg?: string) {
-  const markers = qualityMarkers(cortexPath);
+  const markers = qualityMarkers(getCortexPath());
   const startedAt = new Date().toISOString();
   try {
     const governance = await handleGovernMemories(projectArg, true);
-    const pruneResult = pruneDeadMemories(cortexPath, projectArg);
+    const pruneResult = pruneDeadMemories(getCortexPath(), projectArg);
     const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
     fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastGovernance: {
         at: startedAt,
         status: "ok",
@@ -539,19 +543,19 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       },
     });
     appendAuditLog(
-      cortexPath,
+      getCortexPath(),
       "background_maintenance",
       `status=ok projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
     );
   } catch (err: any) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastGovernance: {
         at: startedAt,
         status: "error",
         detail: err?.message || String(err),
       },
     });
-    appendAuditLog(cortexPath, "background_maintenance_failed", `error=${err?.message || String(err)}`);
+    appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=${err?.message || String(err)}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
   }

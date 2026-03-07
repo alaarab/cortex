@@ -14,7 +14,11 @@ import * as path from "path";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
 import { setTelemetryEnabled, isTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Config router ────────────────────────────────────────────────────────────
@@ -59,7 +63,7 @@ Subcommands:
 
 export async function handleIndexPolicy(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getIndexPolicy(cortexPath), null, 2));
+    console.log(JSON.stringify(getIndexPolicy(getCortexPath()), null, 2));
     return;
   }
   if (args[0] === "set") {
@@ -80,7 +84,7 @@ export async function handleIndexPolicy(args: string[]) {
         patch.includeHidden = /^(1|true|yes|on)$/i.test(v);
       }
     }
-    const result = updateIndexPolicy(cortexPath, patch);
+    const result = updateIndexPolicy(getCortexPath(), patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -97,7 +101,7 @@ export async function handleIndexPolicy(args: string[]) {
 
 export async function handleRetentionPolicy(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getRetentionPolicy(cortexPath), null, 2));
+    console.log(JSON.stringify(getRetentionPolicy(getCortexPath()), null, 2));
     return;
   }
   if (args[0] === "set") {
@@ -115,7 +119,7 @@ export async function handleRetentionPolicy(args: string[]) {
         patch[k] = value;
       }
     }
-    const result = updateRetentionPolicy(cortexPath, patch);
+    const result = updateRetentionPolicy(getCortexPath(), patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -132,7 +136,7 @@ export async function handleRetentionPolicy(args: string[]) {
 
 export async function handleWorkflowPolicy(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getWorkflowPolicy(cortexPath), null, 2));
+    console.log(JSON.stringify(getWorkflowPolicy(getCortexPath()), null, 2));
     return;
   }
   if (args[0] === "set") {
@@ -150,7 +154,7 @@ export async function handleWorkflowPolicy(args: string[]) {
         patch[k] = Number.isNaN(num) ? v : num;
       }
     }
-    const result = updateWorkflowPolicy(cortexPath, patch);
+    const result = updateWorkflowPolicy(getCortexPath(), patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -167,7 +171,7 @@ export async function handleWorkflowPolicy(args: string[]) {
 
 export async function handleAccessControl(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getAccessControl(cortexPath), null, 2));
+    console.log(JSON.stringify(getAccessControl(getCortexPath()), null, 2));
     return;
   }
   if (args[0] === "set") {
@@ -178,7 +182,7 @@ export async function handleAccessControl(args: string[]) {
       if (!k || v === undefined) continue;
       patch[k] = v.split(",").map((s) => s.trim()).filter(Boolean);
     }
-    const result = updateAccessControl(cortexPath, patch);
+    const result = updateAccessControl(getCortexPath(), patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -194,7 +198,7 @@ export async function handleAccessControl(args: string[]) {
 // ── Machines and profiles ────────────────────────────────────────────────────
 
 export function handleConfigMachines() {
-  const result = listMachinesStore(cortexPath);
+  const result = listMachinesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);
     return;
@@ -204,7 +208,7 @@ export function handleConfigMachines() {
 }
 
 export function handleConfigProfiles() {
-  const result = listProfilesStore(cortexPath);
+  const result = listProfilesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);
     return;
@@ -220,19 +224,19 @@ function handleConfigTelemetry(args: string[]) {
   const action = args[0];
   switch (action) {
     case "on":
-      setTelemetryEnabled(cortexPath, true);
+      setTelemetryEnabled(getCortexPath(), true);
       console.log("Telemetry enabled. Local usage stats will be collected.");
       console.log("No data is sent externally. Stats are stored in .runtime/telemetry.json.");
       return;
     case "off":
-      setTelemetryEnabled(cortexPath, false);
+      setTelemetryEnabled(getCortexPath(), false);
       console.log("Telemetry disabled.");
       return;
     case "reset":
-      resetTelemetry(cortexPath);
+      resetTelemetry(getCortexPath());
       console.log("Telemetry stats reset.");
       return;
     default:
-      console.log(getTelemetrySummary(cortexPath));
+      console.log(getTelemetrySummary(getCortexPath()));
   }
 }

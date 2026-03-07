@@ -120,7 +120,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 % === STORAGE ===
 \node[store, right=1.1cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
 \node[store, above=0.55cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.55cm of md]  (mcp) {MCP Tools (19)\\[-2pt]{\scriptsize add\_finding, backlog, etc.}};
+\node[store, below=0.55cm of md]  (mcp) {MCP Tools (29)\\[-2pt]{\scriptsize add\_finding, backlog, etc.}};
 
 % === GOVERNANCE ===
 \node[gov, right=1.1cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
@@ -281,7 +281,7 @@ These concepts are often conflated:
   \item \textbf{Local vs API} is a storage/compute decision (where memory runs).
 \end{itemize}
 
-Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The 19 MCP tools cover search, backlog management, learning capture, memory quality feedback, and data portability \cite{cortex-index}.
+Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The 29 MCP tools cover search, backlog management, finding capture, entity graph, session management, memory quality feedback, and data portability \cite{cortex-index}.
 
 \section{Comparative Assessment}
 \textit{Evidence window: public documentation/changelogs available as of March 6, 2026.}
@@ -299,7 +299,7 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local syste
   \item Governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
   \item Trust filter defaults: decay curve 1.0/0.9/0.75/0.5 at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier 0.8 \cite{cortex-shared}.
   \item Access control: 4 roles (admin, maintainer, contributor, viewer), 6 action types \cite{cortex-shared}.
-  \item MCP tool surface: 19 tools across search, backlog, learning, portability, and quality feedback categories \cite{cortex-index}.
+  \item MCP tool surface: 29 tools across search, backlog, finding capture, entity graph, session management, portability, and quality feedback categories \cite{cortex-index}.
   \item Interactive shell: 6 views, palette commands, persistent state \cite{cortex-shell}.
   \item Claude Opus 4.6 includes a 1M-token context window (beta) \cite{anthropic-opus46}.
 \end{itemize}

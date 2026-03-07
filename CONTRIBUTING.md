@@ -23,7 +23,7 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 
 | Path | What it does |
 |------|-------------|
-| `mcp/src/index.ts` | CLI routing + MCP server (20 tools) |
+| `mcp/src/index.ts` | CLI routing + MCP server (29 tools) |
 | `mcp/src/shared.ts` | Core logic: FTS5 indexing, querying, memory governance |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |

@@ -135,29 +135,40 @@ function touchSentinel(cortexPath: string): void {
   } catch { /* best-effort */ }
 }
 
-function computeCortexHash(cortexPath: string, profile?: string): string {
-  const projectDirs = getProjectDirs(cortexPath, profile);
+function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: string[]): string {
   const policy = getIndexPolicy(cortexPath);
-  const files: string[] = [];
-  for (const dir of projectDirs) {
-    try {
-      const matched = new Set<string>();
-      for (const pattern of policy.includeGlobs) {
-        const dot = policy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
-        const mdFiles = globSync(pattern, { cwd: dir, nodir: true, dot, ignore: policy.excludeGlobs });
-        for (const f of mdFiles) matched.add(f);
-      }
-      for (const f of matched) files.push(path.join(dir, f));
-    } catch { /* skip unreadable dirs */ }
-  }
-  files.sort();
   const hash = crypto.createHash("sha1");
-  for (const f of files) {
-    try {
-      const stat = fs.statSync(f);
-      hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
-    } catch { /* skip */ }
+
+  if (preGlobbed) {
+    for (const f of preGlobbed) {
+      try {
+        const stat = fs.statSync(f);
+        hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
+      } catch { /* skip */ }
+    }
+  } else {
+    const projectDirs = getProjectDirs(cortexPath, profile);
+    const files: string[] = [];
+    for (const dir of projectDirs) {
+      try {
+        const matched = new Set<string>();
+        for (const pattern of policy.includeGlobs) {
+          const dot = policy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
+          const mdFiles = globSync(pattern, { cwd: dir, nodir: true, dot, ignore: policy.excludeGlobs });
+          for (const f of mdFiles) matched.add(f);
+        }
+        for (const f of matched) files.push(path.join(dir, f));
+      } catch { /* skip unreadable dirs */ }
+    }
+    files.sort();
+    for (const f of files) {
+      try {
+        const stat = fs.statSync(f);
+        hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
+      } catch { /* skip */ }
+    }
   }
+
   for (const mem of collectNativeMemoryFiles()) {
     try {
       const stat = fs.statSync(mem.fullPath);
@@ -263,10 +274,11 @@ function getEntrySourceDocKey(entry: FileEntry, cortexPath: string): string {
   return buildSourceDocKey(entry.project, entry.fullPath, cortexPath, entry.filename);
 }
 
-function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
+function globAllFiles(cortexPath: string, profile?: string): { filePaths: string[]; entries: FileEntry[] } {
   const projectDirs = getProjectDirs(cortexPath, profile);
   const indexPolicy = getIndexPolicy(cortexPath);
   const entries: FileEntry[] = [];
+  const allAbsolutePaths: string[] = [];
 
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
@@ -290,14 +302,21 @@ function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
       entries.push({ fullPath, project: projectName, filename, type, relFile });
+      allAbsolutePaths.push(fullPath);
     }
   }
 
   for (const mem of collectNativeMemoryFiles()) {
     entries.push({ fullPath: mem.fullPath, project: mem.project, filename: mem.file, type: "findings" });
+    allAbsolutePaths.push(mem.fullPath);
   }
 
-  return entries;
+  allAbsolutePaths.sort();
+  return { filePaths: allAbsolutePaths, entries };
+}
+
+function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
+  return globAllFiles(cortexPath, profile).entries;
 }
 
 function insertFileIntoIndex(db: SqlJsDatabase, entry: FileEntry, cortexPath: string): boolean {
@@ -378,7 +397,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
-  const hash = computeCortexHash(cortexPath, profile);
+  const globResult = globAllFiles(cortexPath, profile);
+  const hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
   const wasmBinary = findWasmBinary();
@@ -399,7 +419,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         db = new SQL.Database(cached);
 
         // Compute current file hashes and determine what changed
-        const allFiles = collectAllFiles(cortexPath, profile);
+        const allFiles = globResult.entries;
         const currentHashes: Record<string, string> = {};
         const changedFiles: FileEntry[] = [];
         const newFiles: FileEntry[] = [];
@@ -520,7 +540,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   // Q20: Cross-project entity index
   ensureGlobalEntitiesTable(db);
 
-  const allFiles = collectAllFiles(cortexPath, profile);
+  const allFiles = globResult.entries;
   const newHashes: Record<string, string> = {};
   let fileCount = 0;
 

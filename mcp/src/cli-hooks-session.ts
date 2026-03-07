@@ -37,7 +37,11 @@ import {
 import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
 import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Git helpers ──────────────────────────────────────────────────────────────
@@ -281,21 +285,21 @@ async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: bool
 
 export async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
-  if (!getHooksEnabledPreference(cortexPath)) {
-    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
-    appendAuditLog(cortexPath, "hook_session_start", "status=disabled");
+  if (!getHooksEnabledPreference(getCortexPath())) {
+    updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
+    appendAuditLog(getCortexPath(), "hook_session_start", "status=disabled");
     return;
   }
 
-  const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], cortexPath);
-  const doctor = await runDoctor(cortexPath, false);
-  const maintenanceScheduled = scheduleBackgroundMaintenance(cortexPath);
+  const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath());
+  const doctor = await runDoctor(getCortexPath(), false);
+  const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
 
-  try { const { trackSession } = await import("./telemetry.js"); trackSession(cortexPath); } catch { /* best-effort */ }
+  try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch { /* best-effort */ }
 
-  updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
+  updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
   appendAuditLog(
-    cortexPath,
+    getCortexPath(),
     "hook_session_start",
     `pull=${pull.ok ? "ok" : "fail"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
@@ -345,38 +349,38 @@ export function extractConversationInsights(text: string): string[] {
 
 export async function handleHookStop() {
   const now = new Date().toISOString();
-  if (!getHooksEnabledPreference(cortexPath)) {
-    updateRuntimeHealth(cortexPath, {
+  if (!getHooksEnabledPreference(getCortexPath())) {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: "hooks disabled by preference" },
     });
-    appendAuditLog(cortexPath, "hook_stop", "status=disabled");
+    appendAuditLog(getCortexPath(), "hook_stop", "status=disabled");
     return;
   }
 
-  const status = await runBestEffortGit(["status", "--porcelain"], cortexPath);
+  const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
   if (!status.ok) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
     });
-    appendAuditLog(cortexPath, "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
+    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
     return;
   }
 
   if (!status.output) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: "no changes" },
     });
-    appendAuditLog(cortexPath, "hook_stop", "status=clean");
+    appendAuditLog(getCortexPath(), "hook_stop", "status=clean");
     return;
   }
 
-  const add = await runBestEffortGit(["add", "-A"], cortexPath);
-  const commit = add.ok ? await runBestEffortGit(["commit", "-m", "auto-save cortex"], cortexPath) : { ok: false, error: add.error };
+  const add = await runBestEffortGit(["add", "-A"], getCortexPath());
+  const commit = add.ok ? await runBestEffortGit(["commit", "-m", "auto-save cortex"], getCortexPath()) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: {
         at: now,
@@ -384,27 +388,27 @@ export async function handleHookStop() {
         detail: add.error || commit.error || "git add/commit failed",
       },
     });
-    appendAuditLog(cortexPath, "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
+    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
     return;
   }
 
-  const remotes = await runBestEffortGit(["remote"], cortexPath);
+  const remotes = await runBestEffortGit(["remote"], getCortexPath());
   if (!remotes.ok || !remotes.output) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-local", detail: "commit created; no remote configured" },
     });
-    appendAuditLog(cortexPath, "hook_stop", "status=saved-local");
+    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local");
     return;
   }
 
-  const push = await runBestEffortGit(["push"], cortexPath);
+  const push = await runBestEffortGit(["push"], getCortexPath());
   if (push.ok) {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
     });
-    appendAuditLog(cortexPath, "hook_stop", "status=saved-pushed");
+    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-pushed");
 
     // Q21: Auto-capture conversation insights (gated behind CORTEX_FEATURE_AUTO_CAPTURE=1)
     if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
@@ -412,11 +416,11 @@ export async function handleHookStop() {
         const captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
         if (captureInput) {
           const cwd = process.cwd();
-          const activeProject = detectProject(cortexPath, cwd, profile);
+          const activeProject = detectProject(getCortexPath(), cwd, profile);
           if (activeProject) {
             const insights = extractConversationInsights(captureInput);
             for (const insight of insights) {
-              addFindingToFile(cortexPath, activeProject, `[pattern] ${insight}`);
+              addFindingToFile(getCortexPath(), activeProject, `[pattern] ${insight}`);
               debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
             }
           }
@@ -428,7 +432,7 @@ export async function handleHookStop() {
 
     // Auto governance scheduling: run governance weekly if overdue
     try {
-      const lastGovPath = runtimeFile(cortexPath, "last-governance.txt");
+      const lastGovPath = runtimeFile(getCortexPath(), "last-governance.txt");
       const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
       const daysSince = (Date.now() - lastRun) / 86_400_000;
       if (daysSince >= 7) {
@@ -447,15 +451,15 @@ export async function handleHookStop() {
     return;
   }
 
-  updateRuntimeHealth(cortexPath, {
+  updateRuntimeHealth(getCortexPath(), {
     lastStopAt: now,
     lastAutoSave: { at: now, status: "saved-local", detail: push.error || "push failed" },
   });
-  appendAuditLog(cortexPath, "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
+  appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
 }
 
 export async function handleHookContext() {
-  if (!getHooksEnabledPreference(cortexPath)) {
+  if (!getHooksEnabledPreference(getCortexPath())) {
     process.exit(0);
   }
 
@@ -468,9 +472,9 @@ export async function handleHookContext() {
     debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const project = detectProject(cortexPath, cwd, profile);
+  const project = detectProject(getCortexPath(), cwd, profile);
 
-  const db = await buildIndex(cortexPath, profile);
+  const db = await buildIndex(getCortexPath(), profile);
   const contextLabel = project ? `\u25c6 cortex \u00b7 ${project} \u00b7 context` : `\u25c6 cortex \u00b7 context`;
   const parts: string[] = [contextLabel, "<cortex-context>"];
 
@@ -543,7 +547,7 @@ interface ToolLogEntry {
 }
 
 export async function handleHookTool() {
-  if (!getHooksEnabledPreference(cortexPath)) {
+  if (!getHooksEnabledPreference(getCortexPath())) {
     process.exit(0);
   }
 
@@ -600,7 +604,7 @@ export async function handleHookTool() {
   }
 
   try {
-    const logFile = runtimeFile(cortexPath, "tool-log.jsonl");
+    const logFile = runtimeFile(getCortexPath(), "tool-log.jsonl");
     fs.mkdirSync(path.dirname(logFile), { recursive: true });
     fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
   } catch {
@@ -608,17 +612,17 @@ export async function handleHookTool() {
   }
 
   const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-  const activeProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
+  const activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
 
   if (activeProject) {
     try {
       const candidates = extractToolFindings(toolName, input, responseStr);
       for (const { text, confidence } of candidates) {
         if (confidence >= 0.85) {
-          addFindingToFile(cortexPath, activeProject, text);
+          addFindingToFile(getCortexPath(), activeProject, text);
           debugLog(`hook-tool: auto-added learning (conf=${confidence}): ${text.slice(0, 60)}`);
         } else {
-          appendReviewQueue(cortexPath, activeProject, "Review", [text]);
+          appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
           debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
         }
       }

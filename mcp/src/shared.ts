@@ -231,6 +231,18 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
   return results;
 }
 
+/** Canonical finding type tags */
+export const FINDING_TYPES = ["decision", "pitfall", "pattern"] as const;
+export type FindingType = (typeof FINDING_TYPES)[number];
+
+/** All searchable finding tags (canonical + legacy aliases) */
+export const FINDING_TAGS = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
+export type FindingTag = (typeof FINDING_TAGS)[number];
+
+/** Document types in the FTS index */
+export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"] as const;
+export type DocType = (typeof DOC_TYPES)[number];
+
 export function appendAuditLog(cortexPath: string, event: string, details: string): void {
   // Migrate: check old location, use new .runtime/ path
   const legacyPath = path.join(cortexPath, ".cortex-audit.log");

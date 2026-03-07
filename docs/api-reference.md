@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 28 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 29 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -259,6 +259,12 @@ Manually link a finding to an entity. The link persists to `manual-links.json` a
 | `finding_text` | string | yes | Text of the finding to link. |
 | `entity` | string | yes | Entity name to link to. |
 | `relation` | string | no | Relationship type (e.g. "mentions", "implements"). |
+
+### `cross_project_entities`
+
+Find entities that appear in multiple projects. Useful for discovering shared patterns and dependencies.
+
+No parameters.
 
 ---
 

@@ -49,7 +49,7 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (19)
+## MCP Tools (29)
 
 ### Search and Browse
 
@@ -94,6 +94,24 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `export_project` | `project` | Export a project's data (findings, backlog, summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
+
+### Entity Graph
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `search_entities` | `name` | Find entities and related docs by name. |
+| `get_related_docs` | `entity` | Get docs linked to a named entity. |
+| `read_graph` | `project?` | Read the entity graph for a project or all projects. |
+| `link_findings` | `project`, `finding_text`, `entity`, `relation?` | Manually link a finding to an entity. |
+| `cross_project_entities` | (none) | Find entities shared across multiple projects. |
+
+### Session Management
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `session_start` | `project?` | Mark session start. Returns prior summary, recent findings, and active backlog. |
+| `session_end` | `summary?` | Mark session end and save summary for next session. |
+| `session_context` | (none) | Get current session state: project, duration, findings added so far. |
 
 Governance, policy, and maintenance tools are CLI-only. Use `cortex config` and `cortex maintain` commands.
 

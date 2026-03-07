@@ -80,7 +80,11 @@ import {
   handleAccessControl,
 } from "./cli-config.js";
 
-const cortexPath = ensureCortexPath();
+let _cortexPath: string | undefined;
+function getCortexPath(): string {
+  if (!_cortexPath) _cortexPath = ensureCortexPath();
+  return _cortexPath;
+}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Search types and parsing ─────────────────────────────────────────────────
@@ -123,7 +127,7 @@ interface SearchHistoryEntry {
 }
 
 function historyFile(): string {
-  return runtimeFile(cortexPath, "search-history.jsonl");
+  return runtimeFile(getCortexPath(), "search-history.jsonl");
 }
 
 function readSearchHistory(): SearchHistoryEntry[] {
@@ -393,7 +397,7 @@ async function handleSearch(opts: SearchOptions) {
   }
 
   recordSearchQuery(opts);
-  const db = await buildIndex(cortexPath, profile);
+  const db = await buildIndex(getCortexPath(), profile);
 
   try {
     let sql = "SELECT project, filename, type, content, path FROM docs";
@@ -439,7 +443,7 @@ async function handleSearch(opts: SearchOptions) {
       if (opts.query) {
         try {
           const { logSearchMiss } = await import("./mcp-search.js");
-          logSearchMiss(cortexPath, opts.query, opts.project);
+          logSearchMiss(getCortexPath(), opts.query, opts.project);
         } catch { /* best-effort */ }
       }
       const scope = [
@@ -477,7 +481,7 @@ async function handleAddFinding(project: string, learning: string) {
   }
 
   try {
-    const result = addFindingCore(cortexPath, project, learning);
+    const result = addFindingCore(getCortexPath(), project, learning);
     if (!result.ok) {
       console.error(result.message);
       process.exit(1);
@@ -494,7 +498,7 @@ async function handlePinCanonical(project: string, memory: string) {
     console.error('Usage: cortex pin <project> "<memory>"');
     process.exit(1);
   }
-  const result = upsertCanonical(cortexPath, project, memory);
+  const result = upsertCanonical(getCortexPath(), project, memory);
   console.log(result.ok ? result.data : result.error);
 }
 
@@ -502,7 +506,7 @@ async function handleDoctor(args: string[]) {
   const fix = args.includes("--fix");
   const checkData = args.includes("--check-data");
   const agentsOnly = args.includes("--agents");
-  const result = await runDoctor(cortexPath, fix, checkData);
+  const result = await runDoctor(getCortexPath(), fix, checkData);
   if (agentsOnly) {
     // Filter to only agent-related checks
     const agentChecks = result.checks.filter((c) =>
@@ -526,7 +530,7 @@ async function handleDoctor(args: string[]) {
 
   // Q30: Show top search miss patterns
   try {
-    const missFile = runtimeFile(cortexPath, "search-misses.jsonl");
+    const missFile = runtimeFile(getCortexPath(), "search-misses.jsonl");
     if (fs.existsSync(missFile)) {
       const lines = fs.readFileSync(missFile, "utf8").split("\n").filter(Boolean);
       if (lines.length > 0) {
@@ -563,8 +567,8 @@ async function handleQualityFeedback(args: string[]) {
     console.error("Usage: cortex quality-feedback --key=<entry-key> --type=helpful|reprompt|regression");
     process.exit(1);
   }
-  recordFeedback(cortexPath, key, feedback);
-  flushEntryScores(cortexPath);
+  recordFeedback(getCortexPath(), key, feedback);
+  flushEntryScores(getCortexPath());
   console.log(`Recorded feedback: ${feedback} for ${key}`);
 }
 
@@ -572,7 +576,7 @@ async function handleMemoryUi(args: string[]) {
   const portArg = args.find((a) => a.startsWith("--port="));
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
-  await startReviewUi(cortexPath, safePort);
+  await startReviewUi(getCortexPath(), safePort);
 }
 
 async function handleShell(args: string[]) {
@@ -581,7 +585,7 @@ async function handleShell(args: string[]) {
     console.log("Interactive shell with views for Projects, Backlog, Learnings, Memory Queue, Machines/Profiles, and Health.");
     return;
   }
-  await startShell(cortexPath, profile);
+  await startShell(getCortexPath(), profile);
 }
 
 async function handleUpdate(args: string[]) {
@@ -623,10 +627,10 @@ function handleSkillList() {
     }
   }
 
-  const globalSkillsDir = path.join(cortexPath, "global", "skills");
+  const globalSkillsDir = path.join(getCortexPath(), "global", "skills");
   collectSkills(globalSkillsDir, "global");
 
-  const projectDirs = getProjectDirs(cortexPath, profile);
+  const projectDirs = getProjectDirs(getCortexPath(), profile);
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
     if (projectName === "global") continue;
@@ -666,7 +670,7 @@ function handleDetectSkills(args: string[]) {
   }
 
   const trackedSkills = new Set<string>();
-  const globalSkillsDir = path.join(cortexPath, "global", "skills");
+  const globalSkillsDir = path.join(getCortexPath(), "global", "skills");
   if (fs.existsSync(globalSkillsDir)) {
     for (const entry of fs.readdirSync(globalSkillsDir)) {
       trackedSkills.add(entry.replace(/\.md$/, ""));
@@ -675,7 +679,7 @@ function handleDetectSkills(args: string[]) {
       }
     }
   }
-  const projectDirs = getProjectDirs(cortexPath, profile);
+  const projectDirs = getProjectDirs(getCortexPath(), profile);
   for (const dir of projectDirs) {
     const projectSkillsDir = path.join(dir, ".claude", "skills");
     if (!fs.existsSync(projectSkillsDir)) continue;
@@ -742,7 +746,7 @@ function handleDetectSkills(args: string[]) {
 }
 
 function handleBacklogView() {
-  const docs = readBacklogs(cortexPath, profile);
+  const docs = readBacklogs(getCortexPath(), profile);
   if (!docs.length) {
     console.log("No backlogs found.");
     return;
@@ -801,9 +805,9 @@ async function handleQuickstart() {
   console.log(`\nInitializing cortex for "${projectName}"...\n`);
 
   await runInit({ yes: true });
-  await runLink(cortexPath, {});
+  await runLink(getCortexPath(), {});
 
-  const projectDir = path.join(cortexPath, projectName);
+  const projectDir = path.join(getCortexPath(), projectName);
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${projectName} Findings\n`);
@@ -861,7 +865,7 @@ async function handleDebugInjection(args: string[]) {
       input: payload,
       env: {
         ...process.env,
-        CORTEX_PATH: cortexPath,
+        CORTEX_PATH: getCortexPath(),
         CORTEX_PROFILE: profile,
       },
       timeout: EXEC_TIMEOUT_MS,
@@ -905,7 +909,7 @@ async function handleInspectIndex(args: string[]) {
     }
   }
 
-  const db = await buildIndex(cortexPath, profile);
+  const db = await buildIndex(getCortexPath(), profile);
   const where: string[] = [];
   const params: Array<string | number> = [];
   if (project) {
