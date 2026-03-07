@@ -285,12 +285,22 @@ function cleanStaleLocks(cortexPath: string): void {
 
 async function main() {
   cleanStaleLocks(cortexPath);
-  let db = await buildIndex(cortexPath, profile);
+  let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
+  let indexReady = false;
+  try {
+    db = await buildIndex(cortexPath, profile);
+    indexReady = true;
+  } catch (error: unknown) {
+    console.error("Failed to build cortex index at startup:", error);
+    process.exit(1);
+  }
   let writeQueue: Promise<void> = Promise.resolve();
   async function rebuildIndex() {
     runCustomHooks(cortexPath, "pre-index");
-    try { db.close(); } catch { /* best effort */ }
+    indexReady = false;
+    try { db?.close(); } catch { /* best effort */ }
     db = await buildIndex(cortexPath, profile);
+    indexReady = true;
     runCustomHooks(cortexPath, "post-index");
   }
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -318,6 +328,17 @@ async function main() {
   const origRegisterTool = server.registerTool.bind(server);
   server.registerTool = function (name: string, config: any, handler: any) {
     const wrapped = async (...args: any[]) => {
+      if (!indexReady || !db) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "Index unavailable - check cortex setup",
+            }, null, 2),
+          }],
+        };
+      }
       try { trackToolCall(cortexPath, name); } catch { /* best-effort */ }
       return handler(...args);
     };
@@ -328,7 +349,10 @@ async function main() {
   const ctx: McpContext = {
     cortexPath,
     profile,
-    db: () => db,
+    db: () => {
+      if (!db) throw new Error("Index unavailable - check cortex setup");
+      return db;
+    },
     rebuildIndex,
     withWriteQueue,
   };
