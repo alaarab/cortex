@@ -60,7 +60,7 @@
 \maketitle
 
 \begin{abstract}
-Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.17.0 ships a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model with worked examples, and proposes a reproducible benchmark protocol. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
+Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.17.0 ships a policy engine (retention, decay, access control), index-level filtering, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
 \end{abstract}
 
 \section{Executive Summary}
@@ -214,7 +214,7 @@ Governance and memory-quality events are appended to \texttt{memory-usage.log} w
 
 Not all memories deserve equal weight. Each learning entry is scored before injection:
 \begin{itemize}
-  \item \textbf{Age decay}: confidence degrades over four configurable windows (\texttt{d30}/\texttt{d60}/\texttt{d90}/\texttt{d120}), defaulting to 1.0, 0.9, 0.75, and 0.5 respectively.
+  \item \textbf{Age decay}: confidence degrades over four configurable windows (\texttt{d30}/\texttt{d60}/\texttt{d90}/\texttt{d120}), defaulting to 1.0, 0.85, 0.65, and 0.45 respectively.
   \item \textbf{Citation validity}: entries with valid file/line/commit citations score higher. Entries without citations receive a 0.8 multiplier.
   \item \textbf{Minimum confidence}: entries below \texttt{minInjectConfidence=0.35} are suppressed.
   \item \textbf{Quality feedback}: impressions, helpful-count, reprompt penalty, and regression penalty are tracked per entry. Entries that cause regressions lose injection priority over time.
@@ -247,9 +247,9 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
 \addplot[blue!70!black, thick, mark=*, mark size=2pt] coordinates {
   (0,  1.0)
   (30, 1.0)
-  (60, 0.9)
-  (90, 0.75)
-  (120,0.5)
+  (60, 0.85)
+  (90, 0.65)
+  (120,0.45)
 };
 \addlegendentry{Cited entry}
 
@@ -257,9 +257,9 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
 \addplot[orange!80!black, thick, dashed, mark=square*, mark size=2pt] coordinates {
   (0,  0.8)
   (30, 0.8)
-  (60, 0.72)
-  (90, 0.60)
-  (120,0.40)
+  (60, 0.68)
+  (90, 0.52)
+  (120,0.36)
 };
 \addlegendentry{Uncited entry ($\times 0.8$)}
 
@@ -279,13 +279,6 @@ Beyond the three lifecycle hooks, Cortex supports user-defined hooks for seven e
 
 Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{FINDINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
 
-\section{Interactive Shell}
-The terminal-native shell (\texttt{cortex shell}) provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. Eight views are navigable by single keystroke: Projects, Backlog, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health diagnostics.
-
-A palette system (\texttt{:command}) supports structured operations: \texttt{:add}, \texttt{:complete}, \texttt{:move}, \texttt{:govern}, \texttt{:consolidate}, \texttt{:find add}, \texttt{:mq approve}, and more. Filtering (\texttt{/keyword}) and pagination (\texttt{:page next}) handle large datasets. State persists across invocations (current view, project, page, filter) so engineers return to where they left off.
-
-The design goal is operational: memory governance should not require starting a coding session. An engineer should be able to run \texttt{cortex shell}, review what accumulated overnight, and clean it up before any agent touches it.
-
 \section{Multi-Agent Coordination}
 Modern coding workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
 
@@ -294,15 +287,6 @@ Cortex handles multi-agent use through three mechanisms. First, \textbf{shared g
 Second, \textbf{skill-driven coordination}: Cortex skills (markdown files in \texttt{global/skills/} or project-local skill directories) define reusable agent behaviors and can be injected per project. This gives teams a way to coordinate conventions and memory workflows across agents without hard-coding them into the runtime.
 
 Third, \textbf{hook isolation}: each agent session gets its own hook execution context. The consolidation notice fires once per session (tracked via session marker files), preventing duplicate notices within a session.
-
-\section{API vs MCP vs Local}
-These concepts are often conflated:
-\begin{itemize}
-  \item \textbf{MCP} is an integration protocol (tooling interface).
-  \item \textbf{Local vs API} is a storage/compute decision (where memory runs).
-\end{itemize}
-
-Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The current MCP surface exposes 47 tools across search, backlog management, finding capture, entity graph, session management, memory quality feedback, hooks, skills, and data portability \cite{cortex-index}.
 
 \section{Comparative Assessment}
 \textit{Evidence window: public documentation/changelogs available as of March 6, 2026.}
@@ -318,10 +302,9 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local syste
 \begin{itemize}
   \item Cortex injection defaults: token budget $\approx$550, snippet lines 6, snippet chars 520 \cite{cortex-cli,cortex-index}.
   \item Governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
-  \item Trust filter defaults: decay curve 1.0/0.9/0.75/0.5 at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier 0.8 \cite{cortex-shared}.
+  \item Trust filter defaults: decay curve 1.0/0.85/0.65/0.45 at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier 0.8 \cite{cortex-shared}.
   \item Access control: 4 roles (admin, maintainer, contributor, viewer), 6 action types \cite{cortex-shared}.
   \item MCP tool surface: 47 tools across search, backlog, finding capture, entity graph, session management, skills, hooks, portability, and quality feedback categories \cite{cortex-index}.
-  \item Interactive shell: 8 views, palette commands, persistent state \cite{cortex-shell}.
   \item Claude Opus 4.6 includes a 1M-token context window (beta) \cite{anthropic-opus46}.
 \end{itemize}
 No comparable public p95 coding-latency benchmark exists across all systems/models; cross-system speed claims must be measured directly.
@@ -364,71 +347,6 @@ For Cortex, the main operational differentiators are:
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and operational tooling require deliberate architectural choices that are harder to retrofit. This is where Cortex is differentiated most clearly.
-
-\section{Speed and Cost Analysis}
-
-\subsection{Latency decomposition}
-End-to-end latency decomposes into five stages:
-\begin{enumerate}
-  \item retrieval/index lookup,
-  \item ranking/trust filtering,
-  \item prompt augmentation,
-  \item model generation,
-  \item post-response persistence and governance.
-\end{enumerate}
-
-\subsection{Operational cost equation}
-\begin{align*}
-\mathrm{Total\ Cost} &= \mathrm{Token\ Cost} + \mathrm{Infra\ Cost}\\
-&\quad + (\mathrm{Engineer\ Hours} \times \mathrm{Loaded\ Rate})
-\end{align*}
-
-\begin{align*}
-\mathrm{Token\ OpEx}_{month} &= N \times ((T_{in}+T_{inj}) \times p_{in}\\
-&\quad + T_{out} \times p_{out})
-\end{align*}
-
-In production teams, the labor term is routinely underestimated. Governance cleanup and workflow drift often dominate once basic retrieval works.
-
-\subsection{Worked cost example}
-
-Consider a team running 500 prompts/month against Claude Opus 4.6 (input \$15/M tokens, output \$75/M tokens as of March 2026). Assume 1,500 tokens average input, 800 tokens average output, and Cortex injecting its default 550-token budget per prompt.
-
-\begin{align*}
-T_{in,total} &= 1{,}500 + 550 = 2{,}050 \text{ tokens/prompt}\\
-\mathrm{Token\ Cost} &= 500 \times (2{,}050 \times \tfrac{15}{10^6} + 800 \times \tfrac{75}{10^6})\\
-&= 500 \times (0.03075 + 0.060)\\
-&= 500 \times 0.09075 \approx \$45.38/\mathrm{mo}
-\end{align*}
-
-Without memory injection (no Cortex overhead):
-\begin{align*}
-\mathrm{Token\ Cost}_{baseline} &= 500 \times (1{,}500 \times \tfrac{15}{10^6} + 800 \times \tfrac{75}{10^6})\\
-&\approx \$41.25/\mathrm{mo}
-\end{align*}
-
-\textbf{Memory overhead: \$4.13/mo} at 500 prompts. At 5,000 prompts/month, the overhead is \$41.25 --- still modest relative to the value of reduced repetition and context re-entry. Two engineer-hours of re-explanation prevented per month (at a loaded rate of \$100/hr) makes the economics straightforward.
-
-The labor and governance terms are harder to model but often larger. A team spending 30 minutes/week on memory triage pays roughly \$200/mo in loaded time --- which argues for governance automation over manual review.
-
-\subsection{Practical measurement panel}
-\begin{table}[h]
-\centering
-\small
-\begin{tabularx}{\columnwidth}{>{\raggedright\arraybackslash}p{0.42\columnwidth} >{\raggedright\arraybackslash}X}
-\toprule
-\textbf{Metric} & \textbf{Interpretation} \\
-\midrule
-Injected tokens / prompt & Memory overhead on context window and cost \\
-Task success rate & End-user outcome quality \\
-Citation validity rate & Grounding and factual confidence \\
-Latency p95 & Tail performance under realistic load \\
-Stale-memory incidents & Quality pressure from aging memory \\
-Manual interventions / 100 tasks & Governance burden and operator effort \\
-\bottomrule
-\end{tabularx}
-\caption{Minimum panel for meaningful speed/cost/quality analysis.}
-\end{table}
 
 \section{FTS5 vs Semantic Search}
 \label{sec:fts5}
@@ -482,54 +400,6 @@ The automatic hook-injection path is more conservative: it stays centered on FTS
 \end{itemize}
 
 This design reflects a deliberate choice: a personal project store is not the same retrieval problem as a large enterprise corpus. FTS5 handles the dominant case efficiently, while the fallback layers extend recall where exact vocabulary matching is weak. The remaining design gap is consistency across entrypoints.
-
-\section{When To Choose What}
-\subsection{Choose Cortex when}
-\begin{itemize}
-  \item memory ownership, auditability, and portability are hard constraints,
-  \item you need explicit token-budget controls and trust-scored retrieval,
-  \item multiple agents share a codebase and need concurrent memory access,
-  \item governance matters: role-based access, approval workflows, audit trails,
-  \item you want direct memory management through a terminal shell.
-\end{itemize}
-
-\subsection{Choose alternatives when}
-\begin{itemize}
-  \item managed API velocity and external connectors matter more than portability (Supermemory),
-  \item deep GitHub-native convenience is primary (Copilot Memory),
-  \item local custom hook pipelines with broader runtime composition are preferred (claude-mem),
-  \item semantic retrieval quality across large, vocabulary-diverse corpora is critical (Supermemory).
-\end{itemize}
-
-\section{Proposed Benchmark Protocol}
-\label{sec:benchmark}
-
-\textbf{Note: this is a proposed evaluation framework. No results have been collected against it yet. It is published here to define what a fair comparison would require, not to imply that Cortex has been measured against these criteria.}
-
-A minimum viable benchmark uses:
-\begin{itemize}
-  \item paired task-level design across systems,
-  \item fixed model/runtime controls,
-  \item at least 40 tasks across multiple repositories,
-  \item bootstrap confidence intervals for primary endpoints.
-\end{itemize}
-
-\subsection{Model matrix (practical default)}
-Run each system with the same task set across:
-\begin{itemize}
-  \item Claude family: Opus 4.6, Sonnet 4.6, Haiku 4.6.
-  \item OpenAI family: GPT-5.2, GPT-5.3, Codex.
-\end{itemize}
-
-Report both \textbf{memory-path latency} (retrieval, ranking, augmentation, persistence) and \textbf{end-to-end latency} (including generation) for each system/model combination.
-
-\subsection{Primary endpoints}
-\begin{itemize}
-  \item task success rate,
-  \item mean injected tokens,
-  \item latency p95,
-  \item citation validity rate.
-\end{itemize}
 
 \section{Limitations}
 \label{sec:limitations}
@@ -586,7 +456,6 @@ Managed alternatives remain strong choices where integration speed and platform 
 \bibitem{cortex-shared} Cortex source: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}
 \bibitem{cortex-hooks} Cortex source: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
 \bibitem{cortex-index} Cortex source: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
-\bibitem{cortex-shell} Cortex source: \texttt{mcp/src/shell.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shell.ts}
 \bibitem{cortex-data} Cortex source: \texttt{mcp/src/data-access.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/data-access.ts}
 \bibitem{cortex-govern} Cortex source: \texttt{mcp/src/cli-govern.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli-govern.ts}
 \bibitem{cortex-extract} Cortex source: \texttt{mcp/src/cli-extract.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli-extract.ts}
