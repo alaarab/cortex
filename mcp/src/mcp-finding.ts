@@ -25,6 +25,7 @@ import { withFileLock } from "./shared-governance.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings, getCurrentSessionId } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
+import { extractFactFromFinding } from "./mcp-extract-facts.js";
 
 
 
@@ -125,6 +126,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath, 1, getCurrentSessionId());
+            extractFactFromFinding(cortexPath, project, taggedFinding);
           }
           // Surface any conflict annotation that was written into the bullet
           const conflictsWithMatch = result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"\s*-->/);

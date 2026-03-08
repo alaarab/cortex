@@ -64,6 +64,7 @@ export interface FindingItem {
   date: string;
   text: string;
   citation?: string;
+  confidence?: number;
 }
 
 export interface QueueItem {
@@ -638,10 +639,15 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
 
     const next = lines[i + 1] || "";
     const citation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/.test(next.trim()) ? next.trim() : undefined;
+    const rawText = line.replace(/^-\s+/, "").trim();
+    const confMatch = rawText.match(/\s*\[confidence\s+([\d.]+)\]\s*$/);
+    const confidence = confMatch ? parseFloat(confMatch[1]) : undefined;
+    const text = confMatch ? rawText.slice(0, rawText.length - confMatch[0].length).trim() : rawText;
     items.push({
       id: `L${index}`,
       date,
-      text: line.replace(/^-\s+/, "").trim(),
+      text,
+      confidence,
       citation,
     });
     if (citation) i += 1;

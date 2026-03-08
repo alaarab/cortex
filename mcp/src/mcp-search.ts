@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
+import { createHash } from "crypto";
 import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { readFindings } from "./data-access.js";
@@ -23,6 +24,7 @@ import {
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, } from "./shared-governance.js";
+import { callLlm } from "./content-dedup.js";
 import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
 import { embedText as sharedEmbedText, getCloudEmbeddingUrl, getEmbeddingModel } from "./shared-ollama.js";
 
@@ -144,9 +146,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           .optional()
           .describe("Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
+        synthesize: z.boolean().optional().describe("When true, generate a short synthesis paragraph from the top results using an LLM. Requires CORTEX_LLM_ENDPOINT, ANTHROPIC_API_KEY, or OPENAI_API_KEY."),
       }),
     },
-    async ({ query, limit, project, type, tag, since }) => {
+    async ({ query, limit, project, type, tag, since, synthesize }) => {
       try {
         if (query.length > 1000) return mcpResponse({ ok: false, error: "Search query exceeds 1000 character limit." });
         const db = ctx.db();
@@ -445,13 +448,48 @@ export function register(server: McpServer, ctx: McpContext): void {
           `### ${r.project}/${r.filename} (${r.type})\n${r.snippet}\n\n\`${r.path}\``
         );
 
+        // Memory synthesis: generate a concise paragraph from top results when requested
+        let synthesis: string | undefined;
+        if (synthesize && results.length > 0) {
+          try {
+            const synthKey = createHash("sha256").update(query + (filterProject ?? "")).digest("hex").slice(0, 16);
+            const synthCachePath = runtimeFile(cortexPath, "synth-cache.json");
+            let synthCache: Record<string, { result: string; ts: number }> = {};
+            if (fs.existsSync(synthCachePath)) {
+              try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch { /* ignore */ }
+            }
+            const cached = synthCache[synthKey];
+            const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+            if (cached && Date.now() - cached.ts < SYNTH_CACHE_TTL_MS) {
+              synthesis = cached.result;
+            } else {
+              const snippets = results.slice(0, 5).map((r, i) => `[${i + 1}] ${r.snippet}`).join("\n");
+              const synthPrompt = `You are a knowledge assistant. Given these search results for the query "${query}", write a concise 2-3 sentence synthesis paragraph summarizing the key insights. Do not add headers. Return only the paragraph.\n\n${snippets}`;
+              synthesis = await callLlm(synthPrompt, undefined, 300);
+              if (synthesis) {
+                synthCache[synthKey] = { result: synthesis, ts: Date.now() };
+                // Trim cache to 100 entries
+                const cacheKeys = Object.keys(synthCache);
+                if (cacheKeys.length > 100) {
+                  const oldest = cacheKeys.sort((a, b) => synthCache[a].ts - synthCache[b].ts).slice(0, cacheKeys.length - 100);
+                  for (const k of oldest) delete synthCache[k];
+                }
+                try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch { /* best-effort */ }
+              }
+            }
+          } catch (err: unknown) {
+            debugLog(`search synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
         const fallbackNote = usedFallback ? " (keyword fallback)" : "";
         const entityNote = relatedEntities.length > 0 ? `\n\nRelated entities: ${relatedEntities.join(", ")}` : "";
+        const synthesisNote = synthesis ? `\n\n## Synthesis\n${synthesis}` : "";
         runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: query, CORTEX_RESULT_COUNT: String(results.length) });
         return mcpResponse({
           ok: true,
-          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:\n\n${formatted.join("\n\n---\n\n")}${entityNote}`,
-          data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined },
+          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:\n\n${formatted.join("\n\n---\n\n")}${entityNote}${synthesisNote}`,
+          data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined, ...(synthesis ? { synthesis } : {}) },
         });
       } catch (err: unknown) {
         return mcpResponse({ ok: false, error: `Search error: ${err instanceof Error ? err.message : String(err)}`, errorCode: "INTERNAL_ERROR" });
@@ -589,7 +627,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const items = result.data;
       if (!items.length) return mcpResponse({ ok: true, message: `No findings found for "${project}".`, data: { project, findings: [], total: 0 } });
       const capped = items.slice(0, limit ?? 50);
-      const lines = capped.map((entry) => `- [${entry.id}] ${entry.date}: ${entry.text}${entry.citation ? ` (${entry.citation})` : ""}`);
+      const lines = capped.map((entry) => `- [${entry.id}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`);
       return mcpResponse({
         ok: true,
         message: `Findings for ${project} (${capped.length}/${items.length}):\n` + lines.join("\n"),
