@@ -55,15 +55,22 @@ async function _drainEmbQueue(): Promise<void> {
   const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
   const entries = [..._embQueue.entries()];
   _embQueue.clear();
+  // Group by cortexPath so we flush each cache once after all its entries are set.
+  const byCortexPath = new Map<string, Array<{ docPath: string; content: string }>>();
   for (const [docPath, { cortexPath, content }] of entries) {
-    try {
-      const vec = await embedText(content);
-      if (vec) {
-        const cache = getEmbeddingCache(cortexPath);
-        cache.set(docPath, getEmbeddingModel(), vec);
-        await cache.flush();
-      }
-    } catch { /* best-effort */ }
+    const bucket = byCortexPath.get(cortexPath) ?? [];
+    bucket.push({ docPath, content });
+    byCortexPath.set(cortexPath, bucket);
+  }
+  for (const [cortexPath, docs] of byCortexPath) {
+    const cache = getEmbeddingCache(cortexPath);
+    for (const { docPath, content } of docs) {
+      try {
+        const vec = await embedText(content);
+        if (vec) cache.set(docPath, getEmbeddingModel(), vec);
+      } catch { /* best-effort */ }
+    }
+    try { await cache.flush(); } catch { /* best-effort */ }
   }
 }
 

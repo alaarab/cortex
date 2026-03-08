@@ -1,21 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-
-// ── Cache eviction helper ────────────────────────────────────────────────────
-
-const CACHE_MAX = 1000;
-const CACHE_EVICT = 100;
-
-function capCache<K, V>(cache: Map<K, V>): void {
-  if (cache.size > CACHE_MAX) {
-    const it = cache.keys();
-    for (let i = 0; i < CACHE_EVICT; i++) {
-      const k = it.next();
-      if (k.done) break;
-      cache.delete(k.value);
-    }
-  }
-}
+import { capCache } from "./cli-hooks-citations.js";
 
 // ── Glob matching and project frontmatter ────────────────────────────────────
 

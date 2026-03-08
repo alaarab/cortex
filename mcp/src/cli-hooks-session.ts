@@ -2,6 +2,7 @@ import {
   debugLog,
   appendAuditLog,
   runtimeFile,
+  qualityMarkers,
   sessionMarker,
   sessionsDir,
   EXEC_TIMEOUT_MS,
@@ -188,13 +189,6 @@ export function trackSessionMetrics(
 
 // ── Background maintenance ───────────────────────────────────────────────────
 
-function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
-  const today = new Date().toISOString().slice(0, 10);
-  return {
-    done: runtimeFile(cortexPathLocal, `quality-${today}`),
-    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
-  };
-}
 
 export function resolveSubprocessArgs(command: string): string[] | null {
   const distEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
