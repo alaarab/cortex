@@ -158,6 +158,20 @@ export class CortexShell {
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
       case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addBacklogItem(this.cortexPath, p, buf))}`); break; }
       case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, p, buf))}`); break; }
+      case "skill-add": {
+        const p = this.ensureProjectSelected();
+        if (!p) return;
+        const name = buf.trim().replace(/\.md$/i, "").replace(/[^a-zA-Z0-9_-]/g, "-");
+        if (!name) { this.setMessage("  No name entered."); return; }
+        const destDir = path.join(this.cortexPath, p, "skills");
+        fs.mkdirSync(destDir, { recursive: true });
+        const dest = path.join(destDir, `${name}.md`);
+        if (fs.existsSync(dest)) { this.setMessage(`  Skill "${name}" already exists.`); return; }
+        const template = `# ${name}\n\nDescribe what this skill does.\n\n## Usage\n\n\`\`\`\nExample usage here\n\`\`\`\n`;
+        fs.writeFileSync(dest, template, "utf8");
+        this.setMessage(`  Created skill "${name}" — edit ${dest}`);
+        break;
+      }
       case "mq-edit": { const p = this.ensureProjectSelected(); if (!p) return; const r = editQueueItem(this.cortexPath, p, this.inputMqId, buf); this.setMessage(`  ${resultMsg(r)}`); this.inputMqId = ""; break; }
     }
   }

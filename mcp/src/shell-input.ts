@@ -714,7 +714,8 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
           }
         });
       } else if (key === "a") {
-        host.setMessage(`  Use "cortex skills add ${project ?? "<project>"} <path>" to add a skill`);
+        if (!project) { host.setMessage("Select a project first."); return; }
+        host.startInput("skill-add", "");
       }
       break;
     case "Hooks":

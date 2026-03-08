@@ -97,6 +97,7 @@ export function renderBottomBar(state: ShellState, navMode: "navigate" | "input"
       command: "cmd",
       add: "add task",
       "learn-add": "add finding",
+      "skill-add": "new skill name",
       "mq-edit": "edit Memory Queue item",
     };
     const label = labels[inputCtx] || inputCtx;
