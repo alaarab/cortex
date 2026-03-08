@@ -334,15 +334,17 @@ async function main() {
       }
     });
     writeQueueDepth++;
-    writeQueue = run.then(
-      () => undefined,
-      (error): void => {
+    writeQueue = run.then(() => undefined).catch((error): void => {
+      try {
         const message = error instanceof Error
           ? error.stack || error.message
           : String(error);
         debugLog(`Write queue error: ${message}`);
-      },
-    );
+      } catch (logError: unknown) {
+        const message = logError instanceof Error ? logError.message : String(logError);
+        console.error(`Failed to log write queue error: ${message}`);
+      }
+    });
     return run;
   }
 
