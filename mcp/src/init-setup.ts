@@ -81,10 +81,14 @@ export function migrateRootFiles(cortexPath: string): string[] {
         try {
           fs.renameSync(src, dest);
           moved.push(`${f} -> .sessions/${f.slice(1)}`);
-        } catch { /* best effort */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles sessionMarker: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
     }
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles sessionScan: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // Move quality markers (.quality-*) to .runtime/
   try {
@@ -97,10 +101,14 @@ export function migrateRootFiles(cortexPath: string): string[] {
         try {
           fs.renameSync(src, dest);
           moved.push(`${f} -> .runtime/${f.slice(1)}`);
-        } catch { /* best effort */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles qualityMarker: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
     }
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles qualityScan: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // Move debug.log to .runtime/debug.log
   const debugLogFile = path.join(cortexPath, "debug.log");
@@ -116,7 +124,9 @@ export function migrateRootFiles(cortexPath: string): string[] {
         fs.renameSync(debugLogFile, dest);
       }
       moved.push("debug.log -> .runtime/debug.log");
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles debugLog: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   // Move .cortex-audit.log to .runtime/audit.log
@@ -133,7 +143,9 @@ export function migrateRootFiles(cortexPath: string): string[] {
         fs.renameSync(auditLog, dest);
       }
       moved.push(".cortex-audit.log -> .runtime/audit.log");
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles auditLog: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   // Move link.sh to scripts/link.sh
@@ -146,7 +158,9 @@ export function migrateRootFiles(cortexPath: string): string[] {
       try {
         fs.renameSync(linkSh, dest);
         moved.push("link.sh -> scripts/link.sh");
-      } catch { /* best effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles linkSh: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
 
@@ -163,11 +177,15 @@ export function migrateRootFiles(cortexPath: string): string[] {
           try {
             fs.renameSync(src, dest);
             moved.push(`${f} -> global/skills/${skillName}.md`);
-          } catch { /* best effort */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles skillFile: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
       }
     }
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles skillScan: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   return moved;
 }
@@ -388,7 +406,9 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
     if (loaded && typeof loaded === "object" && !Array.isArray(loaded)) {
       parsed = loaded as Record<string, unknown>;
     }
-  } catch { /* fall through to raw write */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateMachinesYaml parse: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // If the hostname key already exists (exact match), do not overwrite
   if (Object.prototype.hasOwnProperty.call(parsed, hostname)) return;
@@ -464,7 +484,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
   try {
     const entries = fs.readdirSync(cortexPath, { withFileTypes: true });
     ftsOk = entries.some(d => d.isDirectory() && !d.name.startsWith("."));
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runPostInitVerify projectScan: ${err instanceof Error ? err.message : String(err)}\n`);
     ftsOk = false;
   }
   checks.push({

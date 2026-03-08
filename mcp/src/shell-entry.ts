@@ -5,6 +5,7 @@
 
 import { CortexShell } from "./shell.js";
 import { style, clearScreen, clearToEnd } from "./shell-render.js";
+import { errorMessage } from "./utils.js";
 
 export async function startShell(cortexPath: string, profile: string): Promise<void> {
   const shell = new CortexShell(cortexPath, profile);
@@ -16,7 +17,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
     await repaint();
     rl.on("line", async (line) => {
       try { const keep = await shell.handleInput(line); if (!keep) { shell.close(); rl.close(); return; } }
-      catch (err: unknown) { process.stdout.write(`\n${style.red("Error:")} ${String(err instanceof Error ? err.message : String(err))}\n`); }
+      catch (err: unknown) { process.stdout.write(`\n${style.red("Error:")} ${String(errorMessage(err))}\n`); }
       await repaint();
     });
     rl.on("SIGINT", () => { shell.close(); rl.close(); });
@@ -37,7 +38,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
       const keep = await shell.handleRawKey(key);
       if (!keep) { exiting = true; process.stdin.setRawMode(false); process.stdin.pause(); process.stdin.removeListener("data", onData); shell.close(); process.stdout.write("\x1b[?1049l"); done(); return; }
       await repaint();
-    } catch (err: unknown) { shell.setMessage(`Error: ${err instanceof Error ? err.message : String(err)}`); await repaint(); }
+    } catch (err: unknown) { shell.setMessage(`Error: ${errorMessage(err)}`); await repaint(); }
   };
   let done: () => void;
   const exitPromise = new Promise<void>((resolve) => { done = resolve; });

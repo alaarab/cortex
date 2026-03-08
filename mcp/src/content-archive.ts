@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, tryUnlink, type CortexResult } from "./shared.js";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { withFileLock } from "./shared-governance.js";
 
 // ── Reference tier helpers ───────────────────────────────────────────────────
@@ -233,7 +233,7 @@ export function autoArchiveToReference(
       });
       successfulTopics.add(topic);
     } catch (err) {
-      debugLog(`auto_archive: failed to write reference file for topic "${topic}": ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`auto_archive: failed to write reference file for topic "${topic}": ${errorMessage(err)}`);
     }
   }
 

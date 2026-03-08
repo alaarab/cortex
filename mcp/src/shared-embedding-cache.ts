@@ -3,6 +3,7 @@ import * as crypto from "crypto";
 import * as path from "path";
 import { runtimeFile, debugLog } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
+import { errorMessage } from "./utils.js";
 
 interface EmbeddingEntry {
   model: string;
@@ -32,8 +33,11 @@ export class EmbeddingCache {
         }
       }
       debugLog(`EmbeddingCache loaded: ${this.cache.size} entries`);
-    } catch {
-      // file missing or corrupt — start fresh
+    } catch (err: unknown) {
+      const code = err instanceof Error && "code" in err ? String((err as NodeJS.ErrnoException).code ?? "") : "";
+      if (code !== "ENOENT") {
+        debugLog(`EmbeddingCache load failed for ${filePath}: ${errorMessage(err)}`);
+      }
     }
   }
 

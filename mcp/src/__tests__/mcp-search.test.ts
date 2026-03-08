@@ -164,6 +164,48 @@ describe("mcp-search: type filter", () => {
   });
 });
 
+describe("mcp-search: tag filter", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-tag-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- [bug] Cache warmup fails when Redis is unavailable\n- [decision] Keep SQLite for local mode\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("matches tags case-insensitively", async () => {
+    const res = parseResult(await server.call("search_knowledge", { query: "redis", tag: "Bug" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    for (const result of res.data.results) {
+      expect(result.snippet.toLowerCase()).toContain("[bug]");
+    }
+  });
+});
+
 describe("mcp-search: no cross-project leakage", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;

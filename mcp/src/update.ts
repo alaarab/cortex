@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { errorMessage } from "./utils.js";
 
 function packageRootFromRuntime(): string {
   const current = fileURLToPath(import.meta.url);
@@ -51,7 +52,7 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
       run("npm", ["install"], root);
       return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.` };
     } catch (err: unknown) {
-      const detail = err instanceof Error ? err.message : String(err);
+      const detail = errorMessage(err);
       return { ok: false, message: `Local repo update failed: ${detail}` };
     }
   }
@@ -60,7 +61,7 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
     run("npm", ["install", "-g", "@alaarab/cortex@latest"]);
     return { ok: true, message: "Updated cortex via npm global install (@latest)." };
   } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = errorMessage(err);
     return { ok: false, message: `Global update failed: ${detail}. Try manually: npm install -g @alaarab/cortex@latest` };
   }
 }

@@ -1,3 +1,4 @@
+import { decodeStringRow } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 
@@ -61,7 +62,9 @@ export function extractEntityNames(content: string): string[] {
 function getOrCreateEntity(db: SqlJsDatabase, name: string, type: string): number {
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [name, type, new Date().toISOString().slice(0, 10)]);
-  } catch { /* ignore duplicate */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   const result = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [name, type]);
   if (result?.length && result[0]?.values?.length) {
     return Number(result[0].values[0][0]);
@@ -83,7 +86,9 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
         PRIMARY KEY (entity, project, doc_key)
       )`
     );
-  } catch { /* ignore if already exists */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] ensureGlobalEntitiesTable: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 /**
@@ -98,7 +103,10 @@ export function parseUserDefinedEntities(cortexPath: string, project: string): s
     const match = content.match(/<!--\s*cortex:entities:\s*(.+?)\s*-->/);
     if (!match) return [];
     return match[1].split(",").map(s => s.trim()).filter(s => s.length > 0);
-  } catch { return []; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+    return [];
+  }
 }
 
 /**
@@ -168,7 +176,9 @@ export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourc
         "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
         [docEntityId, entityId, "mentions", sourceDoc]
       );
-    } catch { /* ignore */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityLinksInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
 
     // Q20: Write to global_entities for cross-project queries
     if (project) {
@@ -177,7 +187,9 @@ export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourc
           "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
           [name, project, sourceDoc]
         );
-      } catch { /* ignore */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] globalEntitiesInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
 }
@@ -201,10 +213,12 @@ export function queryEntityLinks(db: SqlJsDatabase, name: string): { related: st
     );
     if (links?.length && links[0]?.values?.length) {
       for (const row of links[0].values) {
-        related.push(String(row[0]));
+        related.push(decodeStringRow(row, 1, "queryEntityLinks")[0]);
       }
     }
-  } catch { /* ignore query errors */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] queryEntityLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   return { related };
 }
 
@@ -231,14 +245,17 @@ export function queryCrossProjectEntities(
     const rows = db.exec(sql, params);
     if (rows?.length && rows[0]?.values?.length) {
       for (const row of rows[0].values) {
+        const [entity, project, docKey] = decodeStringRow(row, 3, "queryCrossProjectEntities");
         results.push({
-          entity: String(row[0]),
-          project: String(row[1]),
-          docKey: String(row[2]),
+          entity,
+          project,
+          docKey,
         });
       }
     }
-  } catch { /* ignore query errors */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] queryCrossProjectEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   return results;
 }
 
@@ -259,5 +276,8 @@ export function getEntityBoostDocs(db: SqlJsDatabase, query: string, _cortexPath
       if (typeof doc === "string") boostDocs.add(doc);
     }
     return boostDocs;
-  } catch { return new Set(); }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getEntityBoostDocs: ${err instanceof Error ? err.message : String(err)}\n`);
+    return new Set();
+  }
 }

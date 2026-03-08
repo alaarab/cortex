@@ -39,6 +39,7 @@ import {
   type PaletteHost,
   type NavigationHost,
 } from "./shell-input.js";
+import { errorMessage } from "./utils.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ export class CortexShell {
     const entry = this.undoStack.pop();
     if (!entry) return "Nothing to undo.";
     try { fs.writeFileSync(entry.file, entry.content); return `Undid: ${entry.label}`; }
-    catch (err: unknown) { return `Undo failed: ${err instanceof Error ? err.message : String(err)}`; }
+    catch (err: unknown) { return `Undo failed: ${errorMessage(err)}`; }
   }
 
   ensureProjectSelected(): string | null {

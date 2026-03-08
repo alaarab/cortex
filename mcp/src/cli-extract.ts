@@ -14,7 +14,7 @@ import {
 import { detectProject } from "./shared-index.js";
 import { addFindingToFile } from "./shared-content.js";
 import { commandExists } from "./hooks.js";
-import { runGit as runGitShared, isFeatureEnabled, clampInt } from "./utils.js";
+import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage } from "./utils.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -131,7 +131,7 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
       return JSON.parse(fs.readFileSync(cacheFile, "utf8")) as Candidate[];
     }
   } catch (err: unknown) {
-    debugLog(`mineGithubCandidates: cache read failed for ${cacheFile}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`mineGithubCandidates: cache read failed for ${cacheFile}: ${errorMessage(err)}`);
   }
 
   const candidates: Candidate[] = [];
@@ -210,7 +210,7 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
   try {
     fs.writeFileSync(cacheFile, JSON.stringify(candidates));
   } catch (err: unknown) {
-    debugLog(`mineGithubCandidates: cache write failed for ${cacheFile}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`mineGithubCandidates: cache write failed for ${cacheFile}: ${errorMessage(err)}`);
   }
 
   return candidates;

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { SqlJsDatabase } from "./embedding.js";
+import { makeTempDir } from "./test-helpers.js";
 import {
   cosineSimilarity,
   embeddingOps,
@@ -8,6 +9,9 @@ import {
   decodeEmbedding,
   getCachedEmbedding,
   getCachedEmbeddings,
+  openCacheDb,
+  resetSqlJsStateForTests,
+  setSqlJsLoaderForTests,
 } from "./embedding.js";
 
 function makeMockDb(): SqlJsDatabase {
@@ -85,10 +89,12 @@ describe("cosineSimilarity", () => {
 describe("embedding cache helpers", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetSqlJsStateForTests();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    resetSqlJsStateForTests();
   });
 
   it("getCachedEmbeddings returns cached result on second call", async () => {
@@ -215,5 +221,29 @@ describe("embedding cache helpers", () => {
     expect(result).toEqual([0.5]);
     expect(insertSpy).not.toHaveBeenCalled();
     expect(apiSpy).not.toHaveBeenCalled();
+  });
+
+  it("retries sql.js init after a transient startup failure", async () => {
+    const temp = makeTempDir("embedding-sql-init-");
+    const db = makeMockDb();
+    let initCalls = 0;
+
+    setSqlJsLoaderForTests(async () => {
+      initCalls++;
+      if (initCalls === 1) throw new Error("transient init failure");
+      return {
+        Database: function MockDatabase() {
+          return db;
+        } as unknown as new (data?: ArrayLike<number>) => SqlJsDatabase,
+      };
+    });
+
+    try {
+      await expect(openCacheDb(temp.path)).rejects.toThrow("transient init failure");
+      await expect(openCacheDb(temp.path)).resolves.toBe(db);
+      expect(initCalls).toBe(2);
+    } finally {
+      temp.cleanup();
+    }
   });
 });

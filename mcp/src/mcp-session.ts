@@ -52,7 +52,10 @@ function sessionFileForId(cortexPath: string, sessionId: string): string {
 
 function readSessionStateFile(file: string): SessionState | null {
   if (!fs.existsSync(file)) return null;
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readSessionStateFile: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
+  }
 }
 
 function writeSessionStateFile(file: string, state: SessionState): void {
@@ -68,7 +71,10 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch { return null; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSession readdir: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
+  }
 
   let bestFile: string | null = null;
   let bestMtime = 0;
@@ -85,7 +91,9 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
         bestMtime = stat.mtimeMs;
         bestFile = fullPath;
       }
-    } catch { /* skip unreadable files */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSession statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   if (!bestFile) return null;
@@ -104,7 +112,9 @@ function writeLastSummary(cortexPath: string, summary: string, sessionId: string
   try {
     const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
     fs.writeFileSync(lastSummaryPath(cortexPath), JSON.stringify(data, null, 2));
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] writeLastSummary: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 /** Find the most recent session with a summary (including ended sessions). */
@@ -121,14 +131,19 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
       const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string; project?: string };
       if (data.summary) return { summary: data.summary, project: data.project };
     }
-  } catch { /* fall through to O(n) scan */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject fastPath: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // Slow path: scan all session files
   const dir = sessionsDir(cortexPath);
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch { return { summary: null }; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject readdir: ${err instanceof Error ? err.message : String(err)}\n`);
+    return { summary: null };
+  }
 
   let bestSummary: string | null = null;
   let bestProject: string | undefined;
@@ -146,7 +161,9 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
         bestSummary = state.summary;
         bestProject = state.project;
       }
-    } catch { /* skip unreadable files */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   return { summary: bestSummary, project: bestProject };
@@ -173,7 +190,10 @@ function cleanupStaleSessions(cortexPath: string): number {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch { return 0; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupStaleSessions readdir: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 0;
+  }
 
   const now = Date.now();
   let cleaned = 0;
@@ -191,7 +211,9 @@ function cleanupStaleSessions(cortexPath: string): number {
         tryUnlink(fullPath);
         cleaned++;
       }
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupStaleSessions statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
   return cleaned;
 }
@@ -217,8 +239,11 @@ function migrateLegacySession(cortexPath: string): SessionState | null {
     }
     tryUnlink(legacyFile);
     return state;
-  } catch {
-    try { fs.unlinkSync(legacyFile); } catch { /* ignore */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateLegacySession: ${err instanceof Error ? err.message : String(err)}\n`);
+    try { fs.unlinkSync(legacyFile); } catch (e2: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateLegacySession unlink: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+    }
     return null;
   }
 }
@@ -238,7 +263,9 @@ export function incrementSessionFindings(cortexPath: string, count = 1, sessionI
       if (!current) return;
       writeSessionStateFile(file, { ...current, findingsAdded: current.findingsAdded + count });
     });
-  } catch { /* non-fatal */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] incrementSessionFindings: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -299,7 +326,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (bullets.length > 0) {
             parts.push(`## Recent findings (${activeProject})\n${bullets.join("\n")}`);
           }
-        } catch { /* file disappeared between check and read */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start findingsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
       const backlogPath = path.join(cortexPath, activeProject, "backlog.md");
       try {
@@ -311,14 +340,18 @@ export function register(server: McpServer, ctx: McpContext): void {
             parts.push(`## Active backlog (${activeProject})\n${queueItems.join("\n")}`);
           }
         }
-      } catch { /* backlog file absent or unreadable */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start backlogRead: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
       // Surface extracted preferences/facts for this project
       try {
         const facts = readExtractedFacts(cortexPath, activeProject).slice(-10);
         if (facts.length > 0) {
           parts.push(`## Preferences (${activeProject})\n${facts.map(f => `- ${f.fact}`).join("\n")}`);
         }
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start factsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
 
     const message = parts.length > 0

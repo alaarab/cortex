@@ -27,6 +27,7 @@ import {
   EXEC_TIMEOUT_QUICK_MS,
   isRecord,
 } from "./shared.js";
+import { errorMessage } from "./utils.js";
 import { linkSkillsDir, writeSkillMd } from "./link-skills.js";
 import {
   writeContextDefault,
@@ -124,7 +125,10 @@ const DEFAULT_SEARCH_PATHS = [
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
 export function safeUsername(): string {
-  try { return os.userInfo().username; } catch { return "unknown"; }
+  try { return os.userInfo().username; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] safeUsername: ${errorMessage(err)}\n`);
+    return "unknown";
+  }
 }
 
 export function getMachineName(): string {
@@ -180,7 +184,7 @@ export function findProjectDir(name: string): string | null {
     try {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
     } catch (err: unknown) {
-      debugLog(`findProjectDir: failed to check ${candidate}: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`findProjectDir: failed to check ${candidate}: ${errorMessage(err)}`);
     }
   }
   return null;
@@ -197,7 +201,7 @@ function currentPackageVersion(): string | null {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
     return pkg.version || null;
   } catch (err: unknown) {
-    debugLog(`currentPackageVersion: failed to read package.json: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`currentPackageVersion: failed to read package.json: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -208,7 +212,8 @@ function readProjectConfig(cortexPath: string, project: string): ProjectConfig {
   try {
     const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readProjectConfig: ${errorMessage(err)}\n`);
     return {};
   }
 }
@@ -225,7 +230,7 @@ function maybeOfferStarterTemplateUpdate(cortexPath: string) {
       log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
     }
   } catch (err: unknown) {
-    debugLog(`checkStarterVersionUpdate: failed to read preferences: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`checkStarterVersionUpdate: failed to read preferences: ${errorMessage(err)}`);
   }
 }
 
@@ -268,7 +273,9 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
     execFileSync("git", ["commit", "-m", `Register machine: ${machine} (${profile})`, "--allow-empty"], {
       cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS,
     });
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] registerMachine gitCommit: ${errorMessage(err)}\n`);
+  }
 
   log(`\nRegistered ${machine} with profile ${profile}.`);
   return { machine, profile };
@@ -279,7 +286,10 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 function setupSparseCheckout(cortexPath: string, projects: string[]) {
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
-  } catch { return; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
+    return;
+  }
 
   const alwaysInclude = ["profiles", "machines.yaml", "global", "scripts", "link.sh", "README.md", ".gitignore"];
   const paths = [...alwaysInclude, ...projects];
@@ -287,7 +297,7 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
     execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
     execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
   } catch (err: unknown) {
-    debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${errorMessage(err)}`);
   }
 }
 
@@ -351,7 +361,9 @@ function linkGlobal(cortexPath: string, tools: Set<string>) {
         const copilotInstrDir = path.join(os.homedir(), ".github");
         fs.mkdirSync(copilotInstrDir, { recursive: true });
         symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), cortexPath);
-      } catch { /* best effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
+      }
     }
   }
 }
@@ -367,14 +379,18 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
       symlinkFile(src, path.join(target, f), cortexPath);
       if (f === "CLAUDE.md") {
         if (tools.has("codex")) {
-          try { symlinkFile(src, path.join(target, "AGENTS.md"), cortexPath); } catch { /* best effort */ }
+          try { symlinkFile(src, path.join(target, "AGENTS.md"), cortexPath); } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject agentsMd: ${errorMessage(err)}\n`);
+          }
         }
         if (tools.has("copilot")) {
           try {
             const copilotDir = path.join(target, ".github");
             fs.mkdirSync(copilotDir, { recursive: true });
             symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), cortexPath);
-          } catch { /* best effort */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject copilotInstructions: ${errorMessage(err)}\n`);
+          }
         }
       }
     }
@@ -391,7 +407,9 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   // Token annotation on CLAUDE.md
   const claudeFile = path.join(cortexPath, project, "CLAUDE.md");
   if (fs.existsSync(claudeFile)) {
-    try { addTokenAnnotation(claudeFile); } catch { /* best effort */ }
+    try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
+    }
   }
 
   // Project-level skills
@@ -433,7 +451,7 @@ function linkProjectMcpServers(project: string, servers: Record<string, McpServe
       }
     });
   } catch (err: unknown) {
-    debugLog(`linkProjectMcpServers: failed for ${project}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`linkProjectMcpServers: failed for ${project}: ${errorMessage(err)}`);
   }
 }
 
@@ -457,7 +475,7 @@ function pruneStaleProjectMcpServers(activeProjects: string[]): void {
       }
     });
   } catch (err: unknown) {
-    debugLog(`pruneStaleProjectMcpServers: failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`pruneStaleProjectMcpServers: failed: ${errorMessage(err)}`);
   }
 }
 
@@ -528,23 +546,33 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   log(`  Hooks mode: ${hooksEnabled ? "ON (active)" : "OFF (disabled)"}`);
   maybeOfferStarterTemplateUpdate(cortexPath);
   let mcpStatus = "no_settings";
-  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch { /* best effort */ }
+  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureClaude: ${errorMessage(err)}\n`);
+  }
   logMcpTargetStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
-  try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch { /* best effort */ }
+  try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureVSCode: ${errorMessage(err)}\n`);
+  }
   logMcpTargetStatus("VS Code", vsStatus);
 
   let cursorStatus = "no_cursor";
-  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled }) ?? "no_cursor"; } catch { /* best effort */ }
+  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled }) ?? "no_cursor"; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCursorMcp: ${errorMessage(err)}\n`);
+  }
   logMcpTargetStatus("Cursor", cursorStatus);
 
   let copilotStatus = "no_copilot";
-  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled }) ?? "no_copilot"; } catch { /* best effort */ }
+  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled }) ?? "no_copilot"; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCopilotMcp: ${errorMessage(err)}\n`);
+  }
   logMcpTargetStatus("Copilot CLI", copilotStatus);
 
   let codexStatus = "no_codex";
-  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled }) ?? "no_codex"; } catch { /* best effort */ }
+  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled }) ?? "no_codex"; } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCodexMcp: ${errorMessage(err)}\n`);
+  }
   logMcpTargetStatus("Codex", codexStatus);
   const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
     (s) => s === "installed" || s === "already_configured"
@@ -568,7 +596,9 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   try {
     writeSkillMd(cortexPath);
     log(`  cortex.SKILL.md written (agentskills-compatible tools)`);
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link writeSkillMd: ${errorMessage(err)}\n`);
+  }
   log("");
 
   // Step 7: Context file

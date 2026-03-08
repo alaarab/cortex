@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
+import { errorMessage } from "./utils.js";
 import { countActiveFindings } from "./content-archive.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
@@ -449,7 +450,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
   } catch (err: unknown) {
-    debugLog(`autoMergeConflicts: failed to list conflicted files: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`autoMergeConflicts: failed to list conflicted files: ${errorMessage(err)}`);
     return false;
   }
 
@@ -483,7 +484,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: unknown) {
-      debugLog(`Failed to auto-merge ${relFile}: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`Failed to auto-merge ${relFile}: ${errorMessage(err)}`);
       allResolved = false;
     }
   }

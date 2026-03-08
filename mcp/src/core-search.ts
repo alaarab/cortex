@@ -1,6 +1,6 @@
 import { STOP_WORDS } from "./utils.js";
-import { queryRows, type DbRow } from "./shared-index.js";
-import type { SqlJsDatabase } from "./shared-index.js";
+import { queryDocRows } from "./shared-index.js";
+import type { DocRow, SqlJsDatabase } from "./shared-index.js";
 
 /**
  * Keyword overlap fallback for when FTS5 returns no results.
@@ -13,7 +13,7 @@ export function keywordFallbackSearch(
   db: SqlJsDatabase,
   query: string,
   opts: { project?: string; type?: string; limit: number }
-): DbRow[] | null {
+): DocRow[] | null {
   let fallbackSql = "SELECT project, filename, type, content, path FROM docs";
   const fallbackParams: (string | number)[] = [];
   const clauses: string[] = [];
@@ -27,7 +27,7 @@ export function keywordFallbackSearch(
   }
   if (clauses.length) fallbackSql += " WHERE " + clauses.join(" AND ");
 
-  const allRows = queryRows(db, fallbackSql, fallbackParams);
+  const allRows = queryDocRows(db, fallbackSql, fallbackParams);
   if (!allRows) return null;
 
   const terms = query
@@ -39,8 +39,8 @@ export function keywordFallbackSearch(
   if (terms.length === 0) return null;
 
   const scored = allRows
-    .map((row: DbRow) => {
-      const content = (row[3] as string).toLowerCase();
+    .map((row) => {
+      const content = row.content.toLowerCase();
       let score = 0;
       for (const term of terms) {
         if (content.includes(term)) score++;

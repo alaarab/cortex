@@ -11,6 +11,7 @@ import {
   detectProject,
   extractSnippet,
   rowToDoc,
+  rowToDocWithRowid,
   queryDocBySourceKey,
   queryDocRows,
   porterStem,
@@ -406,6 +407,26 @@ describe("rowToDoc", () => {
       type: "findings",
       content: "some content",
       path: "/path/to/file",
+    });
+  });
+
+  it("throws on short rows instead of coercing missing cells", () => {
+    expect(() => rowToDoc(["myproject", "FINDINGS.md"])).toThrow(/expected at least 5 columns/i);
+  });
+});
+
+describe("rowToDocWithRowid", () => {
+  it("maps a rowid-prefixed row to a typed object", () => {
+    const decoded = rowToDocWithRowid([42, "myproject", "FINDINGS.md", "findings", "some content", "/path/to/file"]);
+    expect(decoded).toEqual({
+      rowid: 42,
+      doc: {
+        project: "myproject",
+        filename: "FINDINGS.md",
+        type: "findings",
+        content: "some content",
+        path: "/path/to/file",
+      },
     });
   });
 });

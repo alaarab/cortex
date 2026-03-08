@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
+import { spawnSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
+import { errorMessage } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
 
 export interface FindingCitation {
@@ -25,33 +26,45 @@ export interface TrustFilterOptions {
   decay?: Partial<RetentionPolicy["decay"]>;
 }
 
+function runGit(args: string[], cwd: string, timeout: number): string {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    const suffix = stderr ? `: ${stderr}` : result.signal ? ` (signal: ${result.signal})` : "";
+    throw new Error(`git ${args.join(" ")} exited with status ${result.status ?? "unknown"}${suffix}`);
+  }
+  return result.stdout ?? "";
+}
+
 export function getHeadCommit(cwd: string): string | undefined {
   try {
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
+    const commit = runGit(["rev-parse", "HEAD"], cwd, EXEC_TIMEOUT_QUICK_MS).trim();
     return commit || undefined;
   } catch (err: unknown) {
-    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${errorMessage(err)}`);
     return undefined;
   }
 }
 
 export function getRepoRoot(cwd: string): string | undefined {
   try {
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
+    const root = runGit(["rev-parse", "--show-toplevel"], cwd, EXEC_TIMEOUT_QUICK_MS).trim();
     return root || undefined;
   } catch (err: unknown) {
-    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${errorMessage(err)}`);
     return undefined;
   }
 }
 
 export function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
   try {
-    const raw = execFileSync(
-      "git",
-      ["show", "--pretty=format:", "--unified=0", "--no-color", commit],
-      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }
-    );
+    const raw = runGit(["show", "--pretty=format:", "--unified=0", "--no-color", commit], repoPath, EXEC_TIMEOUT_MS);
     let currentFile = "";
     for (const line of raw.split("\n")) {
       if (line.startsWith("+++ b/")) {
@@ -64,7 +77,7 @@ export function inferCitationLocation(repoPath: string, commit: string): { file?
       }
     }
   } catch (err: unknown) {
-    debugLog(`citationLocationFromCommit: git show failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`citationLocationFromCommit: git show failed: ${errorMessage(err)}`);
   }
   return {};
 }
@@ -98,7 +111,7 @@ export function parseCitationComment(line: string): FindingCitation | null {
       supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
     };
   } catch (err: unknown) {
-    debugLog(`parseCitationComment: malformed citation JSON: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -131,15 +144,11 @@ function commitExists(repoPath: string, commit: string): boolean {
   const cached = commitExistsCache.get(key);
   if (cached !== undefined) return cached;
   try {
-    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
-      cwd: repoPath,
-      stdio: ["ignore", "ignore", "ignore"],
-      timeout: EXEC_TIMEOUT_QUICK_MS,
-    });
+    runGit(["cat-file", "-e", `${commit}^{commit}`], repoPath, EXEC_TIMEOUT_QUICK_MS);
     commitExistsCache.set(key, true);
     return true;
   } catch (err: unknown) {
-    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${errorMessage(err)}`);
     commitExistsCache.set(key, false);
     return false;
   }
@@ -150,16 +159,12 @@ function cachedBlame(repoPath: string, relFile: string, line: number): string | 
   const cached = blameCache.get(key);
   if (cached !== undefined) return cached;
   try {
-    const out = execFileSync(
-      "git",
-      ["blame", "-L", `${line},${line}`, "--porcelain", relFile],
-      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }
-    ).trim();
+    const out = runGit(["blame", "-L", `${line},${line}`, "--porcelain", relFile], repoPath, 10_000).trim();
     const first = out.split("\n")[0] || "";
     blameCache.set(key, first);
     return first;
   } catch (err: unknown) {
-    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${errorMessage(err)}`);
     blameCache.set(key, false);
     return false;
   }

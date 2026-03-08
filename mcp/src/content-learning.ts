@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { type FindingCitation, buildCitationComment, getHeadCommit, getRepoRoot, inferCitationLocation } from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
@@ -243,7 +243,7 @@ export function migrateLegacyFindings(
       }
       migrated++;
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : String(err));
+      errors.push(errorMessage(err));
       continue;
     }
 

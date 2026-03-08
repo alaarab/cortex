@@ -22,19 +22,23 @@ import {
   addFindingToFile,
   validateBacklogFormat,
 } from "./shared-content.js";
-import { isValidProjectName, queueFilePath, safeProjectPath } from "./utils.js";
+import { isValidProjectName, queueFilePath, safeProjectPath, errorMessage } from "./utils.js";
 
-function withFileLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
+function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
   try {
     return withFileLockRaw(filePath, fn);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (msg.includes("could not acquire lock")) {
       return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
     }
     throw err;
   }
 }
+
+const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
+const QUEUE_HEADINGS = new Set(["queue", "queued", "backlog", "todo", "upcoming", "next"]);
+const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
 
 export type BacklogSection = "Active" | "Queue" | "Done";
 
@@ -124,12 +128,12 @@ function stripBulletPrefix(line: string): { checked: boolean; body: string } {
   return { checked, body };
 }
 
-function parseContext(lines: string[], idx: number): { context?: string; consume: number } {
+function parseContext(lines: string[], idx: number): { context?: string; linesToSkip: number } {
   const next = lines[idx + 1] || "";
-  if (!next.trim().startsWith("Context:")) return { consume: 0 };
+  if (!next.trim().startsWith("Context:")) return { linesToSkip: 0 };
   return {
     context: next.trim().slice("Context:".length).trim(),
-    consume: 1,
+    linesToSkip: 1,
   };
 }
 
@@ -190,11 +194,11 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
     const heading = line.trim().match(/^##\s+(.+?)[\s]*$/);
     if (heading) {
       const token = heading[1].replace(/\s+/g, " ").trim().toLowerCase();
-      if (["active", "in progress", "in-progress", "current", "wip"].includes(token)) {
+      if (ACTIVE_HEADINGS.has(token)) {
         section = "Active";
-      } else if (["queue", "queued", "backlog", "todo", "upcoming", "next"].includes(token)) {
+      } else if (QUEUE_HEADINGS.has(token)) {
         section = "Queue";
-      } else if (["done", "completed", "finished", "archived"].includes(token)) {
+      } else if (DONE_HEADINGS.has(token)) {
         section = "Done";
       }
       continue;
@@ -219,7 +223,7 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
       context: context.context,
       pinned: pinned || undefined,
     });
-    i += context.consume;
+    i += context.linesToSkip;
   }
 
   return {
@@ -349,7 +353,7 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
   const preCheck = ensureProject(cortexPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -372,7 +376,7 @@ export function addBacklogItems(cortexPath: string, project: string, items: stri
   const preCheck = ensureProject(cortexPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -399,7 +403,7 @@ export function completeBacklogItems(cortexPath: string, project: string, matche
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -423,7 +427,7 @@ export function completeBacklogItem(cortexPath: string, project: string, match: 
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -449,7 +453,7 @@ export function updateBacklogItem(
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -497,7 +501,7 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -522,7 +526,7 @@ export function unpinBacklogItem(cortexPath: string, project: string, match: str
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -543,7 +547,7 @@ export function workNextBacklogItem(cortexPath: string, project: string): Cortex
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) return cortexErr(`No queued items in "${project}". Add items with :add or the add_backlog_item tool.`, CortexError.NOT_FOUND);
@@ -569,7 +573,7 @@ export function tidyBacklogDone(cortexPath: string, project: string, keep: numbe
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  return withFileLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
@@ -675,7 +679,7 @@ export function removeFinding(cortexPath: string, project: string, match: string
   const filePath = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
   if (!fs.existsSync(filePath)) return cortexErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, CortexError.FILE_NOT_FOUND);
 
-  return withFileLock(filePath, () => {
+  return withSafeLock(filePath, () => {
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
     const needle = match.trim().toLowerCase();
     const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
@@ -826,7 +830,7 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
   // addFindingToFile acquires its own lock on FINDINGS.md; to avoid
   // inconsistent lock ordering (queue lock -> findings lock vs findings lock -> queue lock),
   // we release the queue lock before writing to FINDINGS.md, then re-acquire it to remove the item.
-  const lookupResult = withFileLock<{ item: QueueItem; all: QueueItem[]; index: number }>(qPath, () => {
+  const lookupResult = withSafeLock<{ item: QueueItem; all: QueueItem[]; index: number }>(qPath, () => {
     const found = findQueueByMatch(cortexPath, project, match);
     if (!found.ok) return forwardErr(found);
 
@@ -847,7 +851,7 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
   if (!add.ok) return forwardErr(add);
 
   // Step 3: Re-acquire queue lock to remove the approved item.
-  return withFileLock(qPath, () => {
+  return withSafeLock(qPath, () => {
     // Re-read queue in case it changed while findings lock was held.
     const refreshed = readReviewQueue(cortexPath, project);
     if (!refreshed.ok) return forwardErr(refreshed);
@@ -866,7 +870,7 @@ export function rejectQueueItem(cortexPath: string, project: string, match: stri
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
   const qPath = queuePath(cortexPath, project);
-  return withFileLock(qPath, () => {
+  return withSafeLock(qPath, () => {
     const found = findQueueByMatch(cortexPath, project, match);
     if (!found.ok) return forwardErr(found);
 
@@ -887,7 +891,7 @@ export function editQueueItem(cortexPath: string, project: string, match: string
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
   const qPath = queuePath(cortexPath, project);
-  return withFileLock(qPath, () => {
+  return withSafeLock(qPath, () => {
     const found = findQueueByMatch(cortexPath, project, match);
     if (!found.ok) return forwardErr(found);
 
@@ -943,7 +947,7 @@ export function setMachineProfile(cortexPath: string, machine: string, profile: 
   }
 
   const machinesPath = path.join(cortexPath, "machines.yaml");
-  return withFileLock(machinesPath, () => {
+  return withSafeLock(machinesPath, () => {
     const current = listMachines(cortexPath);
     const data = current.ok ? current.data : {};
     data[machine] = profile;
@@ -996,7 +1000,7 @@ export function addProjectToProfile(cortexPath: string, profile: string, project
   const current = profiles.data.find((p) => p.name === profile);
   if (!current) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
 
-  return withFileLock(current.file, () => {
+  return withSafeLock(current.file, () => {
     const refreshed = listProfiles(cortexPath);
     if (!refreshed.ok) return forwardErr(refreshed);
     const latest = refreshed.data.find((p) => p.name === profile);
@@ -1014,7 +1018,7 @@ export function removeProjectFromProfile(cortexPath: string, profile: string, pr
   const current = profiles.data.find((p) => p.name === profile);
   if (!current) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
 
-  return withFileLock(current.file, () => {
+  return withSafeLock(current.file, () => {
     const refreshed = listProfiles(cortexPath);
     if (!refreshed.ok) return forwardErr(refreshed);
     const latest = refreshed.data.find((p) => p.name === profile);
@@ -1092,7 +1096,7 @@ export function loadShellState(cortexPath: string): ShellState {
 export function saveShellState(cortexPath: string, state: ShellState): void {
   const file = shellStatePath(cortexPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  withFileLock(file, () => {
+  withSafeLock(file, () => {
     const out: ShellState = {
       version: SHELL_STATE_VERSION,
       view: state.view,
@@ -1108,7 +1112,7 @@ export function saveShellState(cortexPath: string, state: ShellState): void {
 
 export function resetShellState(cortexPath: string): CortexResult<string> {
   const file = shellStatePath(cortexPath);
-  return withFileLock(file, () => {
+  return withSafeLock(file, () => {
     if (fs.existsSync(file)) fs.unlinkSync(file);
     return cortexOk("Shell state reset.");
   });
