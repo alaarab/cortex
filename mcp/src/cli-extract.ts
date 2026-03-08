@@ -2,7 +2,7 @@ import {
   debugLog,
   appendAuditLog,
   EXEC_TIMEOUT_MS,
-  ensureCortexPath,
+  getCortexPath,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -21,11 +21,6 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 const profile = process.env.CORTEX_PROFILE || "";
 
 function runGit(cwd: string, args: string[]): string | null {

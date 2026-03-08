@@ -9,7 +9,7 @@ import {
   debugLog,
   sessionMarker,
   sessionsDir,
-  ensureCortexPath,
+  getCortexPath,
 } from "./shared.js";
 import {
   getRetentionPolicy,
@@ -100,11 +100,6 @@ import {
 } from "./cli-hooks-session.js";
 import { approximateTokens } from "./cli-hooks-retrieval.js";
 
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 const profile = process.env.CORTEX_PROFILE || "";
 
 async function readStdin(): Promise<string> {

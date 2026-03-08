@@ -6,7 +6,8 @@ import {
   sessionMarker,
   sessionsDir,
   EXEC_TIMEOUT_MS,
-  ensureCortexPath,
+  getCortexPath,
+  KNOWN_OBSERVATION_TAGS,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -20,7 +21,6 @@ import {
 } from "./shared-index.js";
 import {
   addFindingToFile,
-  KNOWN_OBSERVATION_TAGS,
 } from "./shared-content.js";
 import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
 import * as fs from "fs";
@@ -77,11 +77,6 @@ function isSafeTranscriptPath(p: string): boolean {
   return safePrefixes.some(prefix => normalized.startsWith(prefix + path.sep) || normalized === prefix);
 }
 
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Git helpers ──────────────────────────────────────────────────────────────
