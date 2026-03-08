@@ -358,7 +358,9 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         ? mergeFindings(versions.ours, versions.theirs)
         : mergeBacklog(versions.ours, versions.theirs);
 
-      fs.writeFileSync(fullPath, merged);
+      const tmpMergePath = fullPath + ".tmp";
+      fs.writeFileSync(tmpMergePath, merged);
+      fs.renameSync(tmpMergePath, fullPath);
       execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: any) {
