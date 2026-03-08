@@ -197,6 +197,47 @@ export function resolveSubprocessArgs(command: string): string[] | null {
   return null;
 }
 
+export function scheduleBackgroundSync(cortexPathLocal: string): boolean {
+  const lockPath = runtimeFile(cortexPathLocal, "background-sync.lock");
+  const logPath = runtimeFile(cortexPathLocal, "background-sync.log");
+  const spawnArgs = resolveSubprocessArgs("background-sync");
+  if (!spawnArgs) return false;
+
+  try {
+    if (fs.existsSync(lockPath)) {
+      const ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+      if (ageMs <= 10 * 60 * 1000) return false;
+      fs.unlinkSync(lockPath);
+    }
+  } catch (err: unknown) {
+    debugLog(`scheduleBackgroundSync: lock check failed: ${errorMessage(err)}`);
+    return false;
+  }
+
+  try {
+    fs.writeFileSync(lockPath, JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid }) + "\n", { flag: "wx" });
+    const logFd = fs.openSync(logPath, "a");
+    fs.writeSync(logFd, `[${new Date().toISOString()}] spawn ${process.execPath} ${spawnArgs.join(" ")}\n`);
+    const child = spawn(process.execPath, spawnArgs, {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: {
+        ...process.env,
+        CORTEX_PATH: cortexPathLocal,
+        CORTEX_PROFILE: profile,
+      },
+    });
+    child.unref();
+    fs.closeSync(logFd);
+    return true;
+  } catch (err: unknown) {
+    try { fs.unlinkSync(lockPath); } catch {}
+    debugLog(`scheduleBackgroundSync: spawn failed: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
   if (!isFeatureEnabled("CORTEX_FEATURE_DAILY_MAINTENANCE", true)) return false;
   const markers = qualityMarkers(cortexPathLocal);
@@ -208,8 +249,8 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
       fs.unlinkSync(markers.lock);
     } catch (err: unknown) {
       debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${errorMessage(err)}`);
-      return false;
-    }
+  return false;
+}
   }
 
   const spawnArgs = resolveSubprocessArgs("background-maintenance");
@@ -592,69 +633,78 @@ export async function handleHookStop() {
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local");
     return;
   }
-
-  const lastPushMarker = sessionMarker(getCortexPath(), "last-push");
-  const DEBOUNCE_MS = 10_000;
-  let shouldPush = true;
-  try {
-    const stat = fs.statSync(lastPushMarker);
-    if (Date.now() - stat.mtimeMs < DEBOUNCE_MS) shouldPush = false;
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookStop lastPushMarker: ${errorMessage(err)}\n`);
-  }
-
-  if (!shouldPush) {
-    const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
-    // Debounced: commit is saved locally, push will happen on the next non-debounced stop.
-    updateRuntimeHealth(getCortexPath(), {
-      lastStopAt: now,
-      lastAutoSave: { at: now, status: "saved-local", detail: "commit saved; push debounced" },
-      lastSync: {
-        lastPushAt: now,
-        lastPushStatus: "saved-local",
-        lastPushDetail: "commit saved; push debounced",
-        unsyncedCommits,
-      },
-    });
-    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local detail=debounced");
-
-    // Auto governance scheduling (non-blocking)
-    scheduleWeeklyGovernance();
-    return;
-  }
-
-  const push = await runBestEffortGit(["push"], getCortexPath());
-  if (push.ok) {
-    fs.writeFileSync(lastPushMarker, String(Date.now()));
-    updateRuntimeHealth(getCortexPath(), {
-      lastStopAt: now,
-      lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
-      lastSync: {
-        lastPushAt: now,
-        lastPushStatus: "saved-pushed",
-        lastPushDetail: "commit pushed",
-        unsyncedCommits: 0,
-      },
-    });
-    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-pushed");
-
-    // Auto governance scheduling (non-blocking)
-    scheduleWeeklyGovernance();
-    return;
-  }
-
   const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
+  const scheduled = scheduleBackgroundSync(getCortexPath());
+  const syncDetail = scheduled
+    ? "commit saved; background sync scheduled"
+    : "commit saved; background sync already running";
   updateRuntimeHealth(getCortexPath(), {
     lastStopAt: now,
-    lastAutoSave: { at: now, status: "saved-local", detail: push.error || "push failed" },
+    lastAutoSave: { at: now, status: "saved-local", detail: syncDetail },
     lastSync: {
       lastPushAt: now,
       lastPushStatus: "saved-local",
-      lastPushDetail: push.error || "push failed",
+      lastPushDetail: syncDetail,
       unsyncedCommits,
     },
   });
-  appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
+  appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(syncDetail)}`);
+
+  // Auto governance scheduling (non-blocking)
+  scheduleWeeklyGovernance();
+}
+
+export async function handleBackgroundSync() {
+  const cortexPathLocal = getCortexPath();
+  const now = new Date().toISOString();
+  const lockPath = runtimeFile(cortexPathLocal, "background-sync.lock");
+
+  try {
+    const remotes = await runBestEffortGit(["remote"], cortexPathLocal);
+    if (!remotes.ok || !remotes.output) {
+      const unsyncedCommits = await countUnsyncedCommits(cortexPathLocal);
+      updateRuntimeHealth(cortexPathLocal, {
+        lastAutoSave: { at: now, status: "saved-local", detail: "background sync skipped; no remote configured" },
+        lastSync: {
+          lastPushAt: now,
+          lastPushStatus: "saved-local",
+          lastPushDetail: "background sync skipped; no remote configured",
+          unsyncedCommits,
+        },
+      });
+      appendAuditLog(cortexPathLocal, "background_sync", "status=saved-local detail=no_remote");
+      return;
+    }
+
+    const push = await runBestEffortGit(["push"], cortexPathLocal);
+    if (push.ok) {
+      updateRuntimeHealth(cortexPathLocal, {
+        lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed by background sync" },
+        lastSync: {
+          lastPushAt: now,
+          lastPushStatus: "saved-pushed",
+          lastPushDetail: "commit pushed by background sync",
+          unsyncedCommits: 0,
+        },
+      });
+      appendAuditLog(cortexPathLocal, "background_sync", "status=saved-pushed");
+      return;
+    }
+
+    const unsyncedCommits = await countUnsyncedCommits(cortexPathLocal);
+    updateRuntimeHealth(cortexPathLocal, {
+      lastAutoSave: { at: now, status: "saved-local", detail: push.error || "background sync push failed" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        lastPushDetail: push.error || "background sync push failed",
+        unsyncedCommits,
+      },
+    });
+    appendAuditLog(cortexPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(push.error || "background sync push failed")}`);
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch {}
+  }
 }
 
 function scheduleWeeklyGovernance(): void {

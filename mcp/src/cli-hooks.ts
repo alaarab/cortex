@@ -72,6 +72,7 @@ export {
 export {
   handleHookSessionStart,
   handleHookStop,
+  handleBackgroundSync,
   handleHookContext,
   handleHookTool,
   trackSessionMetrics,

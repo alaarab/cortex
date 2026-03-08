@@ -60,6 +60,7 @@ import {
   handleHookPrompt,
   handleHookSessionStart,
   handleHookStop,
+  handleBackgroundSync,
   handleHookContext,
   handleHookTool,
   scheduleBackgroundMaintenance,
@@ -344,6 +345,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHookSessionStart();
     case "hook-stop":
       return handleHookStop();
+    case "background-sync":
+      return handleBackgroundSync();
     case "hook-context":
       return handleHookContext();
     case "hook-tool":
