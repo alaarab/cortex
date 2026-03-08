@@ -2,10 +2,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry, type CustomHookEvent } from "./hooks.js";
+import { hookConfigPath } from "./shared.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
@@ -42,10 +41,10 @@ function normalizeHookTool(input: string | undefined): HookTool | null {
 
 function hookConfigPaths(): Record<HookTool, string> {
   return {
-    claude: path.join(os.homedir(), ".claude", "settings.json"),
-    copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
-    cursor: path.join(os.homedir(), ".cursor", "hooks.json"),
-    codex: path.join(os.homedir(), ".codex", "config.json"),
+    claude: hookConfigPath("claude"),
+    copilot: hookConfigPath("copilot"),
+    cursor: hookConfigPath("cursor"),
+    codex: hookConfigPath("codex"),
   };
 }
 

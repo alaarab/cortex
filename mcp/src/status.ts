@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { fileURLToPath } from "url";
 import {
   findCortexPath,
@@ -8,6 +7,8 @@ import {
   EXEC_TIMEOUT_QUICK_MS,
   debugLog,
   isRecord,
+  hookConfigPath,
+  homeDir,
 } from "./shared.js";
 import { detectProject, findFtsCacheForPath } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
@@ -97,7 +98,7 @@ export async function runStatus() {
   console.log(`  ${BOLD}Hooks:${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
 
   // Hook health: check ~/.claude/settings.json
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const settingsPath = hookConfigPath("claude");
   let hooksInstalled = false;
   let mcpConfigured = false;
   if (fs.existsSync(settingsPath)) {
@@ -146,7 +147,7 @@ export async function runStatus() {
   function agentConfigured(candidates: string[]): boolean {
     return candidates.some(hasCortexEntry);
   }
-  const home = os.homedir();
+  const home = homeDir();
   const agentChecks: { name: string; configured: boolean }[] = [
     {
       name: "Claude Code",

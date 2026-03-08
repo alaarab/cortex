@@ -4,15 +4,15 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { fileURLToPath } from "url";
+import { homePath } from "./shared.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..", "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 export const VERSION = pkg.version as string;
 export const STARTER_DIR = path.join(ROOT, "starter");
-export const DEFAULT_CORTEX_PATH = path.join(os.homedir(), ".cortex");
+export const DEFAULT_CORTEX_PATH = homePath(".cortex");
 
 export function resolveEntryScript(): string {
   return path.join(ROOT, "mcp", "dist", "index.js");

@@ -10,6 +10,9 @@ import { buildLifecycleCommands } from "./hooks.js";
 import {
   EXEC_TIMEOUT_QUICK_MS,
   isRecord,
+  hookConfigPath,
+  homeDir,
+  homePath,
 } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
 
@@ -236,8 +239,8 @@ export function isCortexCommand(command: string): boolean {
 }
 
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
-  const claudeJsonPath = path.join(os.homedir(), ".claude.json");
+  const settingsPath = hookConfigPath("claude");
+  const claudeJsonPath = homePath(".claude.json");
   const entryScript = resolveEntryScript();
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
   const hooksEnabled = opts.hooksEnabled ?? getHooksEnabledPreference(cortexPath);
@@ -347,7 +350,7 @@ export function resetVSCodeProbeCache() { _vscodeProbeCache = null; }
 
 function probeVSCodePath(): { targetDir: string | null; installed: boolean } {
   if (_vscodeProbeCache) return _vscodeProbeCache;
-  const home = os.homedir();
+  const home = homeDir();
   const userProfile = normalizeWindowsPathToWsl(process.env.USERPROFILE);
   const username = process.env.USERNAME;
   const userProfileRoaming = userProfile ? path.join(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
@@ -390,7 +393,7 @@ export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean
 
 export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = os.homedir();
+  const home = homeDir();
   const candidates = [
     path.join(home, ".cursor", "mcp.json"),
     path.join(home, ".config", "Cursor", "User", "mcp.json"),
@@ -411,7 +414,7 @@ export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: bool
 
 export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = os.homedir();
+  const home = homeDir();
   const candidates = [
     path.join(home, ".copilot", "mcp-config.json"),
     path.join(home, ".github", "mcp.json"),
@@ -445,7 +448,7 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
 
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = os.homedir();
+  const home = homeDir();
   const tomlPath = path.join(home, ".codex", "config.toml");
   const jsonCandidates = [
     path.join(home, ".codex", "config.json"),

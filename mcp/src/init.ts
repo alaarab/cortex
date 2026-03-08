@@ -6,7 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { configureAllHooks } from "./hooks.js";
-import { debugLog, isRecord } from "./shared.js";
+import { debugLog, isRecord, hookConfigPath, homeDir, homePath } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 
 // Re-export everything consumers need from the helper modules
@@ -380,7 +380,7 @@ export async function runInit(opts: InitOptions = {}) {
 
       // Confirmation prompt before writing config
       if (!opts.yes) {
-        const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+        const settingsPath = hookConfigPath("claude");
         const modifications: string[] = [];
         modifications.push(`  ${settingsPath}  (update MCP server + hooks)`);
         log(`\nWill modify:`);
@@ -588,7 +588,7 @@ export async function runInit(opts: InitOptions = {}) {
 
   // Confirmation prompt before writing agent config
   if (!opts.yes) {
-    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const settingsPath = hookConfigPath("claude");
     log(`\nWill modify:`);
     log(`  ${settingsPath}  (add MCP server + hooks)`);
 
@@ -856,11 +856,11 @@ export async function runHooksMode(modeArg?: string) {
 export async function runUninstall() {
   log("\nUninstalling cortex...\n");
 
-  const home = os.homedir();
-  const settingsPath = path.join(home, ".claude", "settings.json");
+  const home = homeDir();
+  const settingsPath = hookConfigPath("claude");
 
   // Remove from Claude Code ~/.claude.json (where MCP servers are actually read)
-  const claudeJsonPath = path.join(home, ".claude.json");
+  const claudeJsonPath = homePath(".claude.json");
   if (fs.existsSync(claudeJsonPath)) {
     try {
       if (removeMcpServerAtPath(claudeJsonPath)) {

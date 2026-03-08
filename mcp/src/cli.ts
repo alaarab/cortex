@@ -5,6 +5,8 @@ import {
   getCortexPath,
   findProjectNameCaseInsensitive,
   normalizeProjectNameForCreate,
+  expandHomePath,
+  homePath,
 } from "./shared.js";
 import {
   recordFeedback,
@@ -755,8 +757,8 @@ function hookConfigPath(tool: string): string | null {
   const cortexPath = getCortexPath();
   const paths: Record<string, string> = {
     claude: path.join(cortexPath, "cortex.SKILL.md"),
-    copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
-    cursor: path.join(os.homedir(), ".cursor", "hooks.json"),
+    copilot: homePath(".github", "hooks", "cortex.json"),
+    cursor: homePath(".cursor", "hooks.json"),
     codex: path.join(cortexPath, "codex.json"),
   };
   return paths[tool] ?? null;
@@ -815,7 +817,7 @@ function handleSkillsNamespace(args: string[]) {
       process.exit(1);
     }
 
-    const source = path.resolve(skillPath.replace(/^~/, os.homedir()));
+    const source = path.resolve(expandHomePath(skillPath));
     if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
       console.error(`Skill file not found: ${source}`);
       process.exit(1);
@@ -1009,7 +1011,7 @@ function handleSkillList() {
 
 function handleDetectSkills(args: string[]) {
   const importFlag = args.includes("--import");
-  const nativeSkillsDir = path.join(os.homedir(), ".claude", "skills");
+  const nativeSkillsDir = homePath(".claude", "skills");
   if (!fs.existsSync(nativeSkillsDir)) {
     console.log("No native skills directory found at ~/.claude/skills/");
     return;
