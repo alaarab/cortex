@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, type CortexResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 
@@ -172,7 +173,10 @@ export function autoArchiveToReference(
     }
     newSection.push("");
 
-    fs.writeFileSync(filePath, existing.trimEnd() + "\n" + newSection.join("\n"));
+    const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
+    const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpRefPath, refContent);
+    fs.renameSync(tmpRefPath, filePath);
   }
 
   // Remove archived entries from FINDINGS.md
