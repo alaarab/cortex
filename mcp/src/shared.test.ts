@@ -6,11 +6,14 @@ import {
   getProjectDirs,
   findCortexPathWithArg,
   collectNativeMemoryFiles,
+  findProjectNameCaseInsensitive,
   CortexError,
   cortexOk,
   cortexErr,
   ensureCortexPath,
+  normalizeProjectNameForCreate,
   parseCortexErrorCode,
+  migrateProjectNames,
 } from "./shared.js";
 import {
   consolidateProjectFindings,
@@ -124,6 +127,21 @@ describe("isValidProjectName", () => {
   it("rejects names with slashes", () => {
     expect(isValidProjectName("foo/bar")).toBe(false);
     expect(isValidProjectName("foo\\bar")).toBe(false);
+  });
+});
+
+describe("project casing helpers", () => {
+  it("normalizes new project names to lowercase", () => {
+    expect(normalizeProjectNameForCreate("Cortex")).toBe("cortex");
+    expect(normalizeProjectNameForCreate("My-App")).toBe("my-app");
+  });
+
+  it("finds existing projects case-insensitively", () => {
+    const cortex = makeCortex();
+    makeProject(cortex, "Cortex", { "FINDINGS.md": "# Cortex Findings\n" });
+    expect(findProjectNameCaseInsensitive(cortex, "cortex")).toBe("Cortex");
+    expect(findProjectNameCaseInsensitive(cortex, "CORTEX")).toBe("Cortex");
+    expect(findProjectNameCaseInsensitive(cortex, "missing")).toBeNull();
   });
 });
 
@@ -2330,6 +2348,56 @@ describe("collectNativeMemoryFiles", () => {
     }
     const result = collectNativeMemoryFiles();
     expect(result).toHaveLength(2);
+  });
+});
+
+describe("migrateProjectNames", () => {
+  let tmpRoot: string;
+  let cleanupRoot: () => void;
+  const origHome = process.env.HOME;
+
+  beforeEach(() => {
+    ({ path: tmpRoot, cleanup: cleanupRoot } = makeTempDir("cortex-project-migrate-"));
+    process.env.HOME = tmpRoot;
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    cleanupRoot();
+  });
+
+  it("renames mixed-case project dirs, updates profiles, and renames native memory files", () => {
+    const cortex = path.join(tmpRoot, ".cortex");
+    fs.mkdirSync(path.join(cortex, "WebProject2"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(cortex, "profiles", "personal.yaml"), "projects:\n  - WebProject2\n");
+    const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, "MEMORY-WebProject2.md"), "# notes");
+
+    const result = migrateProjectNames(cortex);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fs.existsSync(path.join(cortex, "web-project-2"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, "WebProject2"))).toBe(false);
+    expect(fs.readFileSync(path.join(cortex, "profiles", "personal.yaml"), "utf8")).toContain("web-project-2");
+    expect(fs.existsSync(path.join(memDir, "MEMORY-web-project-2.md"))).toBe(true);
+    expect(fs.existsSync(path.join(memDir, "MEMORY-WebProject2.md"))).toBe(false);
+  });
+
+  it("archives duplicate native memory files when lowercase target already exists", () => {
+    const cortex = path.join(tmpRoot, ".cortex");
+    fs.mkdirSync(path.join(cortex, "AlphaLens"), { recursive: true });
+    const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, "MEMORY-AlphaLens.md"), "# same");
+    fs.writeFileSync(path.join(memDir, "MEMORY-alphalens.md"), "# same");
+
+    const result = migrateProjectNames(cortex);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fs.existsSync(path.join(memDir, "MEMORY-AlphaLens.md.case-migration.bak"))).toBe(true);
+    expect(fs.existsSync(path.join(memDir, "MEMORY-alphalens.md"))).toBe(true);
   });
 });
 

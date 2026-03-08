@@ -203,6 +203,23 @@ describe.sequential("review-ui server", () => {
     expect(res.body).toBe("Not found");
   });
 
+  it("change token updates when project content changes", async () => {
+    const readToken = async (): Promise<string> => {
+      return await new Promise((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/change-token`, (res) => {
+          let out = "";
+          res.on("data", (chunk) => { out += String(chunk); });
+          res.on("end", () => resolve(JSON.parse(out).token));
+        }).on("error", reject);
+      });
+    };
+
+    const before = await readToken();
+    fs.appendFileSync(path.join(tmpRoot, "demo", "backlog.md"), "\n- [ ] Live refresh item\n");
+    const after = await readToken();
+    expect(after).not.toBe(before);
+  });
+
   it("returns 413 for request body exceeding 1MB", async () => {
     const bigPayload = querystring.stringify({
       project: "demo",

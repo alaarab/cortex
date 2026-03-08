@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
+import { isValidProjectName } from "./utils.js";
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
@@ -164,6 +165,10 @@ export function readBackNativeMemory(cortexPath: string, projects: string[]) {
 
   for (const project of projects) {
     if (project === "global") continue;
+    if (!isValidProjectName(project)) {
+      log(`  skip native memory sync for invalid project name: ${project}`);
+      continue;
+    }
     const nativeFile = path.join(memoryDir, `MEMORY-${project}.md`);
     if (!fs.existsSync(nativeFile)) continue;
 

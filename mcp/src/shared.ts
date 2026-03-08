@@ -209,6 +209,32 @@ export function findCortexPathWithArg(arg?: string): string {
   return ensureCortexPath();
 }
 
+const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
+
+function isProjectDirEntry(entry: fs.Dirent): boolean {
+  return entry.isDirectory() &&
+    !entry.name.startsWith(".") &&
+    !entry.name.endsWith(".archived") &&
+    !RESERVED_PROJECT_DIR_NAMES.has(entry.name);
+}
+
+export function normalizeProjectNameForCreate(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export function findProjectNameCaseInsensitive(cortexPath: string, name: string): string | null {
+  const needle = name.toLowerCase();
+  try {
+    for (const entry of fs.readdirSync(cortexPath, { withFileTypes: true })) {
+      if (!isProjectDirEntry(entry)) continue;
+      if (entry.name.toLowerCase() === needle) return entry.name;
+    }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+  }
+  return null;
+}
+
 // Figure out which project directories to index
 export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   if (profile) {
@@ -256,7 +282,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   }
 
   return fs.readdirSync(cortexPath, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith(".") && !d.name.endsWith(".archived") && d.name !== "profiles" && d.name !== "templates" && d.name !== "global")
+    .filter(isProjectDirEntry)
     .map(d => path.join(cortexPath, d.name));
 }
 
@@ -283,6 +309,168 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
   }
   return results;
+}
+
+export interface ProjectNameMigrationReport {
+  renamedProjects: Array<{ from: string; to: string }>;
+  updatedProfiles: Array<{ profile: string; replacements: Array<{ from: string; to: string }> }>;
+  renamedNativeMemories: Array<{ from: string; to: string }>;
+  archivedNativeMemories: Array<{ from: string; archivedAs: string; reason: string }>;
+}
+
+function isCanonicalProjectDirName(name: string): boolean {
+  return name === name.toLowerCase() && isValidProjectName(name);
+}
+
+function readYamlObject(filePath: string): Record<string, unknown> | null {
+  try {
+    const parsed = yaml.load(fs.readFileSync(filePath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    return isRecord(parsed) ? parsed : null;
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readYamlObject ${filePath}: ${errorMessage(err)}\n`);
+    return null;
+  }
+}
+
+export function migrateProjectNames(cortexPath: string, dryRun: boolean = false): CortexResult<ProjectNameMigrationReport> {
+  const report: ProjectNameMigrationReport = {
+    renamedProjects: [],
+    updatedProfiles: [],
+    renamedNativeMemories: [],
+    archivedNativeMemories: [],
+  };
+
+  const entries = fs.readdirSync(cortexPath, { withFileTypes: true }).filter(isProjectDirEntry);
+  const projectRenames = new Map<string, string>();
+  const occupiedNames = new Set(entries.map((entry) => entry.name.toLowerCase()));
+
+  for (const entry of entries) {
+    if (isCanonicalProjectDirName(entry.name)) continue;
+    const target = normalizeProjectNameForCreate(entry.name);
+    if (!isValidProjectName(target)) {
+      return cortexErr(`Cannot migrate project "${entry.name}" to invalid canonical name "${target}".`, CortexError.INVALID_PROJECT_NAME);
+    }
+    if (entry.name.toLowerCase() !== target || occupiedNames.has(target) && target !== entry.name.toLowerCase()) {
+      return cortexErr(`Cannot migrate project "${entry.name}" because canonical target "${target}" already exists.`, CortexError.AMBIGUOUS_MATCH);
+    }
+    projectRenames.set(entry.name, target);
+  }
+
+  for (const [from, to] of projectRenames.entries()) {
+    report.renamedProjects.push({ from, to });
+    if (!dryRun) fs.renameSync(path.join(cortexPath, from), path.join(cortexPath, to));
+  }
+
+  const profilesDir = path.join(cortexPath, "profiles");
+  if (fs.existsSync(profilesDir)) {
+    for (const file of fs.readdirSync(profilesDir)) {
+      if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
+      const fullPath = path.join(profilesDir, file);
+      const parsed = readYamlObject(fullPath);
+      if (!parsed) continue;
+      const projects = Array.isArray(parsed.projects) ? parsed.projects.map((value) => String(value)) : null;
+      if (!projects) continue;
+      const replacements: Array<{ from: string; to: string }> = [];
+      const nextProjects = projects.map((name) => {
+        const replacement = projectRenames.get(name);
+        if (!replacement) return name;
+        replacements.push({ from: name, to: replacement });
+        return replacement;
+      });
+      if (!replacements.length) continue;
+      report.updatedProfiles.push({ profile: file, replacements });
+      if (!dryRun) {
+        const updated = { ...parsed, projects: Array.from(new Set(nextProjects)) };
+        fs.writeFileSync(fullPath, yaml.dump(updated, { lineWidth: 120, noRefs: true }));
+      }
+    }
+  }
+
+  for (const memory of collectNativeMemoryFiles()) {
+    const targetProject = projectRenames.get(memory.project);
+    if (!targetProject) continue;
+    const targetPath = path.join(path.dirname(memory.fullPath), `MEMORY-${targetProject}.md`);
+    if (memory.fullPath === targetPath) continue;
+    if (fs.existsSync(targetPath)) {
+      const sourceContent = fs.readFileSync(memory.fullPath, "utf8");
+      const targetContent = fs.readFileSync(targetPath, "utf8");
+      if (sourceContent === targetContent) {
+        const archivedAs = `${memory.fullPath}.case-migration.bak`;
+        report.archivedNativeMemories.push({
+          from: memory.fullPath,
+          archivedAs,
+          reason: "duplicate-content",
+        });
+        if (!dryRun) fs.renameSync(memory.fullPath, archivedAs);
+        continue;
+      }
+      const archivedAs = `${memory.fullPath}.case-conflict.bak`;
+      report.archivedNativeMemories.push({
+        from: memory.fullPath,
+        archivedAs,
+        reason: "target-exists-with-different-content",
+      });
+      if (!dryRun) fs.renameSync(memory.fullPath, archivedAs);
+      continue;
+    }
+    report.renamedNativeMemories.push({ from: memory.fullPath, to: targetPath });
+    if (!dryRun) fs.renameSync(memory.fullPath, targetPath);
+  }
+
+  return cortexOk(report);
+}
+
+function pushFileToken(parts: string[], filePath: string): void {
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.isFile()) parts.push(`${filePath}:${stat.mtimeMs}:${stat.size}`);
+  } catch {
+    parts.push(`${filePath}:missing`);
+  }
+}
+
+function pushDirTokens(parts: string[], dirPath: string): void {
+  if (!fs.existsSync(dirPath)) {
+    parts.push(`${dirPath}:missing`);
+    return;
+  }
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      pushDirTokens(parts, fullPath);
+      continue;
+    }
+    parts.push(`${fullPath}:${fs.statSync(fullPath).mtimeMs}:${fs.statSync(fullPath).size}`);
+  }
+}
+
+export function computeCortexLiveStateToken(cortexPath: string): string {
+  const parts: string[] = [];
+  const projectDirs = getProjectDirs(cortexPath).sort();
+
+  for (const projectDir of projectDirs) {
+    const project = path.basename(projectDir);
+    parts.push(`project:${project}`);
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md"]) {
+      pushFileToken(parts, path.join(projectDir, file));
+    }
+    pushDirTokens(parts, path.join(projectDir, "skills"));
+    pushDirTokens(parts, path.join(projectDir, ".claude", "skills"));
+  }
+
+  pushDirTokens(parts, path.join(cortexPath, "profiles"));
+  pushDirTokens(parts, path.join(cortexPath, "global", "skills"));
+  pushFileToken(parts, path.join(cortexPath, ".governance", "access-control.json"));
+  pushFileToken(parts, path.join(cortexPath, ".governance", "runtime-health.json"));
+  pushFileToken(parts, runtimeFile(cortexPath, "audit.log"));
+  pushFileToken(parts, path.join(cortexPath, ".governance", "memory-usage.log"));
+  pushFileToken(parts, path.join(cortexPath, ".runtime", "install-preferences.json"));
+
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  pushDirTokens(parts, path.join(home, ".github", "hooks"));
+  pushFileToken(parts, path.join(home, ".cursor", "hooks.json"));
+
+  return parts.sort().join("|");
 }
 
 /** All valid finding type tags — used for writes, search filters, and hook extraction */

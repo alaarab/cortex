@@ -276,6 +276,24 @@ describe("safeProjectPath", () => {
   });
 });
 
+describe("isValidProjectName", () => {
+  it("accepts canonical lowercase project names", () => {
+    expect(isValidProjectName("cortex")).toBe(true);
+    expect(isValidProjectName("project-center")).toBe(true);
+    expect(isValidProjectName("m4l_builder")).toBe(true);
+  });
+
+  it("rejects uppercase project names", () => {
+    expect(isValidProjectName("Cortex")).toBe(false);
+    expect(isValidProjectName("WebProject2")).toBe(false);
+  });
+
+  it("rejects punctuation outside hyphen and underscore", () => {
+    expect(isValidProjectName("native:-home")).toBe(false);
+    expect(isValidProjectName("my.project")).toBe(false);
+  });
+});
+
 describe("memory workflow policy", () => {
   let tmpRoot: string;
   let cortexDir: string;

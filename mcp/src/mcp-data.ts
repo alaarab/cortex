@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
 import { readFindings, readBacklog } from "./data-access.js";
-import { debugLog } from "./shared.js";
+import { debugLog, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
 
 
 
@@ -107,21 +107,30 @@ export function register(server: McpServer, ctx: McpContext): void {
           debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
         }
 
-        if (!isValidProjectName(parsed.project)) {
+        const projectName = normalizeProjectNameForCreate(parsed.project);
+        if (!isValidProjectName(projectName)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
         }
 
-        const projectDir = path.join(cortexPath, parsed.project);
+        const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
+        if (existingProject && existingProject !== projectName) {
+          return mcpResponse({
+            ok: false,
+            error: `Project "${existingProject}" already exists with different casing. Refusing to import "${projectName}" because it would split the same project on case-sensitive filesystems.`,
+          });
+        }
+
+        const projectDir = path.join(cortexPath, projectName);
         const overwrite = parsed.overwrite === true;
         if (fs.existsSync(projectDir) && !overwrite) {
           return mcpResponse({
             ok: false,
-            error: `Project "${parsed.project}" already exists. Re-run with "overwrite": true to replace it.`,
+            error: `Project "${projectName}" already exists. Re-run with "overwrite": true to replace it.`,
           });
         }
 
-        const stagingRoot = fs.mkdtempSync(path.join(cortexPath, `.cortex-import-${parsed.project}-`));
-        const stagedProjectDir = path.join(stagingRoot, parsed.project);
+        const stagingRoot = fs.mkdtempSync(path.join(cortexPath, `.cortex-import-${projectName}-`));
+        const stagedProjectDir = path.join(stagingRoot, projectName);
         const imported: string[] = [];
         const cleanupDir = (dir: string) => {
           if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
@@ -130,7 +139,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const buildFindingsContent = () => {
           if (!parsed.learnings || parsed.learnings.length === 0) return null;
           const date = new Date().toISOString().slice(0, 10);
-          const lines = [`# ${parsed.project} Findings`, "", `## ${date}`, ""];
+          const lines = [`# ${projectName} Findings`, "", `## ${date}`, ""];
           for (const item of parsed.learnings) {
             lines.push(`- ${item.text}`);
           }
@@ -144,7 +153,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (typeof backlogRaw === "string") return backlogRaw;
           if (!parsed.backlog) return null;
           const sections = ["Active", "Queue", "Done"] as const;
-          const lines = [`# ${parsed.project} backlog`, ""];
+          const lines = [`# ${projectName} backlog`, ""];
           for (const section of sections) {
             lines.push(`## ${section}`, "");
             const items = parsed.backlog[section];
@@ -187,7 +196,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push("backlog.md");
           }
 
-          const backupDir = overwrite ? path.join(cortexPath, `${parsed.project}.import-backup-${Date.now()}`) : null;
+          const backupDir = overwrite ? path.join(cortexPath, `${projectName}.import-backup-${Date.now()}`) : null;
 
           try {
             if (overwrite && fs.existsSync(projectDir)) {
@@ -221,11 +230,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch (indexError) {
           // Index rebuild failed — restore backup if we replaced the project dir
           if (overwrite) {
-            const backupDir = path.join(cortexPath, `${parsed.project}.import-backup-${Date.now()}`);
+            const backupDir = path.join(cortexPath, `${projectName}.import-backup-${Date.now()}`);
             // Find the backup dir that was created earlier
             try {
               for (const entry of fs.readdirSync(cortexPath)) {
-                if (entry.startsWith(`${parsed.project}.import-backup-`)) {
+                if (entry.startsWith(`${projectName}.import-backup-`)) {
                   const backupPath = path.join(cortexPath, entry);
                   if (fs.existsSync(backupPath) && !fs.existsSync(projectDir)) {
                     fs.renameSync(backupPath, projectDir);
@@ -252,7 +261,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (overwrite) {
           try {
             for (const entry of fs.readdirSync(cortexPath)) {
-              if (entry.startsWith(`${parsed.project}.import-backup-`)) {
+              if (entry.startsWith(`${projectName}.import-backup-`)) {
                 fs.rmSync(path.join(cortexPath, entry), { recursive: true, force: true });
               }
             }
@@ -262,8 +271,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         return mcpResponse({
           ok: true,
-          message: `Imported project "${parsed.project}": ${imported.join(", ")}`,
-          data: { project: parsed.project, files: imported, overwrite },
+          message: `Imported project "${projectName}": ${imported.join(", ")}`,
+          data: { project: projectName, files: imported, overwrite },
         });
       });
     }
@@ -282,6 +291,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, action }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
+      const activeProject = findProjectNameCaseInsensitive(cortexPath, project);
       const projectDir = path.join(cortexPath, project);
       const archiveDir = path.join(cortexPath, `${project}.archived`);
 
@@ -303,8 +313,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       // unarchive
-      if (fs.existsSync(projectDir)) {
-        return mcpResponse({ ok: false, error: `Project "${project}" already exists as an active project.` });
+      if (activeProject) {
+        return mcpResponse({ ok: false, error: `Project "${activeProject}" already exists as an active project.` });
       }
       if (!fs.existsSync(archiveDir)) {
         const entries = fs.readdirSync(cortexPath).filter((e) => e.endsWith(".archived"));

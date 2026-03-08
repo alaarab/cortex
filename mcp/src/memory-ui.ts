@@ -7,6 +7,7 @@ import * as os from "os";
 import * as querystring from "querystring";
 import {
   CortexError,
+  computeCortexLiveStateToken,
   getProjectDirs,
   runtimeDir,
 } from "./shared.js";
@@ -1243,6 +1244,36 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     });
   }
 
+  function refreshLiveState() {
+    loadProjects();
+    if (_selectedProject) {
+      var activeTab = document.querySelector('.project-detail-tab.active');
+      var activeFile = activeTab ? activeTab.textContent : 'Findings';
+      var fileMap = { 'Findings': 'FINDINGS.md', 'Backlog': 'backlog.md', 'CLAUDE.md': 'CLAUDE.md', 'Summary': 'summary.md' };
+      loadProjectFile(fileMap[activeFile] || 'FINDINGS.md', activeTab);
+    }
+    if (_skillsLoaded) loadSkills();
+    if (_hooksLoaded) loadHooks();
+    if (_graphLoaded && !_graphRunning) loadGraph();
+    window.filterReviewCards();
+  }
+
+  function pollLiveUpdates() {
+    fetch('/api/change-token')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || !data.token) return;
+        if (!_lastChangeToken) {
+          _lastChangeToken = data.token;
+          return;
+        }
+        if (data.token === _lastChangeToken) return;
+        _lastChangeToken = data.token;
+        refreshLiveState();
+      })
+      .catch(function() {});
+  }
+
   window.toggleStar = function(name) {
     var starred = getStarredProjects();
     var idx = starred.indexOf(name);
@@ -1331,6 +1362,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   };
 
   loadProjects();
+  var _lastChangeToken = '';
+  pollLiveUpdates();
+  window.setInterval(pollLiveUpdates, 2000);
 
   // ── Skills ───────────────────────────────────────────────────
   function loadSkills() {
@@ -1957,6 +1991,12 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       const projects = collectProjectsForUI(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(projects));
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/change-token") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ token: computeCortexLiveStateToken(cortexPath) }));
       return;
     }
 

@@ -8,6 +8,7 @@ import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import {
   debugLog,
+  findProjectNameCaseInsensitive,
 } from "./shared.js";
 import {
   GOVERNANCE_SCHEMA_VERSION,
@@ -331,6 +332,12 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
 
   const claudeContent = fs.readFileSync(claudeMdPath, "utf8");
   const projectName = path.basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
+  if (existingProject && existingProject !== projectName) {
+    throw new Error(
+      `Project "${existingProject}" already exists with different casing. Refusing to bootstrap "${projectName}" because it would split the same project on case-sensitive filesystems.`
+    );
+  }
   const projDir = path.join(cortexPath, projectName);
   fs.mkdirSync(projDir, { recursive: true });
 

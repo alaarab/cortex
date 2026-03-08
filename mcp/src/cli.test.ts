@@ -147,6 +147,37 @@ describe("CLI integration: doctor", () => {
   });
 });
 
+describe("CLI integration: projects add", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+  });
+
+  afterEach(() => cleanup());
+
+  it("canonicalizes uppercase names to lowercase on create", () => {
+    const { stdout, exitCode } = runCli(
+      ["projects", "add", "Cortex"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Created project "cortex"');
+    expect(fs.existsSync(path.join(cortexDir, "cortex"))).toBe(true);
+  });
+
+  it("rejects creating a lowercase canonical project when a differently cased dir already exists", () => {
+    fs.mkdirSync(path.join(cortexDir, "Cortex"), { recursive: true });
+    const { stderr, exitCode } = runCli(
+      ["projects", "add", "cortex"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("already exists with different casing");
+  });
+});
+
 describe("CLI integration: add-finding", () => {
   let cortexDir: string;
   let cleanup: () => void;
@@ -1359,6 +1390,17 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Unknown migrate flag");
   });
+
+  it("migrate project-names dry-run reports pending project rename", () => {
+    fs.mkdirSync(path.join(cortexDir, "WebProject2"), { recursive: true });
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "project-names", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Project name migration");
+    expect(stdout).toContain("WebProject2 -> web-project-2");
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2023,5 +2065,20 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bootstrapped project");
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
+  });
+
+  it("rejects case-insensitive project collisions", () => {
+    const sourceDir = path.join(path.dirname(projectDir), "cortex");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "CLAUDE.md"), "# cortex\n\nCollision test.\n");
+    fs.mkdirSync(path.join(cortexDir, "Cortex"), { recursive: true });
+
+    const { stdout, exitCode } = runCli(
+      ["init", "-y", "--from-existing", sourceDir],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Could not bootstrap");
+    expect(stdout).toContain("already exists with different casing");
   });
 });
