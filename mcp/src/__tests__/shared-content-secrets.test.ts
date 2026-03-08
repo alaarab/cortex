@@ -10,9 +10,11 @@ import * as path from "path";
 // Test fixtures are constructed at runtime so static secret scanners don't
 // flag this file. These are not real credentials — they are synthetic strings
 // that match the detector regexes and nothing else.
-const FAKE_AWS_KEY    = "AKIA" + "TESTFAKEKEY00001";          // matches /AKIA[0-9A-Z]{16}/
-const FAKE_JWT        = "eyJmYWtl" + "." + "eyJmYWtl" + "." + "ZmFrZXNpZw";  // matches JWT three-part pattern
-const FAKE_SK_LIVE    = "sk_live_" + "TESTONLYFAKEKEY0000001"; // matches Stripe secret key pattern
+const FAKE_AWS_KEY    = "AKIA" + "TESTFAKEKEY00001";                          // matches /AKIA[0-9A-Z]{16}/
+const FAKE_JWT        = "eyJmYWtl" + "." + "eyJmYWtl" + "." + "ZmFrZXNpZw"; // matches JWT three-part pattern
+const FAKE_SK_LIVE    = "sk_live_" + "TESTONLYFAKEKEY0000001";                // matches Stripe secret key pattern
+const FAKE_MONGO      = "mongodb://" + "testuser:testpass@localhost:27017/db";
+const FAKE_POSTGRES   = "postgres://" + "testuser:testpass@localhost:5432/testdb";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -50,8 +52,8 @@ describe("scanForSecrets", () => {
   });
 
   it("detects connection strings with credentials", () => {
-    expect(scanForSecrets("mongodb://testuser:testpass@localhost:27017/db")).toBe("connection string with credentials");
-    expect(scanForSecrets("postgres://testuser:testpass@localhost:5432/testdb")).toBe("connection string with credentials");
+    expect(scanForSecrets(FAKE_MONGO)).toBe("connection string with credentials");
+    expect(scanForSecrets(FAKE_POSTGRES)).toBe("connection string with credentials");
   });
 
   it("detects SSH private key", () => {
