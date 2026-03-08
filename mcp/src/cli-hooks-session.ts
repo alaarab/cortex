@@ -21,6 +21,7 @@ import {
 } from "./shared-index.js";
 import {
   addFindingToFile,
+  autoMergeConflicts,
 } from "./shared-content.js";
 import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
 import * as fs from "fs";
@@ -385,6 +386,60 @@ async function countUnsyncedCommits(cwd: string): Promise<number> {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: string; pullStatus: "ok" | "error"; pullDetail: string }> {
+  const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], cwd);
+  if (pull.ok) {
+    const retryPush = await runBestEffortGit(["push"], cwd);
+    return {
+      ok: retryPush.ok,
+      detail: retryPush.ok ? "commit pushed after pull --rebase" : (retryPush.error || "push failed after pull --rebase"),
+      pullStatus: "ok",
+      pullDetail: pull.output || "pull --rebase ok",
+    };
+  }
+
+  const conflicted = await runBestEffortGit(["diff", "--name-only", "--diff-filter=U"], cwd);
+  const conflictedOutput = conflicted.output?.trim() || "";
+  if (!conflicted.ok || !conflictedOutput) {
+    await runBestEffortGit(["rebase", "--abort"], cwd);
+    return {
+      ok: false,
+      detail: pull.error || "pull --rebase failed",
+      pullStatus: "error",
+      pullDetail: pull.error || "pull --rebase failed",
+    };
+  }
+
+  if (!autoMergeConflicts(cwd)) {
+    await runBestEffortGit(["rebase", "--abort"], cwd);
+    return {
+      ok: false,
+      detail: `rebase conflicts require manual resolution: ${conflictedOutput}`,
+      pullStatus: "error",
+      pullDetail: `rebase conflicts require manual resolution: ${conflictedOutput}`,
+    };
+  }
+
+  const continued = await runBestEffortGit(["-c", "core.editor=true", "rebase", "--continue"], cwd);
+  if (!continued.ok) {
+    await runBestEffortGit(["rebase", "--abort"], cwd);
+    return {
+      ok: false,
+      detail: continued.error || "rebase --continue failed",
+      pullStatus: "error",
+      pullDetail: continued.error || "rebase --continue failed",
+    };
+  }
+
+  const retryPush = await runBestEffortGit(["push"], cwd);
+  return {
+    ok: retryPush.ok,
+    detail: retryPush.ok ? "commit pushed after auto-merge recovery" : (retryPush.error || "push failed after auto-merge recovery"),
+    pullStatus: "ok",
+    pullDetail: "pull --rebase recovered via auto-merge",
+  };
+}
+
 // ── Hook handlers ────────────────────────────────────────────────────────────
 
 export async function handleHookSessionStart() {
@@ -691,17 +746,39 @@ export async function handleBackgroundSync() {
       return;
     }
 
+    const recovered = await recoverPushConflict(cortexPathLocal);
+    if (recovered.ok) {
+      updateRuntimeHealth(cortexPathLocal, {
+        lastAutoSave: { at: now, status: "saved-pushed", detail: recovered.detail },
+        lastSync: {
+          lastPullAt: now,
+          lastPullStatus: recovered.pullStatus,
+          lastPullDetail: recovered.pullDetail,
+          lastSuccessfulPullAt: now,
+          lastPushAt: now,
+          lastPushStatus: "saved-pushed",
+          lastPushDetail: recovered.detail,
+          unsyncedCommits: 0,
+        },
+      });
+      appendAuditLog(cortexPathLocal, "background_sync", `status=saved-pushed detail=${JSON.stringify(recovered.detail)}`);
+      return;
+    }
+
     const unsyncedCommits = await countUnsyncedCommits(cortexPathLocal);
     updateRuntimeHealth(cortexPathLocal, {
-      lastAutoSave: { at: now, status: "saved-local", detail: push.error || "background sync push failed" },
+      lastAutoSave: { at: now, status: "saved-local", detail: recovered.detail || push.error || "background sync push failed" },
       lastSync: {
+        lastPullAt: now,
+        lastPullStatus: recovered.pullStatus,
+        lastPullDetail: recovered.pullDetail,
         lastPushAt: now,
         lastPushStatus: "saved-local",
-        lastPushDetail: push.error || "background sync push failed",
+        lastPushDetail: recovered.detail || push.error || "background sync push failed",
         unsyncedCommits,
       },
     });
-    appendAuditLog(cortexPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(push.error || "background sync push failed")}`);
+    appendAuditLog(cortexPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(recovered.detail || push.error || "background sync push failed")}`);
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }
