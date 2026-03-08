@@ -433,7 +433,7 @@ export interface SelectedSnippet {
 }
 
 /** Mark snippet lines with stale citations (cited file no longer exists). */
-function markStaleCitations(snippet: string): string {
+export function markStaleCitations(snippet: string): string {
   const lines = snippet.split("\n");
   const result: string[] = [];
   for (let i = 0; i < lines.length; i++) {

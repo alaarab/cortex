@@ -2,10 +2,10 @@ import { debugLog } from "./shared.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 
-function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /** Escape SQL LIKE wildcard characters so user input is treated literally. */
-function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
+export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
 
 const PROSE_ENTITY_PATTERN =
   /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Koa|Hapi|NestJS|Django|Flask|FastAPI|Rails|Spring|Laravel|Redis|Postgres|PostgreSQL|MySQL|MariaDB|SQLite|MongoDB|DynamoDB|Cassandra|Elasticsearch|Docker|Kubernetes|Terraform|Ansible|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Prisma|TypeORM|Sequelize|Drizzle|Mongoose|Jest|Vitest|Mocha|Cypress|Playwright|Puppeteer|Webpack|Vite|Rollup|esbuild|Turbopack|ESLint|Prettier|Babel|SWC|GraphQL|REST|gRPC|WebSocket|Kafka|RabbitMQ|NATS|Nginx|Caddy|Traefik|Node\.js|Deno|Bun|Python|Rust|Go|Java|Kotlin|Swift|TypeScript|JavaScript)\b/gi;
