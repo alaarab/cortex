@@ -157,55 +157,25 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \end{figure*}
 
 \subsection{Storage and Retrieval}
-Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and incrementally refresh as files change. This yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
+Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
 
-A configurable index policy \cite{cortex-shared,cortex-index} controls which files are indexed. Operators set \texttt{includeGlobs} (default: \texttt{**/*.md}), \texttt{excludeGlobs} (default: \texttt{node\_modules}, \texttt{.git}), and an \texttt{includeHidden} flag. The policy is hashed into the index cache key, so changing it forces a clean rebuild and prevents accidental indexing of vendor files or sensitive directories.
-
-Before injection, a trust filter scores each learning entry by age decay and citation validity (Section~\ref{sec:decay}), then suppresses entries below \texttt{minInjectConfidence=0.35}. Archived entries inside \texttt{<details>} blocks are stripped so consolidated history does not pollute active search. In the current implementation, trust filtering may also queue stale or conflicting findings for later human review.
+Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search.
 
 \subsection{Lifecycle Automation}
 Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hooks}:
 \begin{enumerate}
-  \item \texttt{SessionStart}: pulls the cortex repo and runs lightweight startup checks.
-  \item \texttt{UserPromptSubmit}: extracts keywords, expands synonyms, loads or refreshes the cached local index, searches it, and injects relevant snippets within the token budget ($\approx$550 tokens, 6 lines, 520 chars per snippet). It also checks consolidation thresholds and fires a one-per-session notice when the project has accumulated $\geq$25 new findings.
-  \item \texttt{Stop}: auto-commits and pushes all cortex changes after every response, including subagent responses.
+  \item \texttt{SessionStart}: pulls the cortex repo and warms the index cache.
+  \item \texttt{UserPromptSubmit}: extracts keywords, searches the index, and injects relevant snippets within the token budget. Fires a consolidation notice when thresholds are met.
+  \item \texttt{Stop}: auto-commits and pushes all cortex changes after every response.
 \end{enumerate}
-This cuts manual tool invocations and keeps session behavior consistent.
 
-\subsection{MCP Context Optimization}
+\subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}
-
-MCP tool responses consume context tokens. A full backlog fetch can return $\sim$10k tokens, which is 5\% of a 200k context window from a single tool call. For multi-step agent workflows with many tool calls, uncontrolled fetches compound quickly.
-
-Cortex addresses this with progressive disclosure at two levels: the automatic hook path and the MCP tool path.
-
-\textbf{Hook-level progressive disclosure.} When \texttt{CORTEX\_FEATURE\_PROGRESSIVE\_DISCLOSURE=1}, the \texttt{UserPromptSubmit} hook switches strategy based on result count. For 1--2 results, full snippets are injected directly (small enough that overhead is negligible). For 3+ results, the hook emits a compact memory index: one line per result with a \texttt{mem:project/filename} ID and a one-line summary truncated at 80 characters. The agent then calls \texttt{get\_memory\_detail(id)} to expand only the entries it needs. This keeps automatic injection small and predictable while still surfacing all relevant matches.
-
-\textbf{Backlog progressive disclosure.} The \texttt{get\_backlog} tool supports three retrieval tiers:
-\begin{enumerate}
-  \item \textbf{Summary} (\texttt{summary:true}): counts and titles only, $\sim$200 tokens. Use for planning and status checks.
-  \item \textbf{Paginated} (\texttt{limit}, \texttt{offset}): full item content with pagination, $\sim$1k tokens per page. Use when reviewing item details.
-  \item \textbf{Single item} (\texttt{id:"bid:XXXXXXXX"}): one item by stable hash, $\sim$100 tokens. Use during execution.
-\end{enumerate}
-
-\textbf{Stable backlog identifiers.} Every backlog item embeds a content-addressed 8-character hex hash as an HTML comment (\texttt{<!-- bid:a3f9c2e1 -->}). These hashes survive reordering, completions, and edits to other items. Positional IDs (A1, Q3, D2) shift when items move between sections; stable \texttt{bid:} hashes do not. For multi-agent coordination, pass \texttt{bid:} hashes in task descriptions so downstream agents can fetch their specific item with \texttt{get\_backlog(id:"bid:xxxx")} instead of scanning the full backlog.
-
-The general principle: default to the smallest fetch that answers the current question. Expand only when the agent needs more detail to proceed. This applies equally to \texttt{get\_findings}, \texttt{search\_knowledge}, and any other tool that returns variable-length content.
+MCP tool responses consume context tokens. Cortex controls this with progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Backlogs support summary-only, paginated, and single-item fetch modes. The design principle is consistent: fetch the minimum that answers the question.
 
 \subsection{Governance}
 \label{sec:governance}
-
-The governance engine lives in \texttt{.governance/} \cite{cortex-shared} and is composed of four policy files:
-
-\textbf{Retention policy} (\texttt{retention-policy.json}): TTL (\texttt{ttlDays=120}), retention (\texttt{retentionDays=365}), auto-accept confidence threshold, minimum injection confidence, and the four-tier decay curve. Changes are audit-logged.
-
-\textbf{Workflow policy} (\texttt{workflow-policy.json}): approval gates controlling review-queue approval of risky memories and which queue sections trigger maintainer review.
-
-\textbf{Access control} (\texttt{access-control.json}): role-based permissions with four roles: \texttt{admin}, \texttt{maintainer}, \texttt{contributor}, \texttt{viewer}. Each maps to a set of allowed actions (\texttt{read}, \texttt{write}, \texttt{queue}, \texttt{pin}, \texttt{policy}, \texttt{delete}). The system resolves the current actor's role and rejects unauthorized operations before they execute.
-
-\textbf{Canonical locks} (\texttt{canonical-locks.json}): pinned memories are protected by content hashes. This prevents accidental overwrite during consolidation or bulk operations.
-
-Governance and memory-quality events are appended to \texttt{memory-usage.log} with timestamps, providing a human-readable audit trail without requiring database queries.
+The governance engine \cite{cortex-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting pinned memories from bulk overwrites. All governance events are appended to a timestamped audit log.
 
 \subsection{Trust Decay and Confidence Scoring}
 \label{sec:decay}
@@ -225,7 +195,7 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
 \begin{tikzpicture}
 \begin{axis}[
   width=\columnwidth,
-  height=4.8cm,
+  height=3.6cm,
   xlabel={Age (days)},
   ylabel={Confidence},
   xmin=0, xmax=135,
@@ -277,10 +247,7 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
 \end{figure}
 
 \subsection{Extensibility}
-
-Beyond the three lifecycle hooks, Cortex supports user-defined hooks for seven events: \texttt{pre-save}, \texttt{post-save}, \texttt{post-search}, \texttt{pre-finding}, \texttt{post-finding}, \texttt{pre-index}, and \texttt{post-index} \cite{cortex-hooks}. Hooks receive \texttt{CORTEX\_PATH} and \texttt{CORTEX\_HOOK\_EVENT} as environment variables, plus event-specific data. Typical uses include Slack notifications on new findings, webhook calls after index rebuilds, and pre-save validation scripts.
-
-Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{FINDINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
+Seven user-defined hook events (\texttt{pre/post-save}, \texttt{post-search}, \texttt{pre/post-finding}, \texttt{pre/post-index}) support custom integrations \cite{cortex-hooks}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
 
 \section{Multi-Agent Coordination}
 Modern agent workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
@@ -304,8 +271,6 @@ Third, \textbf{hook isolation}: each agent session gets its own hook execution c
 No comparable public retrieval-latency benchmark exists across all systems and models; cross-system speed claims must be measured directly.
 
 \subsection{Scorecard (architecture-level, non-empirical)}
-
-Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \textbf{Token ctrl} = ability to bound injected tokens (H=tight control). \textbf{Governance} = policy engine, roles, approval workflows. \textbf{Audit} = queryable history of memory changes. \textbf{Trust} = confidence scoring and decay. \textbf{Multi-agent} = concurrent session safety. \textbf{Shell/CLI} = model-free management tool. \textbf{Daily ops} = ongoing maintenance burden after setup (H=low burden). \textbf{Lock-in} = data portability risk (H=high lock-in, color-coded red; L=low lock-in, color-coded green).
 
 \begin{table*}[!t]
 \centering
