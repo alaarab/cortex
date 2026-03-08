@@ -159,7 +159,7 @@ On a new machine: clone, run init, done.
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Search uses three-tier RRF hybrid retrieval: FTS5 (primary), token-overlap semantic matching, and vector embeddings (when configured via `CORTEX_EMBEDDING_API_URL`). 46 tools grouped by what they do:
+The server indexes your cortex into a local SQLite FTS5 database. Search uses three-tier RRF hybrid retrieval: FTS5 (primary), token-overlap semantic matching, and vector embeddings (when configured via `CORTEX_EMBEDDING_API_URL`). 47 tools grouped by what they do:
 
 ### Search and browse
 
