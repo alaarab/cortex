@@ -78,6 +78,24 @@ describe("addFindings bulk", () => {
       expect(content).toContain(finding.slice(0, 30));
     }
   });
+
+  it("persists extra conflict annotations passed by bulk callers", () => {
+    const findings = [
+      "Use Redis for session storage",
+      "Prefer Postgres for transactional workloads",
+    ];
+    const r = addFindingsToFile(tmp.path, PROJECT, findings, {
+      extraAnnotationsByFinding: [
+        ['<!-- conflicts_with: "Never use Redis for sessions" (from project: global) -->'],
+        [],
+      ],
+    });
+    expect(r.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).toContain('conflicts_with: "Never use Redis for sessions"');
+    expect(content).toContain("from project: global");
+  });
 });
 
 describe("supersession", () => {

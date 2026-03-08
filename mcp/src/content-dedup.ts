@@ -464,7 +464,7 @@ const CONFLICT_CHECK_TOTAL_TIMEOUT_MS = 30_000;
  * LLM-based conflict check. Only called when CORTEX_FEATURE_SEMANTIC_CONFLICT=1.
  * Call after detectConflicts() in addFindingToFile flow.
  * Returns conflict annotations to append to the bullet.
- * Also scans global findings and up to 2 other recent projects for cross-project contradictions.
+ * Also scans global findings and other projects for cross-project contradictions.
  * Has a 30-second total timeout; returns partial results if the deadline is hit.
  */
 export async function checkSemanticConflicts(
@@ -499,7 +499,8 @@ export async function checkSemanticConflicts(
     if (bullets.length > 0) sources.push({ bullets, sourceProject: "global" });
   }
 
-  // Top 2 other projects by recency (mtime of FINDINGS.md)
+  // Scan other projects by FINDINGS.md recency so we still check the hottest projects first,
+  // but do not truncate the search set and miss older contradictions.
   try {
     const entries = fs.readdirSync(cortexPath, { withFileTypes: true });
     const otherProjects = entries
@@ -512,8 +513,7 @@ export async function checkSemanticConflicts(
         } catch { return null; }
       })
       .filter((x): x is { name: string; mtime: number; fp: string } => x !== null)
-      .sort((a, b) => b.mtime - a.mtime)
-      .slice(0, 2);
+      .sort((a, b) => b.mtime - a.mtime);
 
     for (const proj of otherProjects) {
       const content = fs.readFileSync(proj.fp, "utf8");

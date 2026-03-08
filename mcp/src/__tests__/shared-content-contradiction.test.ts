@@ -124,4 +124,29 @@ describe("checkSemanticConflicts (LLM-based)", () => {
     expect(result.annotations[0]).toContain("conflicts_with");
     expect(result.annotations[0]).toContain("Redis");
   });
+
+  it("scans older projects beyond the two most recent ones", async () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    for (const project of ["proj", "recent-a", "recent-b", "older-proj"]) {
+      fs.mkdirSync(path.join(cortex, project), { recursive: true });
+    }
+
+    fs.writeFileSync(path.join(cortex, "proj", "FINDINGS.md"), "# proj Findings\n");
+    fs.writeFileSync(path.join(cortex, "recent-a", "FINDINGS.md"), "# recent-a Findings\n\n- Use Postgres for analytics\n");
+    fs.writeFileSync(path.join(cortex, "recent-b", "FINDINGS.md"), "# recent-b Findings\n\n- Prefer Kafka for event streaming\n");
+    const existing = "- Always use Redis for session storage";
+    fs.writeFileSync(path.join(cortex, "older-proj", "FINDINGS.md"), `# older-proj Findings\n\n${existing}\n`);
+
+    const crypto = await import("node:crypto");
+    const newFinding = "Never use Redis for sessions, it causes data loss";
+    const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
+    fs.writeFileSync(
+      path.join(cortex, ".runtime", "conflict-cache.json"),
+      JSON.stringify({ [key]: { result: "CONFLICT", ts: Date.now() } })
+    );
+
+    const result = await checkSemanticConflicts(cortex, "proj", newFinding);
+    expect(result.annotations.some((annotation) => annotation.includes("older-proj"))).toBe(true);
+  });
 });

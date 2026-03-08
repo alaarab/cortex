@@ -15,13 +15,11 @@
 
 <br>
 
-Supports Claude Code, Copilot CLI, Cursor, and Codex.
+Your agents forget everything between sessions. Cortex fixes that.
 
-<br>
+A shared knowledge base for all your agents. Findings, decisions, task queues, project context. Stored as markdown in a git repo you own. Matching context shows up before each prompt. Findings save when the session ends. Works across Claude Code, Copilot CLI, Cursor, and Codex.
 
-Project references, field findings, task queues. Stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
-
-> **Quick start:** `npx @alaarab/cortex init` takes 30 seconds, no account needed.
+> `npx @alaarab/cortex init` — 30 seconds, no account needed.
 
 <br>
 </div>
@@ -61,7 +59,7 @@ If you want hooks-only mode (no MCP tools), install with:
 npx @alaarab/cortex init --mcp off
 ```
 
-You can toggle later anytime:
+Toggle anytime:
 
 ```bash
 cortex mcp-mode on       # recommended: MCP + hooks
@@ -98,13 +96,17 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
-**It runs itself.** Hooks inject context before every prompt and auto-save after every response. Trust filtering checks confidence, age decay, and citation validity before anything lands in your context.
+**It runs itself.** Hooks handle context injection and saving. Before each prompt, matching context from your store shows up in the agent's window. After each response, changes get committed and pushed. Trust filtering checks confidence, age, and citations so stale stuff fades on its own.
 
-**It's just files.** Markdown in a git repo you own. No database, no vector store, no account. `git log` shows how it grew.
+**Agents share one brain.** Run five agents in parallel on different parts of a codebase. They all write to the same store. A pitfall one agent hits at 2 AM shows up in another agent's context the next morning. The more you use it, the more each agent knows.
 
-**Search that works.** Three-tier hybrid search: FTS5, token-overlap semantic matching, and vector embeddings (when configured). Results merged with Reciprocal Rank Fusion. Recent findings get a recency boost. Type "throttling" and it finds "rate limit" and "429".
+**You can see what they know.** Everything is markdown in git. `git log` shows what your agents learned and when. `git diff` shows what changed between sessions. Grep across projects to find where something went wrong. No dashboards, no vendor portals. Just files.
 
-**Every machine, same brain.** Push to a private repo, clone on a new machine, run init. Profiles control which projects each machine sees.
+**It's just files.** No database, no vector store, no account. Markdown in a git repo you own. Fork it, back it up, delete it. Nothing leaves your machine unless you push it.
+
+**Search that finds what you need.** FTS5 full-text search, token-overlap matching, and optional vector embeddings. Results merged with Reciprocal Rank Fusion. "throttling" finds "rate limit" and "429". Old findings rank lower than recent ones.
+
+**Every machine, same brain.** Push to a private repo, clone on another machine, run init. Profiles control which projects each machine sees. Work laptop gets work projects. Home machine gets side projects.
 
 ---
 
@@ -127,13 +129,17 @@ On a new machine: clone, run init, done.
 
 ## How it runs itself
 
-**Prompt injection.** A hook extracts keywords, searches your cortex, and injects matching context before the agent starts thinking. Trust filtering checks confidence scores, age decay, and citation validity before injection.
+Three things happen every session without you doing anything:
 
-**Auto-save.** After each response, changes get committed and pushed automatically.
+**Before each prompt** — a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
 
-**Context recovery.** When the context window resets, a hook re-injects your project summary, recent findings, and active backlog.
+**After each response** — changes get committed and pushed. Findings, backlog updates, session state. If nothing changed, the hook skips.
 
-**Consolidation.** When findings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries and promotes cross-project patterns to global findings.
+**When context resets** — a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
+
+Two more things run in the background:
+
+**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up in three or more projects.
 
 **Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
@@ -141,13 +147,13 @@ On a new machine: clone, run init, done.
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Search uses three-tier RRF hybrid retrieval: FTS5 (primary), token-overlap semantic matching, and vector embeddings (when configured via `CORTEX_EMBEDDING_API_URL`). 47 tools grouped by what they do:
+The MCP server indexes your project store into a local SQLite FTS5 database and exposes 47 tools:
 
 ### Search and browse
 
 | Tool | What it does |
 |------|-------------|
-| `search_knowledge` | RRF hybrid search (FTS5 + token-overlap + vector) with synonym expansion and recency boost. Filters by project, type, limit. |
+| `search_knowledge` | Hybrid search (FTS5 + token-overlap + vector) with synonym expansion and recency boost. |
 | `get_memory_detail` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
@@ -170,7 +176,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Search uses th
 
 | Tool | What it does |
 |------|-------------|
-| `add_finding` | Append under today's date with optional citation metadata. Accepts optional `findingType` (`decision`, `pitfall`, `pattern`) to prefix the finding inline. |
+| `add_finding` | Save a finding with optional citation and type (`decision`, `pitfall`, `pattern`). |
 | `add_findings` | Bulk add multiple findings in one call. |
 | `remove_finding` | Remove by matching text. |
 | `remove_findings` | Bulk remove multiple findings in one call. |
@@ -180,8 +186,8 @@ The server indexes your cortex into a local SQLite FTS5 database. Search uses th
 
 | Tool | What it does |
 |------|-------------|
-| `pin_memory` | Write canonical/pinned memory that bypasses decay. |
-| `memory_feedback` | Record helpful/reprompt/regression outcomes. |
+| `pin_memory` | Pin a memory so it never decays. |
+| `memory_feedback` | Record helpful / reprompt / regression outcomes. |
 
 ### Data management
 
@@ -198,16 +204,16 @@ The server indexes your cortex into a local SQLite FTS5 database. Search uses th
 | `search_entities` | Find entities and related docs by name. |
 | `get_related_docs` | Get docs linked to a named entity. |
 | `read_graph` | Read the entity graph for a project or all projects. |
-| `link_findings` | Manually link a finding to an entity. Persists to manual-links.json and survives rebuilds. |
+| `link_findings` | Link a finding to an entity. Persists across rebuilds. |
 | `cross_project_entities` | Find entities shared across multiple projects. |
 
 ### Session management
 
 | Tool | What it does |
 |------|-------------|
-| `session_start` | Mark session start. Returns prior session summary, recent findings, and active backlog. |
-| `session_end` | Mark session end and save summary for next session. Reports duration and findings added. |
-| `session_context` | Get current session state: project, duration, findings added so far. |
+| `session_start` | Start a session. Returns prior summary, recent findings, active backlog. |
+| `session_end` | End session and save summary for next time. |
+| `session_context` | Current session state: project, duration, findings added. |
 
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 
@@ -289,7 +295,7 @@ Use `cortex config` for policy tuning and `cortex maintain` for governance opera
 
 ### cortex doctor
 
-`cortex doctor` runs a health check across your entire setup. Add `--fix` to auto-repair what it can, or `--check-data` to also validate config files.
+`cortex doctor` checks your setup. `--fix` repairs what it can. `--check-data` also validates config files.
 
 | Check | What it verifies | What FAIL means |
 |-------|-----------------|-----------------|
@@ -313,15 +319,15 @@ Use `cortex config` for policy tuning and `cortex maintain` for governance opera
 
 ### Access control (RBAC)
 
-Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Configured in `.governance/access-control.json`. Actor identity resolves from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then OS username. Unknown actors are treated as `viewer`.
+Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Set in `.governance/access-control.json`. Identity comes from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then your OS username. Unknown actors default to `viewer`.
 
-See [docs/environment.md](docs/environment.md) for feature flags and env var reference, including cloud embedding configuration (`CORTEX_EMBEDDING_API_URL`, `CORTEX_EMBEDDING_API_KEY`).
+See [docs/environment.md](docs/environment.md) for all feature flags and env vars.
 
 ---
 
 ## Works with every major agent
 
-Init auto-detects which tools you have and registers them all.
+Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
 
 | Agent | Context injection | Auto-save | MCP tools | Instruction files |
 |-------|:-----------------:|:---------:|:---------:|:-----------------:|
@@ -330,11 +336,13 @@ Init auto-detects which tools you have and registers them all.
 | Cursor | yes | yes | yes | via hooks |
 | OpenAI Codex | yes | yes | yes | `AGENTS.md` |
 
-If your agent supports MCP, cortex uses it. If it only supports hooks, that works too.
+MCP or hooks-only, either works. Same knowledge base either way.
 
 ---
 
 ## Multiple machines, one repo
+
+Your cortex is a git repo. Push it to a private remote, clone it anywhere.
 
 `machines.yaml` maps each hostname to a profile:
 
@@ -355,13 +363,26 @@ projects:
   - side-project
 ```
 
-`cortex link` applies the profile. Sparse-checkout keeps only the listed projects on disk. First run asks for a machine name and profile. After that, zero config.
+`cortex link` applies the profile and keeps only the listed projects on disk. First run asks for a machine name and profile. After that, nothing to configure.
 
 For CI or unattended setup:
 
 ```bash
 npx @alaarab/cortex init --machine ci-runner --profile work
 ```
+
+---
+
+## Multiple agents, shared knowledge
+
+When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context. No coordination code. No message passing. Just a shared git repo.
+
+- **Parallel agents** share findings on push/pull cycles
+- **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
+- **Cross-project patterns** surface when the same insight shows up in three or more projects
+- **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
+
+Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
 
 ---
 
@@ -397,7 +418,7 @@ mcpServers:
       API_KEY: "from-your-env"
 ```
 
-`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up automatically when the config changes.
+`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
 
 ---
 
@@ -415,29 +436,29 @@ mkdir ~/.cortex/my-project && echo "# my-project" > ~/.cortex/my-project/CLAUDE.
 
 **Cortex not injecting context into prompts**
 
-Check that hooks are enabled: run `cortex status` and look at the Hooks line. If it says "off", run `cortex hooks-mode on`. If hooks are on but context still isn't appearing, run `cortex doctor` to check that the prompt hook is configured in your agent's settings file.
+Run `cortex status` and check the Hooks line. If it says "off", run `cortex hooks-mode on`. If hooks are on but nothing's appearing, run `cortex doctor` to check the prompt hook config.
 
 **MCP tools not connecting**
 
-Run `cortex status` and check the MCP and MCP cfg lines. If MCP is off, run `cortex mcp-mode on`. If MCP is on but cfg shows "missing", run `cortex init` to reconfigure. For VS Code or Cursor, check that the MCP config was written to the right settings file.
+Run `cortex status` and check the MCP line. If it's off, run `cortex mcp-mode on`. If cfg shows "missing", run `cortex init`. For VS Code or Cursor, check that MCP config landed in the right settings file.
 
 **"I saved a finding but can't find it"**
 
-Findings are scoped to a project. Run `cortex search "your term" --project <name>` to search within a specific project. If the finding was flagged by trust filtering, check the review queue: `cortex` then press `m`, or search without a project filter.
+Findings are scoped to a project. Try `cortex search "your term" --project <name>`. If it was flagged by trust filtering, check the review queue: `cortex` then press `m`.
 
 **Doctor says FAIL on symlinks**
 
-This usually means the project directory moved or the symlinks are stale. Run `cortex doctor --fix` to re-create all symlinks and hooks.
+Project directory probably moved or symlinks are stale. Run `cortex doctor --fix`.
 
 **Merge conflicts after pulling on a new machine**
 
-Run `cortex` and type `:conflicts` to see what conflicted. Cortex auto-merges most cases (backlog items, findings), but if a manual merge is needed the conflict markers will show in the affected files.
+Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (backlog items, findings). If a manual merge is needed, conflict markers show in the files.
 
 ---
 
 ## Dependency note
 
-Cortex uses `sql.js-fts5` for local SQLite FTS5 support in Node. This dependency is actively pinned and tested in CI. If you run in a high-security environment, review dependency updates during upgrades and keep lockfiles committed.
+Cortex uses `sql.js-fts5` for local SQLite FTS5 in Node. Pinned and tested in CI. If you're in a high-security environment, review dependency updates on upgrade and keep lockfiles committed.
 
 ---
 
