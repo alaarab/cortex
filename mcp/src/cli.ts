@@ -2,7 +2,7 @@ import {
   getProjectDirs,
   runtimeFile,
   EXEC_TIMEOUT_MS,
-  ensureCortexPath,
+  getCortexPath,
 } from "./shared.js";
 import {
   recordFeedback,
@@ -81,11 +81,6 @@ import {
 } from "./cli-config.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Search types and parsing ─────────────────────────────────────────────────

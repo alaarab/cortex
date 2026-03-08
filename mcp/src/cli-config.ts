@@ -1,4 +1,4 @@
-import { ensureCortexPath } from "./shared.js";
+import { getCortexPath } from "./shared.js";
 import {
   getIndexPolicy,
   updateIndexPolicy,
@@ -11,12 +11,6 @@ import {
 } from "./shared-governance.js";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
-
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {
