@@ -24,7 +24,7 @@ When to use: documentation too long or structured for a bullet point in FINDINGS
 
 Patterns that apply across all projects: conventions, workflow preferences, tool configuration, shared skills. Global findings are indexed and searchable from any project context.
 
-When to use: a pattern confirmed in 3+ projects (the `/cortex-consolidate` skill promotes these automatically), personal workflow preferences, or shared skills.
+When to use: a pattern confirmed in 2+ projects (the `/cortex-consolidate` skill promotes these automatically), personal workflow preferences, or shared skills.
 
 ## How search works across tiers
 
@@ -47,4 +47,4 @@ search_knowledge(query: "api auth", type: "reference")
 |----------|------|
 | Did I just discover this? Will it fit in one bullet? | Findings |
 | Is this a reference doc I will look up repeatedly? | Reference |
-| Does this pattern apply to 3+ projects? | Global |
+| Does this pattern apply to 2+ projects? | Global |
