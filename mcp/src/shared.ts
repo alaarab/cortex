@@ -346,3 +346,11 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
     if (hasLock) try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
   }
 }
+
+export function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    done: runtimeFile(cortexPathLocal, `quality-${today}`),
+    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
+  };
+}

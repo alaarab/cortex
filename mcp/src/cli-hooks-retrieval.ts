@@ -439,87 +439,63 @@ export function rankResults(
   const getRecentDate = (doc: DocRow): string =>
     recentDateCache.get(doc.path || `${doc.project}/${doc.filename}`) ?? "0000-00-00";
 
-  // Single composite sort — file-match boost is highest priority so relevant files
-  // are not excluded by the slice. All criteria in one pass for deterministic ordering.
+  // Precompute per-doc ranking metadata once — avoids recomputing inside sort comparator.
+  const changedFiles = gitCtx?.changedFiles || new Set<string>();
   const FILE_MATCH_BOOST = 1.5;
-  ranked.sort((a, b) => {
-    // Highest priority: currently-changed files / branch-matching docs
-    // Only apply git-context filtering when explicitly opted in
+  type ScoredDoc = { doc: DocRow; score: number; fileMatch: boolean; globBoost: number; qualityMult: number; entity: number; date: string };
+  const scored: ScoredDoc[] = ranked.map((doc) => {
+    const globBoost = getProjectGlobBoost(cortexPathLocal, doc.project, cwd, gitCtx?.changedFiles);
+    const key = entryScoreKey(doc.project, doc.filename, doc.content);
+    const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
+    const date = getRecentDate(doc);
+    const fileRel = fileRelevanceBoost(doc.path, changedFiles);
+    const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
+    const qualityMult = getQualityMultiplier(cortexPathLocal, key);
+    const score = Math.round((
+      intentBoost(intent, doc.type) +
+      fileRel +
+      branchMat +
+      globBoost +
+      qualityMult +
+      entity +
+      recencyBoost(doc.type, date) -
+      lowValuePenalty(doc.content, doc.type)
+    ) * crossProjectAgeMultiplier(doc, detectedProject, date) * 10000) / 10000;
+    const fileMatch = fileRel > 0 || branchMat > 0;
+    return { doc, score, fileMatch, globBoost, qualityMult, entity, date };
+  });
+
+  // Single composite sort on cached values.
+  scored.sort((a, b) => {
     if (process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === 'true') {
       if (gitCtx && gitCtx.changedFiles.size > 0) {
-        const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
-        const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
-        const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
+        const scoreDiff = (b.fileMatch ? FILE_MATCH_BOOST : 1) - (a.fileMatch ? FILE_MATCH_BOOST : 1);
         if (scoreDiff !== 0) return scoreDiff;
       }
     }
 
-    const isFindingsA = a.type === "findings";
-    const isFindingsB = b.type === "findings";
+    const isFindingsA = a.doc.type === "findings";
+    const isFindingsB = b.doc.type === "findings";
     if (isFindingsA !== isFindingsB) return isFindingsA ? -1 : 1;
     if (isFindingsA && isFindingsB) {
-      const byDate = getRecentDate(b).localeCompare(getRecentDate(a));
+      const byDate = b.date.localeCompare(a.date);
       if (byDate !== 0) return byDate;
     }
 
-    const changedFiles = gitCtx?.changedFiles || new Set<string>();
-    const globBoostA = getProjectGlobBoost(cortexPathLocal, a.project, cwd, gitCtx?.changedFiles);
-    const globBoostB = getProjectGlobBoost(cortexPathLocal, b.project, cwd, gitCtx?.changedFiles);
-    const keyA = entryScoreKey(a.project, a.filename, a.content);
-    const keyB = entryScoreKey(b.project, b.filename, b.content);
-    const entityA = entityBoostPaths.has(a.path) ? 1.3 : 1;
-    const entityB = entityBoostPaths.has(b.path) ? 1.3 : 1;
-    const dateA = getRecentDate(a);
-    const dateB = getRecentDate(b);
-    const scoreA = (
-      intentBoost(intent, a.type) +
-      fileRelevanceBoost(a.path, changedFiles) +
-      branchMatchBoost(a.content, gitCtx?.branch) +
-      globBoostA +
-      getQualityMultiplier(cortexPathLocal, keyA) +
-      entityA +
-      recencyBoost(a.type, dateA) -
-      lowValuePenalty(a.content, a.type)
-    ) * crossProjectAgeMultiplier(a, detectedProject, dateA);
-    const scoreB = (
-      intentBoost(intent, b.type) +
-      fileRelevanceBoost(b.path, changedFiles) +
-      branchMatchBoost(b.content, gitCtx?.branch) +
-      globBoostB +
-      getQualityMultiplier(cortexPathLocal, keyB) +
-      entityB +
-      recencyBoost(b.type, dateB) -
-      lowValuePenalty(b.content, b.type)
-    ) * crossProjectAgeMultiplier(b, detectedProject, dateB);
-    // Round scores to avoid floating-point comparison instability
-    const roundedA = Math.round(scoreA * 10000) / 10000;
-    const roundedB = Math.round(scoreB * 10000) / 10000;
-    const scoreDelta = roundedB - roundedA;
+    const scoreDelta = b.score - a.score;
     if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
 
-    const intentDelta = intentBoost(intent, b.type) - intentBoost(intent, a.type);
-    if (intentDelta !== 0) return intentDelta;
-
-    const fileDelta = fileRelevanceBoost(b.path, changedFiles) - fileRelevanceBoost(a.path, changedFiles);
-    if (fileDelta !== 0) return fileDelta;
-
-    const branchDelta = branchMatchBoost(b.content, gitCtx?.branch) - branchMatchBoost(a.content, gitCtx?.branch);
-    if (branchDelta !== 0) return branchDelta;
-
-    const globDelta = globBoostB - globBoostA;
+    const globDelta = b.globBoost - a.globBoost;
     if (Math.abs(globDelta) > 0.01) return globDelta;
 
-    const qualityDelta = getQualityMultiplier(cortexPathLocal, keyB) - getQualityMultiplier(cortexPathLocal, keyA);
+    const qualityDelta = b.qualityMult - a.qualityMult;
     if (qualityDelta !== 0) return qualityDelta;
 
-    const penaltyDelta = lowValuePenalty(a.content, a.type) - lowValuePenalty(b.content, b.type);
-    if (penaltyDelta !== 0) return penaltyDelta;
+    if (b.entity !== a.entity) return b.entity - a.entity;
 
-    if (entityB !== entityA) return entityB - entityA;
-
-    // Stable secondary sort: deterministic ordering for identical scores
-    return (a.path || `${a.project}/${a.filename}`).localeCompare(b.path || `${b.project}/${b.filename}`);
+    return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
   });
+  ranked = scored.map((s) => s.doc);
 
   ranked = ranked.slice(0, 8);
 

@@ -1,6 +1,7 @@
 import {
   appendAuditLog,
   runtimeFile,
+  qualityMarkers,
   getProjectDirs,
   ensureCortexPath,
 } from "./shared.js";
@@ -88,13 +89,6 @@ function summarizeBackupChanges(before: Map<string, number>, projects: string[])
   return changed.sort();
 }
 
-function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
-  const today = new Date().toISOString().slice(0, 10);
-  return {
-    done: runtimeFile(cortexPathLocal, `quality-${today}`),
-    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
-  };
-}
 
 // ── Governance handlers ──────────────────────────────────────────────────────
 
