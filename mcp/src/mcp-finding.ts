@@ -158,8 +158,9 @@ export function register(server: McpServer, ctx: McpContext): void {
               semanticSkipped.push(f);
               continue;
             }
-          } catch {
+          } catch (err: unknown) {
             // Semantic dedup failure is non-fatal — proceed with the finding
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] add_findings semanticDedup: ${errorMessage(err)}\n`);
           }
 
           try {
@@ -170,8 +171,9 @@ export function register(server: McpServer, ctx: McpContext): void {
             } else {
               extraAnnotationsByFinding.push([]);
             }
-          } catch {
+          } catch (err: unknown) {
             // Semantic conflict failure is non-fatal
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] add_findings semanticConflict: ${errorMessage(err)}\n`);
             extraAnnotationsByFinding.push([]);
           }
           clearTimeout(timeoutId);
@@ -297,7 +299,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           try {
             const remotes = runGit(["remote"]);
             hasRemote = remotes.length > 0;
-          } catch { /* no remote */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes remoteCheck: ${errorMessage(err)}\n`);
+          }
 
           if (!hasRemote) {
             const changedFiles = status.split("\n").filter(Boolean).length;
@@ -320,7 +324,8 @@ export function register(server: McpServer, ctx: McpContext): void {
               if (attempt < 3) {
                 try {
                   runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
-                } catch {
+                } catch (pullErr: unknown) {
+                  if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}\n`);
                   const resolved = autoMergeConflicts(cortexPath);
                   if (resolved) {
                     try {
@@ -328,12 +333,17 @@ export function register(server: McpServer, ctx: McpContext): void {
                         timeout: 10000,
                         env: { ...process.env, GIT_EDITOR: "true" },
                       });
-                    } catch {
-                      try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
+                    } catch (continueErr: unknown) {
+                      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}\n`);
+                      try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
+                        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                      }
                       break;
                     }
                   } else {
-                    try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
+                    try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
+                      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                    }
                     break;
                   }
                 }

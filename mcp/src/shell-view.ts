@@ -229,7 +229,9 @@ export function parseSubsections(backlogPath: string, project: string, cache: Su
         rowIdx++;
       }
     }
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   const newCache = { project, map };
   return { map, cache: newCache };
 }

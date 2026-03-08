@@ -111,7 +111,9 @@ export class CortexShell {
         this.undoStack.push({ label, file, content });
         if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
       }
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] shell pushUndo: ${errorMessage(err)}\n`);
+    }
   }
 
   popUndo(): string {

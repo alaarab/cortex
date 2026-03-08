@@ -126,7 +126,9 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
         if (normalizedLine === normalizedBullet) return true;
       }
     }
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] isDuplicateInReference: ${errorMessage(err)}\n`);
+  }
   return false;
 }
 
@@ -301,6 +303,8 @@ export function autoArchiveToReference(
   return cortexOk(safeToRemove.length);
   });
   } finally {
-    try { fs.unlinkSync(lockFile); } catch { /* best-effort cleanup */ }
+    try { fs.unlinkSync(lockFile); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
+    }
   }
 }

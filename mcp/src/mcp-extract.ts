@@ -34,8 +34,8 @@ function parseFindings(raw: string): string[] {
         .map(f => f.trim())
         .slice(0, 10);
     }
-  } catch {
-    debugLog(`auto_extract: failed to parse LLM output as JSON: ${cleaned.slice(0, 200)}`);
+  } catch (err: unknown) {
+    debugLog(`auto_extract: failed to parse LLM output as JSON: ${cleaned.slice(0, 200)} (${err instanceof Error ? err.message : String(err)})`);
   }
   return [];
 }

@@ -292,8 +292,9 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
         }
       }
     }
-  } catch {
+  } catch (err: unknown) {
     // If unparseable, return all projects
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] memory-ui filterByProfile: ${errorMessage(err)}\n`);
   }
 
   const results: ProjectInfo[] = [];

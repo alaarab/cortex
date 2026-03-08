@@ -402,7 +402,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
             lines.push(`    ${style.red("!")} ${f}`);
           }
         }
-      } catch { /* not a git repo */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] shell status gitStatus: ${errorMessage(err)}\n`);
+      }
 
       const auditPathNew = runtimeFile(host.cortexPath, "audit.log");
       const auditPathLegacy = path.join(host.cortexPath, ".governance", "audit.log");

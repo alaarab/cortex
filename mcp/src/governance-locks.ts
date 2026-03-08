@@ -18,14 +18,16 @@ function acquireFileLock(lockPath: string): void {
       fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
       hasLock = true;
       break;
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
           fs.unlinkSync(lockPath);
           continue;
         }
-      } catch {
+      } catch (statErr: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
         sleep(pollInterval);
         waited += pollInterval;
         continue;
@@ -43,7 +45,9 @@ function acquireFileLock(lockPath: string): void {
 }
 
 function releaseFileLock(lockPath: string): void {
-  try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+  try { fs.unlinkSync(lockPath); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 // Q10: withFileLock now accepts both sync and async callbacks.

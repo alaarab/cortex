@@ -340,7 +340,9 @@ function appendHookErrorLog(cortexPath: string, event: string, message: string):
       const lines = content.split("\n").filter(Boolean);
       fs.writeFileSync(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
     }
-  } catch { /* non-fatal */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendHookErrorLog rotate: ${errorMessage(err)}\n`);
+  }
 }
 
 export function runCustomHooks(
@@ -369,7 +371,9 @@ export function runCustomHooks(
           debugLog(`runCustomHooks webhook: ${message}`);
           try {
             appendHookErrorLog(cortexPath, event, message);
-          } catch { /* best-effort */ }
+          } catch (logErr: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCustomHooks webhookErrorLog: ${errorMessage(logErr)}\n`);
+          }
         });
       continue;
     }
@@ -388,7 +392,9 @@ export function runCustomHooks(
       errors.push({ code: CortexError.VALIDATION_ERROR, message });
       try {
         appendHookErrorLog(cortexPath, event, errorMessage(err));
-      } catch { /* best-effort logging */ }
+      } catch (logErr: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCustomHooks hookErrorLog: ${errorMessage(logErr)}\n`);
+      }
     }
   }
 
@@ -442,7 +448,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
-      try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file is expected */ }
+      try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks cursorRead: ${errorMessage(err)}\n`);
+      }
       const config: CursorHookConfig = {
         ...existing,
         version: 1,
@@ -465,7 +473,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     const codexFile = path.join(cortexPath, "codex.json");
     try {
       let existing: Record<string, unknown> = {};
-      try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file is expected */ }
+      try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks codexRead: ${errorMessage(err)}\n`);
+      }
       const config: CodexHookConfig = {
         ...existing,
         hooks: {

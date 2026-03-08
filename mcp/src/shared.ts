@@ -108,8 +108,9 @@ export function appendIndexEvent(cortexPath: string, event: Record<string, unkno
   try {
     const file = runtimeFile(cortexPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
-  } catch {
+  } catch (err: unknown) {
     // Observability should not break the indexer.
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendIndexEvent: ${errorMessage(err)}\n`);
   }
 }
 
@@ -169,7 +170,10 @@ export function findCortexPath(): string | null {
   if (envVal) {
     try {
       _cachedCortexPath = fs.statSync(envVal).isDirectory() ? envVal : null;
-    } catch { _cachedCortexPath = null; }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findCortexPath stat: ${errorMessage(err)}\n`);
+      _cachedCortexPath = null;
+    }
     return _cachedCortexPath;
   }
   const home = process.env.HOME || process.env.USERPROFILE || "";
@@ -244,7 +248,8 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
         .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
 
       return [...new Set([...listed, ...sharedDirs])];
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
       console.error(`${CortexError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
       return [];
     }
@@ -274,8 +279,8 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
         results.push({ project, file: f, fullPath });
       }
     }
-  } catch {
-    // best effort
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
   }
   return results;
 }
@@ -298,7 +303,9 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   const newPath = runtimeFile(cortexPath, "audit.log");
   // One-time migration: move old audit log to new location
   if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
-    try { fs.renameSync(legacyPath, newPath); } catch { /* best effort */ }
+    try { fs.renameSync(legacyPath, newPath); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog migrate: ${errorMessage(err)}\n`);
+    }
   }
   const logPath = newPath;
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
@@ -319,11 +326,14 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
         fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
         hasLock = true;
         break;
-      } catch {
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
         try {
           const stat = fs.statSync(lockPath);
           if (Date.now() - stat.mtimeMs > staleMs) { fs.unlinkSync(lockPath); continue; }
-        } catch { /* ignore */ }
+        } catch (statErr: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
+        }
         Atomics.wait(waiter, 0, 0, pollMs);
         waited += pollMs;
       }
@@ -343,7 +353,9 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
     const msg = errorMessage(err);
     debugLog(`Audit log write failed: ${msg}`);
   } finally {
-    if (hasLock) try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+    if (hasLock) try { fs.unlinkSync(lockPath); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog unlock: ${errorMessage(err)}\n`);
+    }
   }
 }
 

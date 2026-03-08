@@ -139,7 +139,8 @@ function readSearchHistory(): SearchHistoryEntry[] {
       .split("\n")
       .filter(Boolean)
       .map(line => JSON.parse(line) as SearchHistoryEntry);
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readSearchHistory: ${errorMessage(err)}\n`);
     return [];
   }
 }
@@ -471,7 +472,9 @@ async function handleSearch(opts: SearchOptions) {
         try {
           const { logSearchMiss } = await import("./mcp-search.js");
           logSearchMiss(getCortexPath(), opts.query, opts.project);
-        } catch { /* best-effort */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search logSearchMiss: ${errorMessage(err)}\n`);
+        }
       }
       const scope = [
         opts.query ? `query "${opts.query}"` : undefined,
@@ -568,7 +571,9 @@ async function handleDoctor(args: string[]) {
             for (const token of tokens) {
               tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
             }
-          } catch { /* skip malformed lines */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor searchMissParse: ${errorMessage(err)}\n`);
+          }
         }
         const topMisses = [...tokenCounts.entries()]
           .sort((a, b) => b[1] - a[1])
@@ -581,7 +586,9 @@ async function handleDoctor(args: string[]) {
         }
       }
     }
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
+  }
 
   // Semantic search / Ollama status
   try {
@@ -607,7 +614,9 @@ async function handleDoctor(args: string[]) {
         }
       }
     }
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor ollamaStatus: ${errorMessage(err)}\n`);
+  }
 
   process.exit(result.ok ? 0 : 1);
 }
@@ -732,7 +741,8 @@ function openInEditor(filePath: string): void {
   const editor = process.env.EDITOR || process.env.VISUAL || "nano";
   try {
     execFileSync(editor, [filePath], { stdio: "inherit" });
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] openInEditor: ${errorMessage(err)}\n`);
     console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
     process.exit(1);
   }
@@ -800,7 +810,8 @@ function handleSkillsNamespace(args: string[]) {
     try {
       fs.symlinkSync(source, dest);
       console.log(`Linked skill ${fileName} into ${project}.`);
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] skill add symlinkFailed: ${errorMessage(err)}\n`);
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
@@ -1000,7 +1011,9 @@ function handleDetectSkills(args: string[]) {
     const stat = fs.statSync(entryPath);
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] skillList lstat: ${errorMessage(err)}\n`);
+    }
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
     if (stat.isFile() && entry.endsWith(".md")) {
@@ -1312,7 +1325,10 @@ function handleProjectsList() {
   for (const name of projects) {
     const projectDir = path.join(cortexPath, name);
     let dirFiles: Set<string>;
-    try { dirFiles = new Set(fs.readdirSync(projectDir)); } catch { dirFiles = new Set(); }
+    try { dirFiles = new Set(fs.readdirSync(projectDir)); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] projects list readdir: ${errorMessage(err)}\n`);
+      dirFiles = new Set();
+    }
     const tags: string[] = [];
     if (dirFiles.has("FINDINGS.md")) tags.push("findings");
     if (dirFiles.has("backlog.md")) tags.push("backlog");
@@ -1394,7 +1410,9 @@ async function handleProjectsRemove(name: string) {
       else fileCount++;
     }
   };
-  try { countFiles(projectDir); } catch { /* best-effort */ }
+  try { countFiles(projectDir); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] projects remove countFiles: ${errorMessage(err)}\n`);
+  }
 
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

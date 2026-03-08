@@ -924,7 +924,8 @@ export function listMachines(cortexPath: string): CortexResult<Record<string, st
       cleaned[machine] = profile;
     }
     return cortexOk(cleaned);
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listMachines yaml parse: ${errorMessage(err)}\n`);
     return cortexErr(`Could not parse machines.yaml. Check the file for syntax errors or run 'cortex doctor --fix'.`, CortexError.MALFORMED_YAML);
   }
 }
@@ -977,7 +978,8 @@ export function listProfiles(cortexPath: string): CortexResult<ProfileInfo[]> {
         ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
         : [];
       profiles.push({ name, file: full, projects });
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listProfiles yamlParse: ${errorMessage(err)}\n`);
       return cortexErr(`profiles/${file}`, CortexError.MALFORMED_YAML);
     }
   }
@@ -1088,7 +1090,8 @@ export function loadShellState(cortexPath: string): ShellState {
       page: Number.isFinite(raw.page) ? Number(raw.page) : fallback.page,
       perPage: Number.isFinite(raw.perPage) ? Number(raw.perPage) : fallback.perPage,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadShellState parse: ${errorMessage(err)}\n`);
     return fallback;
   }
 }

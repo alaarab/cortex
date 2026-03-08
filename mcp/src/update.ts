@@ -15,7 +15,8 @@ function readPackageName(packageRoot: string): string | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(packageJson, "utf8")) as { name?: string };
     return parsed.name || null;
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readPackageName: ${errorMessage(err)}\n`);
     return null;
   }
 }
@@ -47,7 +48,9 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
         if (status) {
           process.stderr.write(`Note: uncommitted changes detected, autostash will preserve them.\n`);
         }
-      } catch { /* best effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCortexUpdate gitStatus: ${errorMessage(err)}\n`);
+      }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run("npm", ["install"], root);
       return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.` };

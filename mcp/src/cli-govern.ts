@@ -188,9 +188,11 @@ export async function handlePruneMemories(args: string[] = []) {
       retrievalEntries = fs.readFileSync(retrievalLogPath, "utf8")
         .split("\n")
         .filter(Boolean)
-        .map(line => { try { return JSON.parse(line); } catch { return null; } })
+        .map(line => { try { return JSON.parse(line); } catch { return null; } }) // null filtered below
         .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern retrievalLog readParse: ${errorMessage(err)}\n`);
+    }
   }
 
   // Build map of last retrieval date by file+bullet key
@@ -378,8 +380,8 @@ function describeGovernanceMigrationPlan(): Array<{ file: string; from: number; 
       if (fileVersion < GOVERNANCE_SCHEMA_VERSION) {
         pending.push({ file, from: fileVersion, to: GOVERNANCE_SCHEMA_VERSION });
       }
-    } catch {
-      // Ignore malformed files here; shared migration API handles hard failures defensively.
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern describeGovernanceMigrationPlan fileParse: ${errorMessage(err)}\n`);
     }
   }
   return pending;
@@ -564,6 +566,8 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     });
     appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
-    try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+    try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern backgroundMaintenance unlockFinal: ${errorMessage(err)}\n`);
+    }
   }
 }

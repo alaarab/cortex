@@ -31,7 +31,10 @@ export function readExtractedFacts(cortexPath: string, project: string): Extract
   try {
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     return Array.isArray(data) ? data : [];
-  } catch { return []; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readExtractedFacts: ${errorMessage(err)}\n`);
+    return [];
+  }
 }
 
 function writeExtractedFacts(cortexPath: string, project: string, facts: ExtractedFact[]): void {

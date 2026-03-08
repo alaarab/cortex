@@ -101,7 +101,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         const stat = fs.statSync(doc.path);
         updatedAt = stat.mtime.toISOString();
         createdAt = stat.birthtime.toISOString();
-      } catch { /* file may not exist on disk */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge statFile: ${errorMessage(err)}\n`);
+      }
 
       // Extract tags from content (e.g. [decision], [pitfall], [pattern])
       const tagMatches = doc.content.match(/\[(decision|pitfall|pattern|tradeoff|architecture|bug)\]/gi);
@@ -423,7 +425,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           try {
             const mtime = fs.statSync(filePath).mtimeMs;
             if (mtime > thirtyDaysAgo) boost = 1.2;
-          } catch { /* file may not exist on disk */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge rerank statFile: ${errorMessage(err)}\n`);
+          }
 
           const scoreKey = entryScoreKey(rowProject, filename, content);
           boost *= getQualityMultiplier(cortexPath, scoreKey);
@@ -462,7 +466,9 @@ export function register(server: McpServer, ctx: McpContext): void {
             const synthKey = createHash("sha256").update([query, filterProject ?? "", filterType ?? "", filterTag ?? "", since ?? ""].join("|")).digest("hex").slice(0, 16);
             const synthCachePath = runtimeFile(cortexPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
-            try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch { /* file absent or corrupt */ }
+            try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
+            }
             const cached = synthCache[synthKey];
             const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
             if (cached && Date.now() - cached.ts < SYNTH_CACHE_TTL_MS) {

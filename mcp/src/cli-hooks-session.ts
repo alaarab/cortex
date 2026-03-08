@@ -484,7 +484,9 @@ export async function handleHookStop() {
                   if (block.type === "text" && block.text) assistantTexts.push(block.text);
                 }
               }
-            } catch { /* skip malformed lines */ }
+            } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart transcriptParse: ${errorMessage(err)}\n`);
+            }
           }
           captureInput = assistantTexts.join("\n");
         }

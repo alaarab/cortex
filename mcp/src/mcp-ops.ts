@@ -140,26 +140,34 @@ export function register(server: McpServer, ctx: McpContext): void {
         const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "package.json");
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
 
       // FTS index (lives in /tmp/cortex-fts-*/, not .runtime/)
       let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
       try {
         indexStatus = findFtsCacheForPath(cortexPath, profile);
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
 
       // Hook registration
       let hooksEnabled = false;
       try {
         const { getHooksEnabledPreference } = await import("./init-preferences.js");
         hooksEnabled = getHooksEnabledPreference(cortexPath);
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck hooksEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
 
       let mcpEnabled = false;
       try {
         const { getMcpEnabledPreference } = await import("./init-preferences.js");
         mcpEnabled = getMcpEnabledPreference(cortexPath);
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck mcpEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
 
       // Profile/machine info
       const activeProfile = profile || "(default)";
@@ -171,7 +179,9 @@ export function register(server: McpServer, ctx: McpContext): void {
             const hostnameMatch = content.match(new RegExp(`^\\s*(\\S+):`, "m"));
             return hostnameMatch ? hostnameMatch[1] : undefined;
           }
-        } catch { /* best-effort */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
         return undefined;
       })();
 
@@ -241,7 +251,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           const lines = content.split("\n").filter(l => l.trim());
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
-        } catch { return []; }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readErrorLines: ${err instanceof Error ? err.message : String(err)}\n`);
+          return [];
+        }
       }
 
       // hook-errors.log contains only hook failure lines (no filtering needed)
