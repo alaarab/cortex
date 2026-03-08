@@ -7,6 +7,8 @@ import * as crypto from "crypto";
 import { runtimeFile, resolveFindingsPath, debugLog, tryUnlink } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
+import { runCustomHooks } from "./hooks.js";
+import { readExtractedFacts } from "./mcp-extract-facts.js";
 
 interface SessionState {
   sessionId: string;
@@ -310,6 +312,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
       }
+      // Surface extracted preferences/facts for this project
+      try {
+        const facts = readExtractedFacts(cortexPath, activeProject).slice(-10);
+        if (facts.length > 0) {
+          parts.push(`## Preferences (${activeProject})\n${facts.map(f => `- ${f.fact}`).join("\n")}`);
+        }
+      } catch { /* best-effort */ }
     }
 
     const message = parts.length > 0
@@ -355,6 +364,13 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
+
+    runCustomHooks(cortexPath, "post-session-end", {
+      CORTEX_SESSION_ID: state.sessionId,
+      CORTEX_DURATION_MINS: String(durationMins),
+      CORTEX_FINDINGS_ADDED: String(state.findingsAdded),
+      ...(endedState.project ? { CORTEX_PROJECT: endedState.project } : {}),
+    });
 
     return mcpResponse({
       ok: true,

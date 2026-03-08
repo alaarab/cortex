@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { createHmac } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, type CortexErrorCode } from "./shared.js";
@@ -263,24 +264,36 @@ export function isToolHookEnabled(cortexPath: string, tool: string): boolean {
 // ── #218: Custom integration hooks ──────────────────────────────────────
 
 export type CustomHookEvent =
-  | "pre-save"      // Before push_changes commits
-  | "post-save"     // After push_changes pushes
-  | "post-search"   // After search_knowledge returns results
-  | "pre-finding"   // Before a finding is written to FINDINGS.md
-  | "post-finding"  // After a finding is written
-  | "pre-index"     // Before FTS index rebuild
-  | "post-index";   // After FTS index rebuild
+  | "pre-save"         // Before push_changes commits
+  | "post-save"        // After push_changes pushes
+  | "post-search"      // After search_knowledge returns results
+  | "pre-finding"      // Before a finding is written to FINDINGS.md
+  | "post-finding"     // After a finding is written
+  | "pre-index"        // Before FTS index rebuild
+  | "post-index"       // After FTS index rebuild
+  | "post-session-end" // After session_end completes
+  | "post-consolidate"; // After FINDINGS.md consolidation runs
 
-export interface CustomHookEntry {
+export interface CommandHookEntry {
   event: CustomHookEvent;
   command: string;
   timeout?: number; // ms, default 5000
 }
 
+export interface WebhookHookEntry {
+  event: CustomHookEvent;
+  webhook: string; // HTTP POST URL
+  secret?: string; // Optional HMAC-SHA256 signing secret
+  timeout?: number; // ms, default 5000
+}
+
+export type CustomHookEntry = CommandHookEntry | WebhookHookEntry;
+
 const VALID_HOOK_EVENTS = new Set<string>([
   "pre-save", "post-save", "post-search",
   "pre-finding", "post-finding",
   "pre-index", "post-index",
+  "post-session-end", "post-consolidate",
 ]);
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
@@ -296,8 +309,10 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
         h &&
         typeof h.event === "string" &&
         VALID_HOOK_EVENTS.has(h.event) &&
-        typeof h.command === "string" &&
-        h.command.trim().length > 0
+        (
+          (typeof h.command === "string" && h.command.trim().length > 0) ||
+          (typeof h.webhook === "string" && h.webhook.trim().length > 0)
+        )
     );
   } catch (err: unknown) {
     debugLog(`readCustomHooks: ${err instanceof Error ? err.message : String(err)}`);
@@ -318,6 +333,24 @@ export function runCustomHooks(
   const shellCmd = isWindows ? "cmd" : "sh";
 
   for (const hook of matching) {
+    if ("webhook" in hook) {
+      // Webhook hook: fire-and-forget HTTP POST (async, does not block runCustomHooks)
+      const payload = JSON.stringify({ event, cortexPath, env, timestamp: new Date().toISOString() });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (hook.secret) {
+        headers["X-Cortex-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
+      }
+      fetch(hook.webhook, { method: "POST", headers, body: payload, signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT) })
+        .catch((err: unknown) => {
+          const message = `${event}: ${hook.webhook}: ${err instanceof Error ? err.message : String(err)}`;
+          debugLog(`runCustomHooks webhook: ${message}`);
+          try {
+            const logPath = runtimeFile(cortexPath, "hook-errors.log");
+            fs.appendFileSync(logPath, `[${new Date().toISOString()}] [${event}] ${message}\n`);
+          } catch { /* best-effort */ }
+        });
+      continue;
+    }
     const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
     try {
       execFileSync(shellCmd, shellArgs, {

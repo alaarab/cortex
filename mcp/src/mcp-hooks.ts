@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
-import { readCustomHooks, type CustomHookEntry, type CustomHookEvent } from "./hooks.js";
+import { readCustomHooks, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry, type CustomHookEvent } from "./hooks.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
@@ -14,6 +14,7 @@ const VALID_CUSTOM_EVENTS = [
   "pre-save", "post-save", "post-search",
   "pre-finding", "post-finding",
   "pre-index", "post-index",
+  "post-session-end", "post-consolidate",
 ] as const;
 
 /**
@@ -87,7 +88,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (customHooks.length > 0) {
         lines.push("", `${customHooks.length} custom hook(s):`);
         for (const h of customHooks) {
-          lines.push(`  ${h.event}: ${h.command}${h.timeout ? ` (${h.timeout}ms)` : ""}`);
+          const target = "webhook" in h ? `[webhook] ${h.webhook}` : h.command;
+          lines.push(`  ${h.event}: ${target}${h.timeout ? ` (${h.timeout}ms)` : ""}`);
         }
       }
 
@@ -137,24 +139,39 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ cortex · add custom hook",
       description:
         "Add a custom integration hook. Valid events: " +
-        VALID_CUSTOM_EVENTS.join(", ") + ".",
+        VALID_CUSTOM_EVENTS.join(", ") + ". " +
+        "Provide either command (shell) or webhook (HTTP POST URL), not both.",
       inputSchema: z.object({
         event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name."),
-        command: z.string().describe("Shell command to execute."),
+        command: z.string().optional().describe("Shell command to execute."),
+        webhook: z.string().optional().describe("HTTP POST URL to call asynchronously (webhook hook)."),
+        secret: z.string().optional().describe("HMAC-SHA256 signing secret for webhook hooks. Sent as X-Cortex-Signature header."),
         timeout: z.number().int().min(1).optional().describe("Timeout in ms (default 5000)."),
       }),
     },
-    async ({ event, command, timeout }) => {
-      const cmdErr = validateHookCommand(command);
-      if (cmdErr) return mcpResponse({ ok: false, error: cmdErr });
+    async ({ event, command, webhook, secret, timeout }) => {
+      if (!command && !webhook) return mcpResponse({ ok: false, error: "Provide either command or webhook." });
+      if (command && webhook) return mcpResponse({ ok: false, error: "Provide command or webhook, not both." });
+
+      let newHook: CustomHookEntry;
+      if (webhook) {
+        const trimmed = webhook.trim();
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+          return mcpResponse({ ok: false, error: "webhook must be an http:// or https:// URL." });
+        }
+        newHook = { event: event as CustomHookEvent, webhook: trimmed, ...(secret ? { secret } : {}), ...(timeout !== undefined ? { timeout } : {}) } satisfies WebhookHookEntry;
+      } else {
+        const cmdErr = validateHookCommand(command!);
+        if (cmdErr) return mcpResponse({ ok: false, error: cmdErr });
+        newHook = { event: event as CustomHookEvent, command: command!, ...(timeout !== undefined ? { timeout } : {}) } satisfies CommandHookEntry;
+      }
 
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        const newHook: CustomHookEntry = { event: event as CustomHookEvent, command, ...(timeout !== undefined ? { timeout } : {}) };
-
         writeInstallPreferences(cortexPath, { ...prefs, customHooks: [...existing, newHook] });
-        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${command}`, data: { hook: newHook, total: existing.length + 1 } });
+        const target = "webhook" in newHook ? `[webhook] ${newHook.webhook}` : newHook.command;
+        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${target}`, data: { hook: newHook, total: existing.length + 1 } });
       });
     }
   );
@@ -175,7 +192,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        const remaining = existing.filter(h => h.event !== event || (command && !h.command.includes(command)));
+        const hookTarget = (h: CustomHookEntry) => "webhook" in h ? h.webhook : h.command;
+        const remaining = existing.filter(h => h.event !== event || (command && !hookTarget(h).includes(command)));
         const removed = existing.length - remaining.length;
 
         if (removed === 0) {

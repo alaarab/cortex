@@ -57,7 +57,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-export async function callLlm(prompt: string, signal?: AbortSignal): Promise<string> {
+export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 10): Promise<string> {
   // Check abort before starting any work to avoid unnecessary API calls
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -84,7 +84,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal): Promise<str
         body: JSON.stringify({
           model: model || "gpt-4o-mini",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 10,
+          max_tokens: maxTokens,
           temperature: 0,
         }),
         signal: controller.signal,
@@ -111,7 +111,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal): Promise<str
         },
         body: JSON.stringify({
           model: model || "claude-haiku-4-5-20251001",
-          max_tokens: 10,
+          max_tokens: maxTokens,
           messages: [{ role: "user", content: prompt }],
         }),
         signal: controller.signal,
@@ -139,7 +139,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal): Promise<str
         body: JSON.stringify({
           model: model || "gpt-4o-mini",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 10,
+          max_tokens: maxTokens,
           temperature: 0,
         }),
         signal: controller.signal,

@@ -5,6 +5,7 @@ import * as path from "path";
 import { appendAuditLog, debugLog, getProjectDirs, isRecord, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
+import { runCustomHooks } from "./hooks.js";
 
 type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
 type MemoryAction = "read" | "write" | "queue" | "pin" | "policy" | "delete";
@@ -1006,6 +1007,7 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
     fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
     fs.renameSync(tmpFile, file);
     appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
+    runCustomHooks(cortexPath, "post-consolidate", { CORTEX_PROJECT: project });
     return cortexOk(`Consolidated findings for ${project}.`);
   });
 }
