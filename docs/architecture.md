@@ -44,7 +44,8 @@ This is the core runtime loop from one prompt to the next:
 [2] Retrieval Path
     hook-context + hook-prompt
     -> keyword extraction + synonym expansion
-    -> FTS5 search over ~/.cortex markdown state
+    -> 3-tier RRF search (FTS5 + token-overlap + vector embeddings)
+    -> recency boost applied to ranking
     -> top snippets injected into model context
         |
         v
@@ -100,8 +101,10 @@ UserPromptSubmit (stdin: JSON with prompt text)
   |
   +-> extract keywords (stop-word filter + bigrams)
   |
-  +-> FTS5 search with synonym expansion
+  +-> 3-tier RRF search (FTS5 + token-overlap + vector)
   |     query capped at 20 terms
+  |     all tiers run in parallel, merged by reciprocal rank
+  |     recency boost: <=7d +0.3, <=30d +0.15
   |
   +-> trust filter
   |     check citation validity
@@ -201,7 +204,37 @@ All state lives in `~/.cortex/` as plain files, committed to git.
       <hash>.db            # FTS5 index cache (SQLite)
 ```
 
-## FTS5 Index
+## Search and Retrieval
+
+### Three-Tier Hybrid Search with RRF
+
+Search uses three tiers that run in parallel, with results merged by Reciprocal Rank Fusion (RRF):
+
+```
+Query
+  |
+  +-> Tier 1: FTS5 (primary)
+  |     sanitize input -> expand synonyms (cap at 20 terms)
+  |     -> FTS5 MATCH with quoted OR terms
+  |
+  +-> Tier 2: Token-overlap semantic
+  |     TF-IDF cosine similarity over indexed documents
+  |     cache invalidated on incremental index updates
+  |
+  +-> Tier 3: Vector embeddings (when configured)
+  |     uses CORTEX_EMBEDDING_API_URL or Ollama
+  |     embedding cache loaded on first call (including hook subprocesses)
+  |     cached to .runtime/embed-cache.jsonl by SHA-256 hash
+  |
+  +-> RRF merge
+        merge ranked lists from all tiers by reciprocal rank
+        apply recency boost: <=7 days +0.3, <=30 days +0.15
+        -> final ranked results
+```
+
+Previously, search used a waterfall fallback (FTS5 first, then cosine if too few results). RRF replaces this with parallel execution and rank-based merging, which produces better results when different tiers surface different relevant documents.
+
+### FTS5 Index
 
 Built at MCP server startup, cached to disk by content hash.
 
@@ -213,7 +246,6 @@ Build:
 Query:
   sanitize input -> expand synonyms (cap at 20 terms)
   -> FTS5 MATCH with quoted OR terms
-  -> rank by relevance, boost recent files (1.2x for last 30 days)
 ```
 
 ## MCP Context Optimization

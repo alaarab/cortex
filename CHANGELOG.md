@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-03-08
+
+### Added
+- **RRF hybrid search**: three-tier search (FTS5 + token-overlap + vector embeddings) merged with Reciprocal Rank Fusion. All three tiers run in parallel, results merged by rank.
+- **Recency boost**: recent findings rank higher in retrieval (7 days or less: +0.3, 30 days or less: +0.15).
+- **Cloud embedding support**: `CORTEX_EMBEDDING_API_URL` + `CORTEX_EMBEDDING_API_KEY` for OpenAI-compatible embedding endpoints. Works in both hook retrieval and MCP search.
+- **`cortex projects` CLI**: `cortex projects list`, `cortex projects add <name>`, `cortex projects remove <name>` for managing projects from the terminal.
+- **Auto-capture at session end**: `CORTEX_FEATURE_AUTO_CAPTURE=1` extracts insights from the conversation transcript at Stop hook. Offered in `cortex init` walkthrough.
+- **Semantic dedup/conflict in init walkthrough**: `cortex init` now prompts to enable `CORTEX_FEATURE_SEMANTIC_DEDUP` and `CORTEX_FEATURE_SEMANTIC_CONFLICT` when an LLM is configured.
+- **`conflicts_with` in `add_finding` response**: MCP response now includes `conflictsWith` field when a conflict is detected.
+- **Entity hints in `add_finding` response**: `detectedEntities: string[]` returned when entities are auto-extracted from finding text.
+- **Automatic entity extraction**: entities auto-extracted from finding text on write (backtick-quoted, double-quoted, `<!-- entity: X -->` annotations).
+- **Cross-project contradiction detection**: `CORTEX_FEATURE_SEMANTIC_CONFLICT` now scans global + top-2 other projects' FINDINGS.md, not just the current project.
+
+### Fixed
+- **Archive data safety**: `autoArchiveToReference()` no longer drops findings when a reference write fails. Only successfully-archived topics are removed from FINDINGS.md.
+- **session_start recovery**: fixed lookup that was skipping ended sessions, so `session_start` always returns the most recent summary.
+- **Queue approval race**: uses content-based matching instead of unstable positional IDs (M1, M2...).
+- **Shared/org docs retention**: `rankResults()` now keeps up to 2 shared/org docs per type even when local docs of the same type exist.
+- **TF-IDF cache invalidation**: incremental index updates now invalidate the fallback search cache.
+- **Backlog priority sort**: `work_next_backlog_item` now correctly returns highest-priority item (High > Medium > Low > none). `pin_backlog_item` now reorders the item to the top of its section.
+- **MCP search project synonyms**: `search_knowledge` now passes `project` to `buildRobustFtsQuery()` so project-specific synonyms apply.
+- **Per-tool hook disable**: `toggle_hooks(tool=...)` now respected at runtime; disabled tools no longer fire hooks.
+- **ESM version fix**: `cortex status` now correctly reports version in ESM builds.
+- **Uninstall completeness**: `cortex uninstall` now removes Copilot/Cursor/Codex configs and wrapper binaries.
+- **Embedding cache in hook subprocess**: vector tier now loads the embedding cache on first call in hook subprocesses.
+- **callLlm OpenAI routing**: properly routes to OpenAI's API when `OPENAI_API_KEY` is set (was incorrectly sending to Anthropic).
+- **Conflict annotation targeting**: uses content + date tag matching instead of unreliable 60-char prefix to find the correct bullet.
+- **Bulk `add_findings` semantic gates**: bulk path now runs semantic dedup and conflict checks per-finding (was bypassing them entirely).
+- **Manual entity links in global_entities**: `link_findings` now populates `global_entities` so manual links appear in cross-project entity discovery.
+
+## [1.15.6] - 2026-03-08
+
 ### Added
 - `pin_backlog_item` MCP tool: pin a task to the top of its section
 - `work_next_backlog_item` MCP tool: promote highest-priority Queue item to Active
@@ -529,7 +562,9 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.15.5...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/alaarab/cortex/compare/v1.15.6...v1.16.0
+[1.15.6]: https://github.com/alaarab/cortex/compare/v1.15.5...v1.15.6
 [1.15.5]: https://github.com/alaarab/cortex/compare/v1.13.6...v1.15.5
 [1.13.6]: https://github.com/alaarab/cortex/compare/v1.11.1...v1.13.6
 [1.11.1]: https://github.com/alaarab/cortex/compare/v1.11.0...v1.11.1

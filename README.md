@@ -98,6 +98,11 @@ On a new machine: clone, run init, done.
 
 ## What's new
 
+- **RRF hybrid search**: three-tier retrieval (FTS5 + token-overlap + vector embeddings) merged with Reciprocal Rank Fusion and recency boost
+- **Cloud embeddings**: set `CORTEX_EMBEDDING_API_URL` + `CORTEX_EMBEDDING_API_KEY` to use any OpenAI-compatible embedding endpoint
+- **Auto-capture**: `CORTEX_FEATURE_AUTO_CAPTURE=1` passively extracts insights from conversation transcripts at session end
+- **Project management CLI**: `cortex projects list/add/remove` for managing projects from the terminal
+- **Init walkthrough**: `cortex init` now prompts for auto-capture and semantic memory quality features (dedup, conflict detection)
 - **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Review Queue, Skills, Hooks, and Health. No agent needed
 - **Synonym search**: type "throttling" and find "rate limit" and "429". You don't need to remember what you called it
 - **Bulk operations**: `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch work
@@ -115,7 +120,7 @@ On a new machine: clone, run init, done.
 
 **It's just files.** Markdown in a git repo you own. No database, no vector store, no account. `git log` shows how it grew.
 
-**Search that works.** Type "throttling" and it finds "rate limit" and "429". You don't need to remember what you called it.
+**Search that works.** Three-tier hybrid search: FTS5, token-overlap semantic matching, and vector embeddings (when configured). Results merged with Reciprocal Rank Fusion. Recent findings get a recency boost. Type "throttling" and it finds "rate limit" and "429".
 
 **Every machine, same brain.** Push to a private repo, clone on a new machine, run init. Profiles control which projects each machine sees.
 
@@ -154,13 +159,13 @@ On a new machine: clone, run init, done.
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. 46 tools grouped by what they do:
+The server indexes your cortex into a local SQLite FTS5 database. Search uses three-tier RRF hybrid retrieval: FTS5 (primary), token-overlap semantic matching, and vector embeddings (when configured via `CORTEX_EMBEDDING_API_URL`). 46 tools grouped by what they do:
 
 ### Search and browse
 
 | Tool | What it does |
 |------|-------------|
-| `search_knowledge` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `search_knowledge` | RRF hybrid search (FTS5 + token-overlap + vector) with synonym expansion and recency boost. Filters by project, type, limit. |
 | `get_memory_detail` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
@@ -280,6 +285,10 @@ cortex review-ui [--port=3499]           # lightweight review UI in the browser
 cortex update                            # update to latest version
 cortex uninstall                         # remove cortex config and hooks
 
+cortex projects list                        # list all projects
+cortex projects add <name>                  # create a new project
+cortex projects remove <name>               # remove a project (confirmation required)
+
 cortex link [--machine <n>] [--profile <n>]  # sync profile, symlinks, hooks
 cortex mcp-mode [on|off|status]          # toggle MCP integration
 cortex hooks-mode [on|off|status]        # toggle hook execution
@@ -324,7 +333,7 @@ Use `cortex config` for policy tuning and `cortex maintain` for governance opera
 
 Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Configured in `.governance/access-control.json`. Actor identity resolves from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then OS username. Unknown actors are treated as `viewer`.
 
-See [docs/environment.md](docs/environment.md) for feature flags and env var reference.
+See [docs/environment.md](docs/environment.md) for feature flags and env var reference, including cloud embedding configuration (`CORTEX_EMBEDDING_API_URL`, `CORTEX_EMBEDDING_API_KEY`).
 
 ---
 

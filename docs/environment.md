@@ -52,6 +52,15 @@ These control the `gh` CLI calls used by `extract-memories` to pull signals from
 | `CORTEX_GH_RUN_LIMIT` | integer | `25` | Maximum number of recent CI workflow runs to fetch. Range: 5-200. |
 | `CORTEX_GH_ISSUE_LIMIT` | integer | `25` | Maximum number of recent issues to fetch. Range: 5-200. |
 
+## Embeddings
+
+These control the vector embedding tier used in hybrid search and hook retrieval.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORTEX_EMBEDDING_API_URL` | string | (none) | OpenAI-compatible `/embeddings` endpoint (e.g. `https://api.openai.com/v1`). When set, used for both hook retrieval and MCP search. Takes priority over Ollama. |
+| `CORTEX_EMBEDDING_API_KEY` | string | (none) | Bearer token for `CORTEX_EMBEDDING_API_URL`. Required when using a cloud embedding endpoint. |
+
 ## LLM Integration
 
 These control the optional LLM calls used for semantic dedup and conflict detection.
@@ -70,6 +79,7 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 |----------|---------|-------------|
 | `CORTEX_FEATURE_AUTO_EXTRACT` | enabled | Automatically extract memory candidates from git/GitHub signals once per session per project during hook-prompt. |
 | `CORTEX_FEATURE_DAILY_MAINTENANCE` | enabled | Schedule background maintenance (pruning, canonical lock enforcement, legacy migration) once per day during hook-session-start. |
+| `CORTEX_FEATURE_AUTO_CAPTURE` | disabled | Set to `1` to extract insights from conversation transcripts at session end (Stop hook). Enabled during `cortex init` walkthrough. |
 | `CORTEX_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `1` to enable LLM-based paraphrase dedup when adding findings. |
 | `CORTEX_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `1` to enable LLM-based contradiction detection when adding findings. |
 | `CORTEX_FEATURE_GH_MINING` | disabled | Set to `1` to mine GitHub signals in `cortex maintain extract`. |

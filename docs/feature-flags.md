@@ -144,6 +144,29 @@ export CORTEX_FINDINGS_CAP=50   # allow up to 50 active findings
 export CORTEX_FINDINGS_CAP=10   # aggressive archiving
 ```
 
+## CORTEX_FEATURE_AUTO_CAPTURE
+
+**Default:** disabled
+
+Controls automatic insight extraction from conversation transcripts at session end. When enabled, the Stop hook reads the `transcript_path` from the Stop hook JSON payload, parses JSONL assistant messages, and runs keyword-heuristic extraction to identify findings worth saving.
+
+This is pure heuristic extraction -- no LLM call, no Ollama, no external dependencies required. Extracted findings are written directly to FINDINGS.md for the active project.
+
+The feature is offered during the `cortex init` walkthrough. When the user opts in, `CORTEX_FEATURE_AUTO_CAPTURE=1` is written to `~/.cortex/.env`.
+
+**When to enable:**
+- When you want passive memory capture without manual `add_finding` calls
+- For teams that want every session to leave a trace without changing developer workflow
+- When running long sessions where important patterns might be missed
+
+**When to disable:**
+- If auto-captured findings are too noisy for your workflow
+- In CI or automated environments where conversation transcripts are not meaningful
+
+```bash
+export CORTEX_FEATURE_AUTO_CAPTURE=1
+```
+
 ## How Feature Flags Work
 
 The `isFeatureEnabled` function in `cli.ts` reads the named environment variable. If the value is `0`, `false`, `off`, or `no` (case-insensitive, trimmed), the feature is disabled. Any other value, or if the variable is not set, means the feature is enabled.
