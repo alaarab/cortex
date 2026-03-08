@@ -132,6 +132,21 @@ describe("mcp-data: export/import round-trip", () => {
     expect(res.error).toContain("already exists");
   });
 
+  it("import rejects case-insensitive duplicate project names", async () => {
+    const projectDir = path.join(tmp.path, "Cortex");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# Cortex");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "cortex", summary: "# lowercase" };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("different casing");
+  });
+
   it("import with overwrite replaces existing project", async () => {
     const projectDir = path.join(tmp.path, "overme");
     fs.mkdirSync(projectDir, { recursive: true });
@@ -168,6 +183,16 @@ describe("mcp-data: export/import round-trip", () => {
     );
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Invalid project name");
+  });
+
+  it("import canonicalizes uppercase project names to lowercase", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify({ project: "Cortex", summary: "# Cortex" }) })
+    );
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("cortex");
+    expect(fs.existsSync(path.join(tmp.path, "cortex"))).toBe(true);
   });
 
   it("import builds backlog content from structured data", async () => {

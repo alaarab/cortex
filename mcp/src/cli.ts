@@ -3,6 +3,8 @@ import {
   runtimeFile,
   EXEC_TIMEOUT_MS,
   getCortexPath,
+  findProjectNameCaseInsensitive,
+  normalizeProjectNameForCreate,
 } from "./shared.js";
 import {
   recordFeedback,
@@ -1115,24 +1117,34 @@ async function handleQuickstart() {
     });
   });
 
-  if (!isValidProjectName(projectName)) {
+  const normalizedProjectName = normalizeProjectNameForCreate(projectName);
+  if (!isValidProjectName(normalizedProjectName)) {
     console.error(`Error: invalid project name "${projectName}". Use lowercase letters, numbers, hyphens, or underscores.`);
     return;
   }
 
-  console.log(`\nInitializing cortex for "${projectName}"...\n`);
+  console.log(`\nInitializing cortex for "${normalizedProjectName}"...\n`);
 
   await runInit({ yes: true });
-  await runLink(getCortexPath(), {});
+  const cortexPath = getCortexPath();
+  await runLink(cortexPath, {});
 
-  const projectDir = path.join(getCortexPath(), projectName);
-  if (!fs.existsSync(projectDir)) {
-    fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${projectName} Findings\n`);
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${projectName} Backlog\n\n## Active\n\n## Queue\n\n## Done\n`);
+  const existingProject = findProjectNameCaseInsensitive(cortexPath, normalizedProjectName);
+  if (existingProject && existingProject !== normalizedProjectName) {
+    console.error(
+      `Error: project "${existingProject}" already exists with different casing. Refusing to create "${normalizedProjectName}" because it would split the same project on case-sensitive filesystems.`
+    );
+    return;
   }
 
-  console.log(`\n\u2713 cortex ready. Project: ${projectName}. Try: cortex search 'your query'`);
+  const projectDir = path.join(cortexPath, normalizedProjectName);
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${normalizedProjectName} Findings\n`);
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${normalizedProjectName} Backlog\n\n## Active\n\n## Queue\n\n## Done\n`);
+  }
+
+  console.log(`\n\u2713 cortex ready. Project: ${normalizedProjectName}. Try: cortex search 'your query'`);
 }
 
 async function handleDebugInjection(args: string[]) {
@@ -1336,16 +1348,24 @@ function handleProjectsList() {
 }
 
 function handleProjectsAdd(name: string) {
-  if (!isValidProjectName(name)) {
+  const projectName = normalizeProjectNameForCreate(name);
+  if (!isValidProjectName(projectName)) {
     console.error(`Invalid project name: "${name}". Use lowercase letters, numbers, and hyphens.`);
     process.exit(1);
   }
 
   const cortexPath = getCortexPath();
-  const projectDir = path.join(cortexPath, name);
+  const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
+  if (existingProject && existingProject !== projectName) {
+    console.error(
+      `Project "${existingProject}" already exists with different casing. Refusing to create "${projectName}" because it would split the same project on case-sensitive filesystems.`
+    );
+    process.exit(1);
+  }
+  const projectDir = path.join(cortexPath, projectName);
 
   if (fs.existsSync(projectDir)) {
-    console.error(`Project "${name}" already exists at ${projectDir}`);
+    console.error(`Project "${projectName}" already exists at ${projectDir}`);
     process.exit(1);
   }
 
@@ -1355,22 +1375,22 @@ function handleProjectsAdd(name: string) {
 
   fs.writeFileSync(
     path.join(projectDir, "summary.md"),
-    `# ${name}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
+    `# ${projectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
   );
   fs.writeFileSync(
     path.join(projectDir, "CLAUDE.md"),
-    `# ${name}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+    `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
   );
   fs.writeFileSync(
     path.join(projectDir, "FINDINGS.md"),
-    `# ${name} Findings\n\n<!-- created: ${today} -->\n`
+    `# ${projectName} Findings\n\n<!-- created: ${today} -->\n`
   );
   fs.writeFileSync(
     path.join(projectDir, "backlog.md"),
-    `# ${name} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+    `# ${projectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
   );
 
-  console.log(`\nCreated project "${name}" at ${projectDir}`);
+  console.log(`\nCreated project "${projectName}" at ${projectDir}`);
   console.log(`\nFiles created:`);
   console.log(`  summary.md     — one-liner description, stack, run command`);
   console.log(`  CLAUDE.md      — project instructions for Claude`);

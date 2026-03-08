@@ -46,6 +46,8 @@ Maintenance:
   cortex maintain govern [project]       Queue stale/low-value memories for review
   cortex maintain prune [project]        Delete expired entries
   cortex maintain consolidate [project]  Deduplicate FINDINGS.md
+  cortex maintain migrate project-names [--dry-run]
+                                         Canonicalize mixed-case project dirs and native memory files
   cortex maintain migrate <project> [--pin] [--dry-run]
                                          Promote legacy findings into FINDINGS/CANONICAL
   cortex maintain extract [project]      Mine git/GitHub signals

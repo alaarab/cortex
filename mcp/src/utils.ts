@@ -112,6 +112,7 @@ export function extractKeywords(text: string): string {
   return result.join(" ");
 }
 
+// Validate a project name: lowercase letters/numbers with optional hyphen/underscore separators.
 // Validate a project name: no path separators, no dot-dot segments, no null bytes, max 100 chars
 export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;

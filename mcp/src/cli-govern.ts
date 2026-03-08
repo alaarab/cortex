@@ -4,6 +4,7 @@ import {
   qualityMarkers,
   getProjectDirs,
   getCortexPath,
+  migrateProjectNames,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -283,7 +284,7 @@ export async function handleMigrateFindings(args: string[]) {
 
 // ── Maintain migrate ─────────────────────────────────────────────────────────
 
-type MaintainMigrationKind = "governance" | "data" | "all";
+type MaintainMigrationKind = "governance" | "data" | "all" | "project-names";
 
 interface ParsedMaintainMigrationArgs {
   kind: MaintainMigrationKind;
@@ -295,6 +296,7 @@ interface ParsedMaintainMigrationArgs {
 function printMaintainMigrationUsage() {
   console.error("Usage:");
   console.error("  cortex maintain migrate governance [--dry-run]");
+  console.error("  cortex maintain migrate project-names [--dry-run]");
   console.error("  cortex maintain migrate data <project> [--pin] [--dry-run]");
   console.error("  cortex maintain migrate all <project> [--pin] [--dry-run]");
   console.error("  cortex maintain migrate <project> [--pin] [--dry-run]  # legacy data alias");
@@ -337,6 +339,18 @@ function parseMaintainMigrationArgs(args: string[]): ParsedMaintainMigrationArgs
       process.exit(1);
     }
     return { kind: "governance", pinCanonical, dryRun };
+  }
+
+  if (mode === "project-names") {
+    if (pinCanonical) {
+      console.error("--pin is only valid for data/all migrations.");
+      process.exit(1);
+    }
+    if (positional.length !== 1) {
+      printMaintainMigrationUsage();
+      process.exit(1);
+    }
+    return { kind: "project-names", pinCanonical, dryRun };
   }
 
   if (mode === "data" || mode === "all") {
@@ -398,6 +412,27 @@ export async function handleMaintainMigrate(args: string[]) {
   const parsed = parseMaintainMigrationArgs(args);
   const lines: string[] = [];
 
+  if (parsed.kind === "project-names") {
+    const result = migrateProjectNames(getCortexPath(), parsed.dryRun);
+    if (!result.ok) {
+      console.log(`Project name migration: ${result.error}`);
+      return;
+    }
+    const report = result.data;
+    if (!report.renamedProjects.length && !report.updatedProfiles.length && !report.renamedNativeMemories.length && !report.archivedNativeMemories.length) {
+      lines.push(`${parsed.dryRun ? "[dry-run] " : ""}Project name migration: already canonical.`);
+      console.log(lines.join("\n"));
+      return;
+    }
+    const verb = parsed.dryRun ? "[dry-run] Would migrate" : "Migrated";
+    lines.push(`Project name migration: ${verb} ${report.renamedProjects.length} project dir(s), updated ${report.updatedProfiles.length} profile file(s), renamed ${report.renamedNativeMemories.length} native memory file(s), archived ${report.archivedNativeMemories.length} conflicting/duplicate native memory file(s).`);
+    if (report.renamedProjects.length) lines.push(`Projects: ${report.renamedProjects.map((entry) => `${entry.from} -> ${entry.to}`).join(", ")}`);
+    if (report.updatedProfiles.length) lines.push(`Profiles: ${report.updatedProfiles.map((entry) => entry.profile).join(", ")}`);
+    if (report.archivedNativeMemories.length) lines.push(`Archived native memories: ${report.archivedNativeMemories.map((entry) => path.basename(entry.archivedAs)).join(", ")}`);
+    console.log(lines.join("\n"));
+    return;
+  }
+
   if (parsed.kind === "governance" || parsed.kind === "all") {
     lines.push(`Governance migration: ${runGovernanceMigration(parsed.dryRun)}`);
   }
@@ -447,6 +482,8 @@ Subcommands:
                                          when findings feel repetitive, or monthly to keep things clean.
   cortex maintain migrate governance [--dry-run]
                                          Upgrade governance policy file schemas
+  cortex maintain migrate project-names [--dry-run]
+                                         Rename mixed-case project dirs and native memory files to canonical lowercase
   cortex maintain migrate data <project> [--pin] [--dry-run]
   cortex maintain migrate all <project> [--pin] [--dry-run]
   cortex maintain migrate <project> [--pin] [--dry-run]  (legacy alias)

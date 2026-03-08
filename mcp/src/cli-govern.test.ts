@@ -331,6 +331,14 @@ describe("handleMaintainMigrate", () => {
     await handleMaintainMigrate(["all", "proj", "--dry-run"]);
   });
 
+  it("handles project-names migration in dry-run mode", async () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "ProjectCenter", { "FINDINGS.md": "# Findings\n" });
+    const { handleMaintainMigrate } = await importGovern(cortex);
+    await handleMaintainMigrate(["project-names", "--dry-run"]);
+  });
+
   it("treats unknown positional as legacy data alias", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
