@@ -133,7 +133,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \draw[arr] (pol) -- (aud);
 \draw[dasharr] (ss) to[bend left=18] (fts);
 \node[draw, rounded corners=2pt, fill=white, inner sep=5pt, font=\scriptsize,
-      below=0.8cm of fts, anchor=north] (leg) {
+      anchor=north] (leg) at ($(stop.south)!0.5!(aud.south)+(0,-0.5cm)$) {
   \raisebox{1.5pt}{\tikz{\fill[orange!15] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Hooks\quad
   \raisebox{1.5pt}{\tikz{\fill[blue!8] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Retrieval\quad
   \raisebox{1.5pt}{\tikz{\fill[green!12] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Storage\quad
