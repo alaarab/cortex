@@ -299,7 +299,7 @@ cortex hooks enable <tool>              # enable hooks for tool (claude/copilot/
 cortex hooks disable <tool>             # disable hooks for tool
 ```
 
-Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands.
+Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands. See [Skills](#skills) for guidance on when to run discover and consolidate.
 
 ### cortex doctor
 
@@ -404,6 +404,13 @@ Four skills for the things that can't be automatic:
 | `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
 | `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
 | `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
+
+**When to run these manually:**
+
+- **`/cortex-discover`** -- Run after your first week on a new project, or when you feel like things are slipping through the cracks. It tells you what's missing, what's stale, and what's stuck.
+- **`/cortex-consolidate`** -- Run after a burst of work across multiple projects, or monthly. It finds patterns that repeat across projects and promotes them to global knowledge so every agent benefits.
+- **`cortex maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
+- **`cortex maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
 
 Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 

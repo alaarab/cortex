@@ -3,7 +3,7 @@ import {
   runtimeFile,
   qualityMarkers,
   getProjectDirs,
-  ensureCortexPath,
+  getCortexPath,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -24,11 +24,6 @@ import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
 
-let _cortexPath: string | undefined;
-function getCortexPath(): string {
-  if (!_cortexPath) _cortexPath = ensureCortexPath();
-  return _cortexPath;
-}
 const profile = process.env.CORTEX_PROFILE || "";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -443,11 +438,13 @@ export async function handleMaintain(args: string[]) {
 
 Subcommands:
   cortex maintain govern [project] [--dry-run]
-                                         Queue stale/conflicting/low-value memories for review
+                                         Queue stale/conflicting/low-value memories for review.
+                                         Run when search results feel noisy or after a long break.
   cortex maintain prune [project] [--dry-run]
                                          Delete expired entries by retention policy
   cortex maintain consolidate [project] [--dry-run]
-                                         Deduplicate FINDINGS.md bullets
+                                         Deduplicate FINDINGS.md bullets. Run after a burst of work
+                                         when findings feel repetitive, or monthly to keep things clean.
   cortex maintain migrate governance [--dry-run]
                                          Upgrade governance policy file schemas
   cortex maintain migrate data <project> [--pin] [--dry-run]
