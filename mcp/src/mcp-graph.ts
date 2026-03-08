@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { isValidProjectName } from "./utils.js";
-import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities, ensureGlobalEntitiesTable } from "./shared-index.js";
+import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities, ensureGlobalEntitiesTable, logEntityMiss } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 
@@ -60,6 +60,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
+        logEntityMiss(ctx.cortexPath, query, "search_entities", project);
         return mcpResponse({ ok: true, data: [], message: `No entities matching "${query}".` });
       }
 
@@ -101,6 +102,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       relatedDocs = relatedDocs.slice(0, max);
 
       if (relatedDocs.length === 0) {
+        logEntityMiss(ctx.cortexPath, entity, "get_related_docs", project);
         return mcpResponse({ ok: true, data: [], message: `No docs found referencing "${entity}".` });
       }
 
@@ -357,6 +359,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const capped = results.slice(0, max);
 
       if (capped.length === 0) {
+        logEntityMiss(ctx.cortexPath, entity, "cross_project_entities", exclude_project);
         return mcpResponse({ ok: true, data: [], message: `No cross-project references found for "${entity}".` });
       }
 

@@ -14,13 +14,13 @@ import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
 import { cosineFallback, invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
-import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
+import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
 
 // Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
-export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
+export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];

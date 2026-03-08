@@ -1,11 +1,43 @@
 import { decodeStringRow } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
+import { runtimeFile } from "./shared.js";
 
 export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /** Escape SQL LIKE wildcard characters so user input is treated literally. */
 export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
+
+/**
+ * Log entity resolution misses to .runtime/entity-misses.jsonl.
+ *
+ * Judgment criteria — what's worth capturing vs noise:
+ * - Worth capturing: repeated lookups for the same entity name (indicates a gap
+ *   in the entity graph that the user keeps hitting), entity names that look like
+ *   real library/tool names (not random query fragments).
+ * - Noise: single one-off lookups for short generic terms, lookups that fail
+ *   because the query was malformed. We filter these by requiring name.length > 2.
+ *
+ * Gated by CORTEX_DEBUG to avoid disk writes for regular users. The miss log is
+ * append-only JSONL so downstream tooling can detect repeated patterns (e.g.
+ * "entity X was looked up 5 times but never found" → suggest adding it).
+ */
+export function logEntityMiss(cortexPath: string, name: string, context: string, project?: string): void {
+  if (!process.env.CORTEX_DEBUG) return;
+  if (!name || name.length <= 2) return;
+  try {
+    const entry = JSON.stringify({
+      entity: name,
+      context,
+      ts: Date.now(),
+      project: project ?? null,
+    });
+    const missFile = runtimeFile(cortexPath, "entity-misses.jsonl");
+    fs.appendFileSync(missFile, entry + "\n");
+  } catch {
+    // Best-effort logging; don't let miss tracking break the caller.
+  }
+}
 
 const PROSE_ENTITY_PATTERN =
   /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Koa|Hapi|NestJS|Django|Flask|FastAPI|Rails|Spring|Laravel|Redis|Postgres|PostgreSQL|MySQL|MariaDB|SQLite|MongoDB|DynamoDB|Cassandra|Elasticsearch|Docker|Kubernetes|Terraform|Ansible|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Prisma|TypeORM|Sequelize|Drizzle|Mongoose|Jest|Vitest|Mocha|Cypress|Playwright|Puppeteer|Webpack|Vite|Rollup|esbuild|Turbopack|ESLint|Prettier|Babel|SWC|GraphQL|REST|gRPC|WebSocket|Kafka|RabbitMQ|NATS|Nginx|Caddy|Traefik|Node\.js|Deno|Bun|Python|Rust|Go|Java|Kotlin|Swift|TypeScript|JavaScript)\b/gi;

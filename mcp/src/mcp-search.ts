@@ -18,6 +18,7 @@ import {
   queryDocRows,
   cosineFallback,
   queryEntityLinks,
+  logEntityMiss,
   extractSnippet,
   queryDocBySourceKey,
   normalizeMemoryId,
@@ -448,6 +449,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             const links = queryEntityLinks(db, term);
             if (links.related.length > 0) {
               relatedEntities.push(...links.related);
+            } else {
+              logEntityMiss(cortexPath, term, "search_knowledge", filterProject);
             }
           }
           relatedEntities = [...new Set(relatedEntities)].slice(0, 10);
