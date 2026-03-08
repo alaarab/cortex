@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import {
   debugLog,
   findProjectNameCaseInsensitive,
+  hookConfigPath,
 } from "./shared.js";
 import {
   GOVERNANCE_SCHEMA_VERSION,
@@ -442,7 +443,7 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
   const checks: PostInitCheck[] = [];
 
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const settingsPath = hookConfigPath("claude");
   let mcpOk = false;
   let hooksOk = false;
   try {

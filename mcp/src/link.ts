@@ -26,6 +26,9 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   isRecord,
+  homeDir,
+  homePath,
+  hookConfigPath,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { linkSkillsDir, writeSkillMd } from "./link-skills.js";
@@ -100,12 +103,8 @@ interface ProjectConfig {
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || os.homedir();
-}
-
-const LEGACY_MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
-const CORTEX_MACHINE_FILE = path.join(os.homedir(), ".cortex", ".machine-id");
+const LEGACY_MACHINE_FILE = homePath(".cortex-machine");
+const CORTEX_MACHINE_FILE = homePath(".cortex", ".machine-id");
 
 function machineFilePath(): string {
   if (fs.existsSync(LEGACY_MACHINE_FILE)) return LEGACY_MACHINE_FILE;
@@ -115,11 +114,11 @@ function machineFilePath(): string {
 }
 
 const DEFAULT_SEARCH_PATHS = [
-  os.homedir(),
-  path.join(os.homedir(), "Sites"),
-  path.join(os.homedir(), "Projects"),
-  path.join(os.homedir(), "Code"),
-  path.join(os.homedir(), "dev"),
+  homeDir(),
+  homePath("Sites"),
+  homePath("Projects"),
+  homePath("Code"),
+  homePath("dev"),
 ];
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
@@ -350,15 +349,15 @@ function addTokenAnnotation(filePath: string) {
 
 function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
-  const skillsDir = path.join(os.homedir(), ".claude", "skills");
+  const skillsDir = homePath(".claude", "skills");
   linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir, cortexPath, symlinkFile);
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
-    symlinkFile(globalClaude, path.join(os.homedir(), ".claude", "CLAUDE.md"), cortexPath);
+    symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), cortexPath);
     if (tools.has("copilot")) {
       try {
-        const copilotInstrDir = path.join(os.homedir(), ".github");
+        const copilotInstrDir = homePath(".github");
         fs.mkdirSync(copilotInstrDir, { recursive: true });
         symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), cortexPath);
       } catch (err: unknown) {
@@ -432,7 +431,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
  * and clean them up without touching user-managed servers.
  */
 function linkProjectMcpServers(project: string, servers: Record<string, McpServerEntry>): void {
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const settingsPath = hookConfigPath("claude");
   if (!fs.existsSync(settingsPath) && Object.keys(servers).length === 0) return;
   try {
     patchJsonFile(settingsPath, (data) => {
@@ -457,7 +456,7 @@ function linkProjectMcpServers(project: string, servers: Record<string, McpServe
 
 /** Remove any cortex__<project>__* MCP entries for projects no longer in the active set. */
 function pruneStaleProjectMcpServers(activeProjects: string[]): void {
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const settingsPath = hookConfigPath("claude");
   if (!fs.existsSync(settingsPath)) return;
   try {
     patchJsonFile(settingsPath, (data) => {

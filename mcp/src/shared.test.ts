@@ -14,6 +14,9 @@ import {
   normalizeProjectNameForCreate,
   parseCortexErrorCode,
   migrateProjectNames,
+  expandHomePath,
+  homePath,
+  hookConfigPath,
 } from "./shared.js";
 import {
   consolidateProjectFindings,
@@ -193,6 +196,25 @@ describe("ensureCortexPath", () => {
       expect(fs.existsSync(path.join(result, "README.md"))).toBe(true);
     } finally {
       process.env.HOME = origHome;
+      tmp.cleanup();
+    }
+  });
+});
+
+describe("path resolution helpers", () => {
+  it("resolves home-relative paths from HOME overrides", () => {
+    const tmp = makeTempDir("fakehome-");
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = tmp.path;
+    process.env.USERPROFILE = tmp.path;
+    try {
+      expect(expandHomePath("~/demo/file.txt")).toBe(path.join(tmp.path, "demo", "file.txt"));
+      expect(homePath(".claude", "settings.json")).toBe(path.join(tmp.path, ".claude", "settings.json"));
+      expect(hookConfigPath("copilot")).toBe(path.join(tmp.path, ".github", "hooks", "cortex.json"));
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
       tmp.cleanup();
     }
   });

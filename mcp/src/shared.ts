@@ -41,6 +41,39 @@ export function cortexErr<T>(error: string, code?: CortexErrorCode): CortexResul
   return { ok: false, error, code };
 }
 
+export function homeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
+
+export function homePath(...parts: string[]): string {
+  return path.join(homeDir(), ...parts);
+}
+
+export function expandHomePath(input: string): string {
+  if (input === "~") return homeDir();
+  if (input.startsWith("~/") || input.startsWith("~\\")) return path.join(homeDir(), input.slice(2));
+  return input;
+}
+
+export function defaultCortexPath(): string {
+  return process.env.CORTEX_PATH || homePath(".cortex");
+}
+
+export type HookToolName = "claude" | "copilot" | "cursor" | "codex";
+
+export function hookConfigPath(tool: HookToolName): string {
+  switch (tool) {
+    case "claude":
+      return homePath(".claude", "settings.json");
+    case "copilot":
+      return homePath(".github", "hooks", "cortex.json");
+    case "cursor":
+      return homePath(".cursor", "hooks.json");
+    case "codex":
+      return homePath(".codex", "config.json");
+  }
+}
+
 // Forward a failed CortexResult to a different result type (re-types the error branch).
 // Safe to call after an `if (!result.ok)` guard; extracts error and code from the union.
 export function forwardErr<T>(result: CortexResult<unknown>): CortexResult<T> {
@@ -96,8 +129,7 @@ export function sessionMarker(cortexPath: string, name: string): string {
 // Debug logger - writes to ~/.cortex/.runtime/debug.log when CORTEX_DEBUG=1
 export function debugLog(msg: string): void {
   if (!process.env.CORTEX_DEBUG) return;
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  const cortexPath = process.env.CORTEX_PATH || path.join(home, ".cortex");
+  const cortexPath = defaultCortexPath();
   const logFile = runtimeFile(cortexPath, "debug.log");
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
@@ -176,9 +208,8 @@ export function findCortexPath(): string | null {
     }
     return _cachedCortexPath;
   }
-  const home = process.env.HOME || process.env.USERPROFILE || "";
   for (const name of [".cortex", "cortex"]) {
-    const candidate = path.join(home, name);
+    const candidate = homePath(name);
     if (fs.existsSync(candidate)) { _cachedCortexPath = candidate; return candidate; }
   }
   _cachedCortexPath = null;
@@ -189,8 +220,7 @@ export function findCortexPath(): string | null {
 export function ensureCortexPath(): string {
   const existing = findCortexPath();
   if (existing) return existing;
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  const defaultPath = path.join(home, ".cortex");
+  const defaultPath = homePath(".cortex");
   fs.mkdirSync(defaultPath, { recursive: true });
   fs.writeFileSync(
     path.join(defaultPath, "README.md"),
@@ -203,7 +233,7 @@ export function ensureCortexPath(): string {
 // Resolve the cortex path from an explicit argument (used by MCP mode)
 export function findCortexPathWithArg(arg?: string): string {
   if (arg) {
-    const resolved = arg.replace(/^~/, process.env.HOME || process.env.USERPROFILE || "");
+    const resolved = expandHomePath(arg);
     return requireDirectory(resolved, "cortex path");
   }
   return ensureCortexPath();
@@ -288,7 +318,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
 
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
 export function collectNativeMemoryFiles(): Array<{ project: string; file: string; fullPath: string }> {
-  const claudeProjectsDir = path.join(process.env.HOME || process.env.USERPROFILE || os.homedir(), ".claude", "projects");
+  const claudeProjectsDir = homePath(".claude", "projects");
   if (!fs.existsSync(claudeProjectsDir)) return [];
 
   const results: Array<{ project: string; file: string; fullPath: string }> = [];
@@ -466,9 +496,8 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   pushFileToken(parts, path.join(cortexPath, ".governance", "memory-usage.log"));
   pushFileToken(parts, path.join(cortexPath, ".runtime", "install-preferences.json"));
 
-  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
-  pushDirTokens(parts, path.join(home, ".github", "hooks"));
-  pushFileToken(parts, path.join(home, ".cursor", "hooks.json"));
+  pushDirTokens(parts, homePath(".github", "hooks"));
+  pushFileToken(parts, homePath(".cursor", "hooks.json"));
 
   return parts.sort().join("|");
 }

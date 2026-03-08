@@ -9,6 +9,7 @@ import {
   getProjectDirs,
   collectNativeMemoryFiles,
   runtimeFile,
+  homeDir,
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
@@ -680,7 +681,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndexImpl userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
-    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
 
@@ -992,7 +993,7 @@ async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): P
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadIndexSnapshotOrEmpty userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
-    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
   const globResult = globAllFiles(cortexPath, profile);
@@ -1230,7 +1231,7 @@ export function findFtsCacheForPath(cortexPath: string, profile?: string): { exi
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findFtsCacheForPath userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
-    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
   try {

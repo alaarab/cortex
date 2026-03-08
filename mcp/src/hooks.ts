@@ -4,7 +4,7 @@ import * as os from "os";
 import { createHmac } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, type CortexErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, type CortexErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 
 export interface HookError {
@@ -25,13 +25,13 @@ export function commandExists(cmd: string): boolean {
 
 export function detectInstalledTools(): Set<string> {
   const tools = new Set<string>();
-  if (commandExists("github-copilot-cli") || fs.existsSync(path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot"))) {
+  if (commandExists("github-copilot-cli") || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))) {
     tools.add("copilot");
   }
-  if (commandExists("cursor") || fs.existsSync(path.join(os.homedir(), ".cursor"))) {
+  if (commandExists("cursor") || fs.existsSync(homePath(".cursor"))) {
     tools.add("cursor");
   }
-  if (commandExists("codex") || fs.existsSync(path.join(os.homedir(), ".codex"))) {
+  if (commandExists("codex") || fs.existsSync(homePath(".codex"))) {
     tools.add("codex");
   }
   return tools;
@@ -39,7 +39,7 @@ export function detectInstalledTools(): Set<string> {
 
 function resolveToolBinary(tool: string): string | null {
   try {
-    const wrapperPath = path.resolve(path.join(os.homedir(), ".local", "bin", tool));
+    const wrapperPath = path.resolve(homePath(".local", "bin", tool));
     const whichCmd = process.platform === "win32" ? "where.exe" : "which";
     const whichArgs = process.platform === "win32" ? [tool] : ["-a", tool];
     const raw = execFileSync(whichCmd, whichArgs, {
@@ -117,7 +117,7 @@ function installSessionWrapper(tool: string, cortexPath: string): boolean {
 
   const entry = resolveCliEntryScript();
 
-  const localBinDir = path.join(os.homedir(), ".local", "bin");
+  const localBinDir = homePath(".local", "bin");
   const wrapperPath = path.join(localBinDir, tool);
 
   const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -421,7 +421,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
   if (detected.has("copilot")) {
-    const copilotHooksDir = path.join(os.homedir(), ".github", "hooks");
+    const copilotHooksDir = homePath(".github", "hooks");
     const copilotFile = path.join(copilotHooksDir, "cortex.json");
     try {
       fs.mkdirSync(copilotHooksDir, { recursive: true });
@@ -444,7 +444,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
   if (detected.has("cursor")) {
-    const cursorFile = path.join(os.homedir(), ".cursor", "hooks.json");
+    const cursorFile = homePath(".cursor", "hooks.json");
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};

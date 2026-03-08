@@ -1,12 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { execFileSync } from "child_process";
 import {
   debugLog,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
   isRecord,
+  homeDir,
+  homePath,
+  hookConfigPath,
 } from "./shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
@@ -28,7 +30,7 @@ import type { DoctorResult } from "./link.js";
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
 export function isWrapperActive(tool: string): boolean {
-  const wrapperPath = path.join(os.homedir(), ".local", "bin", tool);
+  const wrapperPath = homePath(".local", "bin", tool);
   if (!fs.existsSync(wrapperPath)) return false;
   try {
     const resolved = execFileSync("which", [tool], {
@@ -97,7 +99,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.cortex is on a network mount)" : ""}`,
   });
 
-  const contextFile = path.join(os.homedir(), ".cortex-context.md");
+  const contextFile = homePath(".cortex-context.md");
   checks.push({
     name: "context-file",
     ok: fs.existsSync(contextFile),
@@ -105,7 +107,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
 
   const memoryFile = path.join(
-    os.homedir(),
+    homeDir(),
     ".claude",
     "projects",
     claudeProjectKey(),
@@ -119,7 +121,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
 
   const globalClaudeSrc = path.join(cortexPath, "global", "CLAUDE.md");
-  const globalClaudeDest = path.join(os.homedir(), ".claude", "CLAUDE.md");
+  const globalClaudeDest = homePath(".claude", "CLAUDE.md");
   let globalLinkOk = false;
   try {
     globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
@@ -159,7 +161,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     }
   }
 
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const settingsPath = hookConfigPath("claude");
   let hookOk = false;
   let lifecycleOk = false;
   try {
@@ -239,7 +241,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
 
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
-    const copilotHooks = path.join(os.homedir(), ".github", "hooks", "cortex.json");
+    const copilotHooks = homePath(".github", "hooks", "cortex.json");
     checks.push({
       name: "copilot-hooks",
       ok: fs.existsSync(copilotHooks),
@@ -247,7 +249,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
   if (detected.has("cursor")) {
-    const cursorHooks = path.join(os.homedir(), ".cursor", "hooks.json");
+    const cursorHooks = homePath(".cursor", "hooks.json");
     checks.push({
       name: "cursor-hooks",
       ok: fs.existsSync(cursorHooks),
@@ -332,8 +334,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const missing: string[] = [];
     for (const tool of detectedTools) {
       let configPath = "";
-      if (tool === "copilot") configPath = path.join(os.homedir(), ".github", "hooks", "cortex.json");
-      else if (tool === "cursor") configPath = path.join(os.homedir(), ".cursor", "hooks.json");
+      if (tool === "copilot") configPath = homePath(".github", "hooks", "cortex.json");
+      else if (tool === "cursor") configPath = homePath(".cursor", "hooks.json");
       else if (tool === "codex") configPath = path.join(cortexPath, "codex.json");
       if (configPath && fs.existsSync(configPath)) hookChecks.push(tool);
       else if (configPath) missing.push(tool);

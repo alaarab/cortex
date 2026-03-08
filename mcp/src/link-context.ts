@@ -1,18 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as yaml from "js-yaml";
 import { isValidProjectName } from "./utils.js";
+import { homeDir, homePath } from "./shared.js";
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
-// Cross-platform home directory helper
-function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || os.homedir();
-}
-
 function contextFilePath(): string {
-  return path.join(homeDir(), ".cortex-context.md");
+  return homePath(".cortex-context.md");
 }
 
 export function claudeProjectKey(): string {
@@ -160,7 +155,7 @@ export function writeContextClean(machine: string, profile: string, mcpStatus: s
 
 export function readBackNativeMemory(cortexPath: string, projects: string[]) {
   const projectKey = claudeProjectKey();
-  const memoryDir = path.join(homeDir(), ".claude", "projects", projectKey, "memory");
+  const memoryDir = homePath(".claude", "projects", projectKey, "memory");
   if (!fs.existsSync(memoryDir)) return;
 
   for (const project of projects) {
@@ -193,7 +188,7 @@ export function readBackNativeMemory(cortexPath: string, projects: string[]) {
 
 export function rebuildMemory(cortexPath: string, projects: string[]) {
   const projectKey = claudeProjectKey();
-  const memoryDir = path.join(homeDir(), ".claude", "projects", projectKey, "memory");
+  const memoryDir = homePath(".claude", "projects", projectKey, "memory");
   const memoryFile = path.join(memoryDir, "MEMORY.md");
 
   const hasSummaries = projects.some(p =>

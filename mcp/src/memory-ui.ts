@@ -10,6 +10,7 @@ import {
   computeCortexLiveStateToken,
   getProjectDirs,
   runtimeDir,
+  homePath,
 } from "./shared.js";
 import {
   approveQueueItem,
@@ -123,8 +124,8 @@ function h(s: string): string {
 
 const HOOK_CONFIG_PATHS = (cortexPath: string): Record<string, string> => ({
   claude: path.join(cortexPath, "cortex.SKILL.md"),
-  copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
-  cursor: path.join(os.homedir(), ".cursor", "hooks.json"),
+  copilot: homePath(".github", "hooks", "cortex.json"),
+  cursor: homePath(".cursor", "hooks.json"),
   codex: path.join(cortexPath, "codex.json"),
 });
 
@@ -132,8 +133,8 @@ function isAllowedFilePath(filePath: string, cortexPath: string): boolean {
   const resolved = path.resolve(filePath);
   const allowedRoots = [
     path.resolve(cortexPath),
-    path.resolve(path.join(os.homedir(), ".github", "hooks")),
-    path.resolve(path.join(os.homedir(), ".cursor")),
+    path.resolve(homePath(".github", "hooks")),
+    path.resolve(homePath(".cursor")),
   ];
   if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + path.sep))) {
     return false;
@@ -312,7 +313,7 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
   // Q34: Filter by machine profile if available
   let allowedProjects: Set<string> | null = null;
   try {
-    const contextPath = path.join(os.homedir(), ".cortex-context.md");
+    const contextPath = homePath(".cortex-context.md");
     if (fs.existsSync(contextPath)) {
       const contextContent = fs.readFileSync(contextPath, "utf8");
       const activeMatch = contextContent.match(/Active projects?:\s*(.+)/i);

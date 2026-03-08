@@ -8,6 +8,7 @@ import {
   EXEC_TIMEOUT_MS,
   getCortexPath,
   KNOWN_OBSERVATION_TAGS,
+  homePath,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -72,8 +73,8 @@ function isSafeTranscriptPath(p: string): boolean {
   }
   const safePrefixes = [
     path.resolve(os.tmpdir()),
-    path.resolve(os.homedir(), ".claude"),
-    path.resolve(os.homedir(), ".config", "claude"),
+    path.resolve(homePath(".claude")),
+    path.resolve(homePath(".config", "claude")),
   ];
   return safePrefixes.some(prefix => normalized.startsWith(prefix + path.sep) || normalized === prefix);
 }

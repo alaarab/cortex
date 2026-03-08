@@ -2,6 +2,7 @@ import { parseMcpMode, runInit } from "./init.js";
 import * as os from "os";
 import * as path from "path";
 import { errorMessage } from "./utils.js";
+import { defaultCortexPath } from "./shared.js";
 
 const HELP_TEXT = `cortex - Long-term memory for Claude Code
 
@@ -199,7 +200,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
 
   if (argvCommand === "verify") {
     const { runPostInitVerify } = await import("./init.js");
-    const cortexPath = process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex");
+    const cortexPath = defaultCortexPath();
     const result = runPostInitVerify(cortexPath);
     console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
     for (const check of result.checks) {
@@ -250,7 +251,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
       return finish(1);
     }
-    await runLink(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), {
+    await runLink(defaultCortexPath(), {
       machine: getFlag("--machine"),
       profile: getFlag("--profile"),
       register: linkArgs.includes("--register"),
@@ -275,7 +276,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const { runCliCommand } = await import("./cli.js");
     try {
       const { trackCliCommand } = await import("./telemetry.js");
-      trackCliCommand(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), argvCommand);
+      trackCliCommand(defaultCortexPath(), argvCommand);
     } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli trackCliCommand: ${errorMessage(err)}\n`);
     }
