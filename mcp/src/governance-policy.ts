@@ -551,9 +551,17 @@ export function migrateGovernanceFiles(cortexPath: string): string[] {
 }
 
 function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
-  const acl = readJsonFile<AccessControl>(govFile(cortexPath, "access-control"), DEFAULT_ACCESS);
+  const aclPath = govFile(cortexPath, "access-control");
+  // If the ACL file does not exist, treat as open access (no ACL configured).
+  if (!fs.existsSync(aclPath)) return "admin";
+  // If the file exists but fails validation, fail closed — return least-privilege role.
+  if (!validateGovernanceJson(aclPath, "access-control")) {
+    debugLog(`resolveRole: ${aclPath} failed validation, failing closed (viewer)`);
+    return "viewer";
+  }
+  const acl = readJsonFile<AccessControl>(aclPath, DEFAULT_ACCESS);
   const allRoles = [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])];
-  if (allRoles.length === 0) return "admin"; // no access control configured — open access
+  if (allRoles.length === 0) return "admin"; // ACL file present but empty — open access
   if ((acl.admins || []).includes(actor)) return "admin";
   if ((acl.maintainers || []).includes(actor)) return "maintainer";
   if ((acl.contributors || []).includes(actor)) return "contributor";
@@ -785,52 +793,57 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
   for (const dir of dirs) {
     const file = resolveFindingsPath(dir);
     if (!file) continue;
-    const lines = fs.readFileSync(file, "utf8").split("\n");
-    let currentDate: string | null = null;
-    const next: string[] = [];
-    let inDetails = false;
+    // Q23: wrap read-modify-write in per-file lock to prevent races with concurrent finding writers
+    withFileLock(file, () => {
+      const lines = fs.readFileSync(file, "utf8").split("\n");
+      let currentDate: string | null = null;
+      const next: string[] = [];
+      let inArchive = false;
 
-    for (let index = 0; index < lines.length; index++) {
-      const line = lines[index];
-      if (line.includes("<details>")) {
-        inDetails = true;
-        next.push(line);
-        continue;
-      }
-      if (line.includes("</details>")) {
-        inDetails = false;
-        next.push(line);
-        continue;
-      }
-      const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
-      if (heading) {
-        currentDate = heading[1];
-        next.push(line);
-        continue;
-      }
-      if (line.startsWith("- ") && !inDetails && currentDate) {
-        const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86_400_000);
-        if (!Number.isNaN(age) && age > cutoffDays) {
-          pruned++;
-          if (dryRun) dryRunDetails.push(`[${path.basename(dir)}] ${line.slice(0, 80)}`);
-          const nextLine = lines[index + 1] || "";
-          if (nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
-            index++;
-          }
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        // Detect archive block start (both <details> and cortex:archive:start markers)
+        if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) {
+          inArchive = true;
+          next.push(line);
           continue;
         }
+        // Detect archive block end
+        if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) {
+          inArchive = false;
+          next.push(line);
+          continue;
+        }
+        const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+        if (heading) {
+          currentDate = heading[1];
+          next.push(line);
+          continue;
+        }
+        if (line.startsWith("- ") && !inArchive && currentDate) {
+          const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86_400_000);
+          if (!Number.isNaN(age) && age > cutoffDays) {
+            pruned++;
+            if (dryRun) dryRunDetails.push(`[${path.basename(dir)}] ${line.slice(0, 80)}`);
+            const nextLine = lines[index + 1] || "";
+            if (nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+              index++;
+            }
+            continue;
+          }
+        }
+        if (line.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+          const previous = next.length ? next[next.length - 1] : "";
+          if (!previous.startsWith("- ")) continue;
+        }
+        next.push(line);
       }
-      if (line.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
-        const previous = next.length ? next[next.length - 1] : "";
-        if (!previous.startsWith("- ")) continue;
+      if (!dryRun) {
+        const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
+        fs.writeFileSync(tmpFile, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+        fs.renameSync(tmpFile, file);
       }
-      next.push(line);
-    }
-    if (!dryRun) {
-      const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
-      fs.writeFileSync(tmpFile, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
-      fs.renameSync(tmpFile, file);
-    }
+    });
   }
 
   if (dryRun) {
@@ -880,62 +893,111 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
   const file = resolveFindingsPath(path.join(cortexPath, project));
   if (!file) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
-  const lines = fs.readFileSync(file, "utf8").split("\n");
-  const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
-  let currentDate: string | null = null;
-  const title = lines.find((line: string) => line.startsWith("# ")) || `# ${project} Findings`;
-  let totalBullets = 0;
-  let uniqueBullets = 0;
+  // Q23: wrap entire read-modify-write in per-file lock to prevent races with concurrent finding writers
+  return withFileLock(file, (): CortexResult<string> => {
+    const raw = fs.readFileSync(file, "utf8");
+    const lines = raw.split("\n");
 
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
-    if (heading) {
-      const date = heading[1];
-      currentDate = date;
-      if (!byDate.has(date)) byDate.set(date, new Map<string, { bullet: string; citation?: string }>());
-      continue;
-    }
-    if (line.startsWith("- ") && currentDate) {
-      totalBullets++;
-      const key = line.trim().toLowerCase().replace(/\s+/g, " ");
-      const nextLine = lines[index + 1] || "";
-      const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
-      const trimmedBullet = line.trimEnd();
-      const existing = byDate.get(currentDate)?.get(key);
-      if (!existing) {
-        byDate.get(currentDate)?.set(key, { bullet: trimmedBullet, citation });
-        uniqueBullets++;
-      } else if (!existing.citation && citation) {
-        existing.citation = citation;
+    // Q12: Separate the file into "active" lines and verbatim archive/details blocks.
+    // Archive blocks (<!-- cortex:archive:start/end --> and <details>...</details>) are
+    // collected verbatim and appended unchanged after the consolidated active section.
+    const archiveBlocks: string[] = [];
+    const activeLines: string[] = [];
+    let inArchive = false;
+    let currentArchiveBlock: string[] = [];
+
+    for (const line of lines) {
+      const isArchiveStart = line.includes("<!-- cortex:archive:start -->") || line.includes("<details>");
+      const isArchiveEnd = line.includes("<!-- cortex:archive:end -->") || line.includes("</details>");
+
+      if (!inArchive && isArchiveStart) {
+        inArchive = true;
+        currentArchiveBlock = [line];
+        // If the start and end are on the same line, close immediately
+        if (isArchiveEnd && line.includes("<!-- cortex:archive:start -->") && line.includes("<!-- cortex:archive:end -->")) {
+          archiveBlocks.push(...currentArchiveBlock);
+          currentArchiveBlock = [];
+          inArchive = false;
+        }
+        continue;
       }
-      if (citation) index++;
+      if (inArchive) {
+        currentArchiveBlock.push(line);
+        if (isArchiveEnd) {
+          archiveBlocks.push(...currentArchiveBlock);
+          currentArchiveBlock = [];
+          inArchive = false;
+        }
+        continue;
+      }
+      activeLines.push(line);
     }
-  }
+    // Any unclosed archive block goes to archive verbatim
+    if (currentArchiveBlock.length) archiveBlocks.push(...currentArchiveBlock);
 
-  const dates = [...byDate.keys()].sort().reverse();
-  const duplicatesRemoved = totalBullets - uniqueBullets;
+    // Process only the active section: deduplicate bullets within each date group
+    const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
+    let currentDate: string | null = null;
+    const title = activeLines.find((line: string) => line.startsWith("# ")) || `# ${project} Findings`;
+    let totalBullets = 0;
+    let uniqueBullets = 0;
 
-  if (dryRun) {
-    return cortexOk(`[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`);
-  }
-
-  const out: string[] = [title, ""];
-  for (const date of dates) {
-    const items = [...(byDate.get(date)?.values() || [])];
-    if (!items.length) continue;
-    out.push(`## ${date}`, "");
-    for (const item of items) {
-      out.push(item.bullet);
-      if (item.citation) out.push(item.citation);
+    for (let index = 0; index < activeLines.length; index++) {
+      const line = activeLines[index];
+      const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+      if (heading) {
+        const date = heading[1];
+        currentDate = date;
+        if (!byDate.has(date)) byDate.set(date, new Map<string, { bullet: string; citation?: string }>());
+        continue;
+      }
+      if (line.startsWith("- ") && currentDate) {
+        totalBullets++;
+        const key = line.trim().toLowerCase().replace(/\s+/g, " ");
+        const nextLine = activeLines[index + 1] || "";
+        const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
+        const trimmedBullet = line.trimEnd();
+        const existing = byDate.get(currentDate)?.get(key);
+        if (!existing) {
+          byDate.get(currentDate)?.set(key, { bullet: trimmedBullet, citation });
+          uniqueBullets++;
+        } else if (!existing.citation && citation) {
+          existing.citation = citation;
+        }
+        if (citation) index++;
+      }
     }
-    out.push("");
-  }
 
-  fs.copyFileSync(file, file + ".bak");
-  const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
-  fs.renameSync(tmpFile, file);
-  appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
-  return cortexOk(`Consolidated findings for ${project}.`);
+    const dates = [...byDate.keys()].sort().reverse();
+    const duplicatesRemoved = totalBullets - uniqueBullets;
+
+    if (dryRun) {
+      return cortexOk(`[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`);
+    }
+
+    // Reconstruct: consolidated active section first, then verbatim archive blocks
+    const out: string[] = [title, ""];
+    for (const date of dates) {
+      const items = [...(byDate.get(date)?.values() || [])];
+      if (!items.length) continue;
+      out.push(`## ${date}`, "");
+      for (const item of items) {
+        out.push(item.bullet);
+        if (item.citation) out.push(item.citation);
+      }
+      out.push("");
+    }
+    // Append archive blocks verbatim (separated by a blank line if there's active content)
+    if (archiveBlocks.length) {
+      if (out.length && out[out.length - 1] !== "") out.push("");
+      out.push(...archiveBlocks);
+    }
+
+    fs.copyFileSync(file, file + ".bak");
+    const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
+    fs.renameSync(tmpFile, file);
+    appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
+    return cortexOk(`Consolidated findings for ${project}.`);
+  });
 }
