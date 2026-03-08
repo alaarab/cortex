@@ -256,7 +256,7 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
 
 Beyond the three lifecycle hooks, Cortex supports user-defined hooks for seven events: \texttt{pre-save}, \texttt{post-save}, \texttt{post-search}, \texttt{pre-learning}, \texttt{post-learning}, \texttt{pre-index}, and \texttt{post-index} \cite{cortex-hooks}. Hooks receive \texttt{CORTEX\_PATH} and \texttt{CORTEX\_HOOK\_EVENT} as environment variables, plus event-specific data. Typical uses include Slack notifications on new learnings, webhook calls after index rebuilds, and pre-save validation scripts.
 
-Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{LEARNINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
+Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{FINDINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
 
 \section{Interactive Shell}
 The terminal-native shell (\texttt{cortex shell}) provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. Six views are navigable by single keystroke: Projects, Backlog, Learnings, Memory Queue, Machines/Profiles, and Health diagnostics.
@@ -318,7 +318,7 @@ Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \te
 \toprule
 \textbf{System} & \textbf{Ease} & \textbf{Token ctrl} & \textbf{Governance} & \textbf{Audit} & \textbf{Trust} & \textbf{Multi-agent} & \textbf{Shell/CLI} & \textbf{Daily ops} & \textbf{Lock-in} \\
 \midrule
-Cortex 1.14.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
+Cortex 1.15.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
 Supermemory     & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 claude-mem      & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M \\
 Copilot Memory  & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
