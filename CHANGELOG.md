@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
+## [1.15.3] - 2026-03-08
+
+### Fixed
+- Skills shell view: pressing `a` now opens an inline input to name and create a new skill file in-place, instead of showing a terminal command hint
+
 ## [1.15.2] - 2026-03-08
 
 ### Added
