@@ -1,9 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
-import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
   removeFinding as removeFindingCore,
@@ -21,13 +19,18 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";
-import { withFileLock } from "./shared-governance.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings, getCurrentSessionId } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
 
 
+
+function extractConflictsWith(annotations: string[]): string[] {
+  return annotations
+    .map((annotation) => annotation.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1])
+    .filter((value): value is string => Boolean(value));
+}
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, withWriteQueue, rebuildIndex, updateFileInIndex } = ctx;
@@ -66,8 +69,11 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (await checkSemanticDedup(cortexPath, project, taggedFinding)) {
             return mcpResponse({ ok: true, message: `Skipped semantic duplicate finding for "${project}".` });
           }
+          const semanticConflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
-          const result = addFindingToFile(cortexPath, project, taggedFinding, citation);
+          const result = addFindingToFile(cortexPath, project, taggedFinding, citation, {
+            extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
+          });
           if (!result.ok) {
             return mcpResponse({ ok: false, error: result.error });
           }
@@ -79,65 +85,34 @@ export function register(server: McpServer, ctx: McpContext): void {
             return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "skipped" } });
           }
 
-          // Semantic conflict post-check (async, feature-flagged) — only for newly added findings
-          const conflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
-          if (conflicts.checked && conflicts.annotations.length > 0) {
-            // Append conflict annotations to the exact inserted bullet in the file.
-            // Wrap in withFileLock so the read-modify-write is atomic with respect to
-            // concurrent add_finding calls that also modify FINDINGS.md.
-            const resolvedDir = safeProjectPath(cortexPath, project);
-            if (resolvedDir) {
-              const fp = path.join(resolvedDir, "FINDINGS.md");
-              if (fs.existsSync(fp)) {
-                withFileLock(fp, () => {
-                  try {
-                    let content = fs.readFileSync(fp, "utf8");
-                    // Use the full bullet text with today's created date to uniquely identify
-                    // the just-inserted finding. Using only a 60-char prefix risks matching
-                    // an older bullet that starts with the same text.
-                    const today = new Date().toISOString().slice(0, 10);
-                    const fullBullet = taggedFinding.startsWith("- ") ? taggedFinding : `- ${taggedFinding}`;
-                    const createdTag = `<!-- created: ${today} -->`;
-                    // Search for the bullet with its created date to precisely target the new entry
-                    const searchStr = `${fullBullet} ${createdTag}`;
-                    let idx = content.lastIndexOf(searchStr);
-                    // Fallback: search for just the created tag near the bullet prefix
-                    if (idx < 0) {
-                      const bulletPrefix = fullBullet.slice(0, 60);
-                      idx = content.lastIndexOf(bulletPrefix);
-                    }
-                    if (idx >= 0) {
-                      const lineEnd = content.indexOf("\n", idx);
-                      const insertAt = lineEnd >= 0 ? lineEnd : content.length;
-                      content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
-                      const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
-                      fs.writeFileSync(tmpFp, content);
-                      fs.renameSync(tmpFp, fp);
-                    }
-                  } catch (e: unknown) {
-                    debugLog(`add_finding: failed to append conflict annotations: ${e instanceof Error ? e.message : String(e)}`);
-                  }
-                });
-              }
-            }
-          }
-          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
-          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+          updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
           if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath, 1, getCurrentSessionId());
             extractFactFromFinding(cortexPath, project, taggedFinding);
           }
-          // Surface any conflict annotation that was written into the bullet
-          const conflictsWithMatch = result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"\s*-->/);
-          const conflictsWith = conflictsWithMatch?.[1];
+          const conflictsWithList = semanticConflicts.checked
+            ? extractConflictsWith(semanticConflicts.annotations)
+            : (result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1] ? [result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)![1]] : []);
+          const conflictsWith = conflictsWithList[0];
 
           // Extract entity hints synchronously from the finding text (regex only, no DB).
           // Full DB entity linking happens on the next index rebuild via updateFileInIndex →
           // extractAndLinkEntities. We surface hints here so callers can see what was detected.
           const detectedEntities = extractEntityNames(taggedFinding);
 
-          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added", ...(conflictsWith ? { conflictsWith } : {}), ...(detectedEntities.length > 0 ? { detectedEntities } : {}) } });
+          return mcpResponse({
+            ok: true,
+            message: result.data,
+            data: {
+              project,
+              finding: taggedFinding,
+              status: "added",
+              ...(conflictsWith ? { conflictsWith } : {}),
+              ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
+              ...(detectedEntities.length > 0 ? { detectedEntities } : {}),
+            }
+          });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
             return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });
@@ -169,8 +144,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         // Use a per-item timeout so one slow LLM call doesn't stall the whole batch.
         const PER_ITEM_TIMEOUT_MS = 5_000;
         const semanticSkipped: string[] = [];
-        const semanticConflicts: string[] = [];
+        const semanticConflicts: Array<{ finding: string; conflictsWith: string[] }> = [];
         const filteredFindings: string[] = [];
+        const extraAnnotationsByFinding: string[][] = [];
 
         for (const f of findings) {
           const controller = new AbortController();
@@ -189,17 +165,21 @@ export function register(server: McpServer, ctx: McpContext): void {
           try {
             const conflicts = await checkSemanticConflicts(cortexPath, project, f, controller.signal);
             if (conflicts.checked && conflicts.annotations.length > 0) {
-              semanticConflicts.push(`${f} (${conflicts.annotations.join(", ")})`);
+              semanticConflicts.push({ finding: f, conflictsWith: extractConflictsWith(conflicts.annotations) });
+              extraAnnotationsByFinding.push(conflicts.annotations);
+            } else {
+              extraAnnotationsByFinding.push([]);
             }
           } catch {
             // Semantic conflict failure is non-fatal
+            extraAnnotationsByFinding.push([]);
           }
           clearTimeout(timeoutId);
 
           filteredFindings.push(f);
         }
 
-        const result = addFindingsToFile(cortexPath, project, filteredFindings);
+        const result = addFindingsToFile(cortexPath, project, filteredFindings, { extraAnnotationsByFinding });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
         // Include semantic skips in the total skipped count
@@ -207,8 +187,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
           incrementSessionFindings(cortexPath, added.length, getCurrentSessionId());
-          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
-          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+          updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
         const conflictMsg = semanticConflicts.length > 0 ? `, ${semanticConflicts.length} with conflicts` : "";

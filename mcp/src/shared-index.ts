@@ -64,8 +64,11 @@ async function _drainEmbQueue(): Promise<void> {
   }
   for (const [cortexPath, docs] of byCortexPath) {
     const cache = getEmbeddingCache(cortexPath);
+    try { await cache.load(); } catch { /* best-effort */ }
+    const model = getEmbeddingModel();
     for (const { docPath, content } of docs) {
       try {
+        if (cache.get(docPath, model)) continue;
         const vec = await embedText(content);
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
       } catch { /* best-effort */ }
@@ -365,20 +368,36 @@ function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
   return globAllFiles(cortexPath, profile).entries;
 }
 
-function insertFileIntoIndex(db: SqlJsDatabase, entry: FileEntry, cortexPath: string): boolean {
+export function normalizeIndexedContent(content: string, type: string, cortexPath: string, maxChars?: number): string {
+  let normalized = content
+    .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")
+    .replace(/<details>[\s\S]*?<\/details>/gi, "");
+  normalized = resolveImports(normalized, cortexPath);
+  if (type === "backlog") {
+    normalized = stripBacklogDoneSection(normalized);
+  }
+  if (typeof maxChars === "number" && maxChars >= 0) {
+    normalized = normalized.slice(0, maxChars);
+  }
+  return normalized;
+}
+
+function insertFileIntoIndex(
+  db: SqlJsDatabase,
+  entry: FileEntry,
+  cortexPath: string,
+  opts?: { scheduleEmbeddings?: boolean }
+): boolean {
   try {
     const raw = fs.readFileSync(entry.fullPath, "utf-8");
-    let content = raw
-      .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")
-      .replace(/<details>[\s\S]*?<\/details>/gi, "");
-    content = resolveImports(content, cortexPath);
-    if (entry.type === "backlog") {
-      content = stripBacklogDoneSection(content);
-    }
+    const content = normalizeIndexedContent(raw, entry.type, cortexPath);
     db.run(
       "INSERT INTO docs (project, filename, type, content, path) VALUES (?, ?, ?, ?, ?)",
       [entry.project, entry.filename, entry.type, content, entry.fullPath]
     );
+    if (opts?.scheduleEmbeddings) {
+      scheduleEmbedding(cortexPath, entry.fullPath, content.slice(0, 8000));
+    }
     return true;
   } catch {
     return false;
@@ -420,7 +439,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
     const type = classifyFile(filename, relFile);
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
-    if (insertFileIntoIndex(db, entry, cortexPath)) {
+    if (insertFileIntoIndex(db, entry, cortexPath, { scheduleEmbeddings: true })) {
       // Re-extract entities for finding files
       if (type === "findings") {
         try {
@@ -435,12 +454,6 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
       const hashData = loadHashMap(cortexPath);
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(cortexPath, hashData.hashes);
-    } catch { /* best-effort */ }
-
-    // Schedule async embedding (best-effort, does not block caller)
-    try {
-      const rawContent = fs.readFileSync(resolvedPath, "utf-8").slice(0, 8000);
-      scheduleEmbedding(cortexPath, resolvedPath, rawContent);
     } catch { /* best-effort */ }
   } else {
     // Remove stale embedding if file was deleted
@@ -621,7 +634,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
-              if (insertFileIntoIndex(db, entry, cortexPath)) {
+              if (insertFileIntoIndex(db, entry, cortexPath, { scheduleEmbeddings: true })) {
                 updatedCount++;
                 if (entry.type === "findings") {
                   try {
@@ -750,7 +763,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     try {
       newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
     } catch { /* skip */ }
-    if (insertFileIntoIndex(db, entry, cortexPath)) {
+    if (insertFileIntoIndex(db, entry, cortexPath, { scheduleEmbeddings: true })) {
       fileCount++;
       // Extract entities from finding files (if not loaded from cache)
       if (!entityGraphLoaded && entry.type === "findings") {

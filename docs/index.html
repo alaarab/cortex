@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cortex: Long-term memory for your AI agents</title>
-  <meta name="description" content="Git-backed project store for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Relevant context injects automatically. Findings save automatically. One command to set up." />
+  <meta name="description" content="Long-term memory for AI agents. One shared knowledge base across sessions, machines, and parallel agents. Git-backed, no vendor lock-in. Works with Claude Code, Copilot, Cursor, and Codex." />
   <meta property="og:title" content="Cortex: Long-term memory for your AI agents" />
-  <meta property="og:description" content="Git-backed project store for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Context injects when your prompt matches. Findings save automatically when the session ends." />
+  <meta property="og:description" content="Your agents forget everything between sessions. Cortex fixes that. One shared knowledge base, stored in your own git repo. What one agent learns, every agent gets." />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -261,7 +261,7 @@
 
       <h1 class="hero-title">Long-term memory<br>for <em>your AI agents.</em></h1>
 
-      <p class="hero-sub">Your prompt hits the index. Matching context shows up in Claude's window. Findings save when the session ends. One command to set up.</p>
+      <p class="hero-sub">Your agents forget everything between sessions. Cortex fixes that. Matching context shows up before each prompt. Findings save when the session ends. The more agents you run, the more they all know.</p>
 
       <div class="hero-actions">
         <a href="#install" class="btn-primary">
@@ -308,7 +308,7 @@
     <div class="container">
       <div class="how-header reveal">
         <div class="section-label">How it works</div>
-        <h2 class="section-title">Three steps.<br>Then Claude remembers.</h2>
+        <h2 class="section-title">Three steps.<br>Then your agent remembers.</h2>
       </div>
       <div class="steps-grid">
         <div class="step reveal reveal-delay-1">
@@ -317,7 +317,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
           </div>
           <div class="step-title">Create your project store</div>
-          <p class="step-desc">A folder of markdown files at <code style="font-size:12px;color:var(--copper-mid)">~/.cortex</code>. Project notes, findings, backlog. Anything Claude should know. It's just a git repo you own.</p>
+          <p class="step-desc">A folder of markdown files at <code style="font-size:12px;color:var(--copper-mid)">~/.cortex</code>. Project notes, findings, backlog. Anything your agents should know. Just a git repo you own.</p>
           <span class="step-code">~/.cortex/</span>
         </div>
         <div class="step reveal reveal-delay-2">
@@ -325,8 +325,8 @@
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
           </div>
-          <div class="step-title">One command sets everything up</div>
-          <p class="step-desc">Creates your project store, registers the MCP server, and sets up hooks for Claude Code, Copilot, Cursor, and Codex. Restart your agent and you're done.</p>
+          <div class="step-title">One command sets it up</div>
+          <p class="step-desc">Creates the project store, registers the MCP server, and wires up hooks for Claude Code, Copilot, Cursor, and Codex. Restart your agent.</p>
           <span class="step-code">npx @alaarab/cortex init</span>
         </div>
         <div class="step reveal reveal-delay-3">
@@ -334,8 +334,8 @@
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <div class="step-title">Knowledge compounds</div>
-          <p class="step-desc">Claude captures findings as it works. When the session ends, a hook commits and pushes. Next session, next machine: it's all there.</p>
+          <div class="step-title">It builds from there</div>
+          <p class="step-desc">Your agent captures findings as it works. When the session ends, a hook commits and pushes. Next session, next machine, it's all there.</p>
           <span class="step-code">automatic</span>
         </div>
       </div>
@@ -361,7 +361,7 @@
             <div class="trace-step"><span class="trace-fn">git pull --rebase</span> <span class="trace-comment">sync ~/.cortex from remote</span></div>
             <div class="trace-step"><span class="trace-fn">detectProject(cwd)</span> <span class="trace-comment">match working directory to a cortex project</span></div>
             <div class="trace-step"><span class="trace-fn">inject(CLAUDE.md, summary.md)</span> <span class="trace-comment">project instructions enter the context window</span></div>
-            <div class="trace-out">&#8627; Claude knows what project you're in before you type anything</div>
+            <div class="trace-out">&#8627; your agent knows the project before you type anything</div>
           </div>
         </div>
 
@@ -407,32 +407,32 @@
 
       <dl class="ref-list reveal">
         <div class="ref-entry">
-          <dt>You never see what gets injected.</dt>
-          <dd>Hook output goes into Claude's context, not your terminal. The <code>&#9670; cortex &middot; 3 results</code> status line is all you get. Use <code>cortex search</code> to see what the index actually contains.</dd>
+          <dt>You don't see what gets injected.</dt>
+          <dd>Hook output goes into your agent's context, not your terminal. The <code>&#9670; cortex &middot; 3 results</code> status line is the only feedback. Run <code>cortex search</code> to see what the index has.</dd>
         </div>
         <div class="ref-entry">
-          <dt>Stop fires continuously, not at exit.</dt>
-          <dd>After every response. Including subagent responses. Ctrl+C doesn't lose work because there's nothing batched. If nothing changed, the hook is a no-op.</dd>
+          <dt>Stop fires after every response, not at exit.</dt>
+          <dd>Including subagent responses. Ctrl+C doesn't lose work because nothing is batched. If nothing changed, the hook skips.</dd>
         </div>
         <div class="ref-entry">
-          <dt>Search is keyword-based.</dt>
-          <dd>FTS5 finds what you wrote, not what you meant. "component flickering" won't match a finding about "React re-render loops." Synonym expansion helps, but write findings with the words you'll search for later.</dd>
+          <dt>Search is keyword-based first.</dt>
+          <dd>FTS5 finds what you wrote, not what you meant. "component flickering" won't match "React re-render loops." Synonym expansion and token-overlap help, but write findings with the words you'd search for.</dd>
         </div>
         <div class="ref-entry">
-          <dt>550 tokens per prompt. That's it.</dt>
-          <dd>About 3 snippets. The budget exists because context is finite and tokens cost money. If nothing matches, zero tokens are injected. Set <code>CORTEX_CONTEXT_TOKEN_BUDGET</code> to change it.</dd>
+          <dt>550 tokens per prompt by default.</dt>
+          <dd>About 3 snippets. If nothing matches, nothing gets injected. Set <code>CORTEX_CONTEXT_TOKEN_BUDGET</code> to raise or lower it.</dd>
         </div>
         <div class="ref-entry">
           <dt>Everything is a text file.</dt>
-          <dd><code>~/.cortex/project/FINDINGS.md</code> is just markdown. No database, no binary blobs. You can read it, edit it, grep it, pipe it. If cortex disappears tomorrow, your data doesn't.</dd>
+          <dd><code>~/.cortex/project/FINDINGS.md</code> is markdown. Read it, edit it, grep it, pipe it. If cortex goes away, your data stays.</dd>
         </div>
         <div class="ref-entry">
           <dt>Old memories fade.</dt>
-          <dd>Confidence decays at 30/60/90/120 days. A 6-month-old workaround shouldn't outrank yesterday's insight. Run <code>cortex maintain govern</code> to see what's aging out, or pin entries to exempt them.</dd>
+          <dd>Confidence decays at 30/60/90/120 days. A six-month-old workaround won't outrank something from yesterday. Pin entries to keep them from aging out.</dd>
         </div>
         <div class="ref-entry">
           <dt>One pull at open. That's the sync model.</dt>
-          <dd>SessionStart does <code>git pull</code> once. Mid-session changes from other machines won't appear until you restart. This is deliberate. Context shouldn't shift under you while you're working.</dd>
+          <dd>SessionStart runs <code>git pull</code> once. Changes from other machines don't show up mid-session. That's on purpose. Context shouldn't shift while you're working.</dd>
         </div>
       </dl>
     </div>
@@ -444,7 +444,7 @@
       <div class="bento-header reveal">
         <div class="section-label">Why cortex</div>
         <h2 class="section-title">Built for how<br>your agents work.</h2>
-        <p class="section-sub" style="margin-top:12px">Context windows are finite and tokens cost money. Cortex pulls the relevant slice, not the whole file.</p>
+        <p class="section-sub" style="margin-top:12px">Context windows are finite and tokens cost money. Cortex pulls the relevant slice. What one agent learns, every other agent gets.</p>
       </div>
       <div class="bento-grid">
         <!-- Card 1: Targeted retrieval -->
@@ -453,7 +453,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="bento-card-title">Search, not load</div>
-          <p class="bento-card-desc">Claude searches your project store instead of loading everything upfront. Synonym expansion means "throttling" also finds "rate limit" and "429".</p>
+          <p class="bento-card-desc">Your agent searches the project store instead of loading everything upfront. "throttling" also finds "rate limit" and "429".</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">Without</div>
@@ -474,7 +474,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
           <div class="bento-card-title">Git-backed</div>
-          <p class="bento-card-desc">Push, pull, branch. Full version history. Work from your laptop, pick up on your desktop. Same context either way.</p>
+          <p class="bento-card-desc">Push, pull, branch, diff. Full version history of everything your agents learned. Start on your laptop, pick up on your desktop.</p>
           <div class="bento-tag-row">
             <div class="bento-tag">git push</div>
             <div class="bento-tag">git pull</div>
@@ -488,23 +488,23 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           </div>
           <div class="bento-card-title">Just files</div>
-          <p class="bento-card-desc">No app. No account. No cloud service with a pricing page. Open a file and edit it. It's markdown all the way down.</p>
+          <p class="bento-card-desc">No app. No account. No cloud service. Open a file, edit it, done. Markdown all the way down.</p>
           <div class="bento-file-list">
             <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/my-app/CLAUDE.md</div>
             <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/backend/backlog.md</div>
           </div>
         </div>
 
-        <!-- Card 4: Persistent learning -->
+        <!-- Card 4: Multi-agent shared knowledge -->
         <div class="bento-card bento-card-4 reveal reveal-delay-3">
           <div class="bento-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
-          <div class="bento-card-title">Automatic context</div>
-          <p class="bento-card-desc">Before each prompt, hooks search your project store and inject what matches. Nothing if nothing matches, top 3 results (~400 tokens) if something does. Findings auto-commit when the session ends. You don't do anything.</p>
+          <div class="bento-card-title">Shared knowledge</div>
+          <p class="bento-card-desc">Run agents in parallel, across sessions, on different machines. They all read and write the same store. What one agent figures out, the rest get for free.</p>
           <div class="bento-stat">
-            <div class="bento-stat-num">∞</div>
-            <div class="bento-stat-label">sessions of context,<br>there next time you open Claude</div>
+            <div class="bento-stat-num">n agents</div>
+            <div class="bento-stat-label">one knowledge base,<br>insights shared on every push/pull</div>
           </div>
         </div>
       </div>
@@ -517,7 +517,7 @@
       <div class="features-header reveal">
         <div class="section-label">V2 features</div>
         <h2 class="section-title">Memory that cleans up after itself.</h2>
-        <p class="section-sub" style="margin-top:12px">47 MCP tools, quality controls, trust filtering, and an interactive shell. Old junk fades. Good stuff stays.</p>
+        <p class="section-sub" style="margin-top:12px">47 MCP tools, quality controls, trust filtering, and a shell. Old stuff fades. Good stuff stays.</p>
       </div>
       <div class="features-grid">
 
@@ -526,7 +526,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div class="feature-card-title">Memory governance</div>
-          <p class="feature-card-desc">Stale and conflicting entries get flagged. Retention policies expire what's no longer useful. Consolidation deduplicates and rewrites.</p>
+          <p class="feature-card-desc">Stale and conflicting entries get flagged. Retention policies expire old stuff. Consolidation deduplicates what's left.</p>
           <div class="feature-card-link"><a href="#hooks">See the hook lifecycle</a></div>
         </div>
 
@@ -535,7 +535,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
           </div>
           <div class="feature-card-title">Quality controls</div>
-          <p class="feature-card-desc">Confidence scoring, feedback loops (helpful / reprompt / regression), and citation tracking. Every finding traces back to the code that prompted it.</p>
+          <p class="feature-card-desc">Confidence scoring, feedback loops (helpful / reprompt / regression), and citation tracking. Every finding traces back to where it came from.</p>
           <div class="feature-card-link"><a href="#know">How it works</a></div>
         </div>
 
@@ -544,7 +544,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
           </div>
           <div class="feature-card-title">Trust filtering</div>
-          <p class="feature-card-desc">Role-based access, approval workflows for risky writes, and index policies. Not every file belongs in the search index.</p>
+          <p class="feature-card-desc">Role-based access, approval workflows for risky writes, and index policies. You control what gets indexed and what doesn't.</p>
           <div class="feature-card-link"><a href="#hooks">See the pipeline</a></div>
         </div>
 
@@ -553,7 +553,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           </div>
           <div class="feature-card-title">Interactive shell</div>
-          <p class="feature-card-desc">Search, add findings, pin memories, run doctor checks, review governance queues. All from a single <code style="font-size:12px;color:var(--copper-mid)">cortex</code> command with tab completion and history.</p>
+          <p class="feature-card-desc">Search, add findings, pin memories, run doctor, review the governance queue. One <code style="font-size:12px;color:var(--copper-mid)">cortex</code> command, single-key navigation.</p>
           <div class="feature-card-link"><a href="#demo">See it in action</a></div>
         </div>
 
@@ -562,16 +562,25 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="feature-card-title">Multi-machine sync</div>
-          <p class="feature-card-desc">Machine profiles, hostname-based config, and git-backed sync. Start on your laptop, pick up on your desktop. Same project store, different machines.</p>
+          <p class="feature-card-desc">Profiles map hostnames to project sets. Push from your laptop, pull on your desktop. Each machine sees only the projects it should.</p>
           <div class="feature-card-link"><a href="#install">Get started</a></div>
         </div>
 
         <div class="feature-card reveal reveal-delay-1">
           <div class="feature-card-icon feature-card-icon-copper">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div class="feature-card-title">Agent observability</div>
+          <p class="feature-card-desc">See what your agents learned and when. <code style="font-size:12px;color:var(--copper-mid)">git log</code> is the audit trail. <code style="font-size:12px;color:var(--copper-mid)">git diff</code> shows what changed between sessions. Grep to find where something went wrong.</p>
+          <div class="feature-card-link"><a href="#know">How it works</a></div>
+        </div>
+
+        <div class="feature-card reveal reveal-delay-2">
+          <div class="feature-card-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
           </div>
           <div class="feature-card-title">Self-healing doctor</div>
-          <p class="feature-card-desc">Detects broken symlinks, missing hooks, stale MCP config, and orphaned entries. The <code style="font-size:12px;color:var(--copper-mid)">--fix</code> flag repairs what it finds automatically.</p>
+          <p class="feature-card-desc">Finds broken symlinks, missing hooks, stale MCP config, orphaned entries. <code style="font-size:12px;color:var(--copper-mid)">--fix</code> repairs what it can.</p>
           <div class="feature-card-link"><a href="#demo">See it in action</a></div>
         </div>
 
@@ -604,7 +613,7 @@
       <div class="install-header reveal">
         <div class="section-label">Get started</div>
         <h2 class="section-title">One command.</h2>
-        <p class="section-sub" style="margin-top:12px">Sets up your project store, configures the MCP server, and hooks into Claude Code, Copilot, Cursor, and Codex.</p>
+        <p class="section-sub" style="margin-top:12px">Creates the project store, configures MCP, and hooks into every detected agent.</p>
       </div>
 
       <div class="install-tabs-container">
@@ -623,7 +632,7 @@
                 <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
               </div>
               <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures the MCP server, and wires up hooks for every detected agent. Restart your agent and you're done.
+                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, and wires up hooks. Restart your agent.
               </div>
             </div>
           </div>
@@ -708,13 +717,13 @@
       <div class="skills-header reveal">
         <div class="section-label">Skills</div>
         <h2 class="section-title">47 MCP tools. Four skills.<br>Add your own.</h2>
-        <p class="section-sub" style="margin-top:12px">The MCP server handles search, backlogs, findings, and governance. These four skills are for things you kick off yourself. Your own go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px">The MCP server handles search, backlogs, findings, and governance. These four skills are for the things you start yourself. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
         <div class="skill-card reveal">
           <div class="skill-name">/cortex-sync</div>
-          <div class="skill-desc">Pull cortex to a new machine or push config changes back. Run this on first setup or after switching machines.</div>
+          <div class="skill-desc">Pull cortex to a new machine or push config changes back.</div>
         </div>
         <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/cortex-init</div>
@@ -722,15 +731,15 @@
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/cortex-discover</div>
-          <div class="skill-desc">Research what's missing in a project. Comes back with a prioritized list of gaps.</div>
+          <div class="skill-desc">Audit a project for missing files, stale content, stuck backlog items.</div>
         </div>
         <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/cortex-consolidate</div>
-          <div class="skill-desc">Find patterns across all your project FINDINGS.md files. Finds what shows up in more than one place.</div>
+          <div class="skill-desc">Find patterns across all project findings. Surfaces what shows up in more than one place.</div>
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Workflow skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code>, <code style="font-size:11px;color:var(--text-muted)">/release</code> are personal. Drop them in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex link</code> wires them up. The starter template (bundled in the package) has examples.</div>
+          <div class="skill-desc">Drop skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code>, <code style="font-size:11px;color:var(--text-muted)">/release</code> in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex link</code> wires them up. Starter templates have examples.</div>
         </div>
       </div>
     </div>
@@ -739,8 +748,8 @@
   <!-- CTA FOOTER -->
   <section class="cta-section">
     <div class="cta-content reveal">
-      <h2 class="cta-title">One command.<br>Then it runs itself.</h2>
-      <p class="cta-sub">47 tools. Governance. Quality tracking. Works across sessions and machines.</p>
+      <h2 class="cta-title">One command.<br>Then your agents remember everything.</h2>
+      <p class="cta-sub">47 tools. Quality tracking. Governance. Works across sessions, machines, and agents.</p>
       <div class="cta-actions">
         <a href="#install" class="btn-primary">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

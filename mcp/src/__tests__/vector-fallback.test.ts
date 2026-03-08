@@ -95,4 +95,24 @@ describe("vectorFallback content hydration", () => {
     expect(results.length).toBe(1);
     expect(results[0].content).toContain("high score content");
   });
+
+  it("strips backlog Done items the same way the indexer does", async () => {
+    const backlogPath = path.join(tmp.path, "proj", "backlog.md");
+    writeFile(
+      backlogPath,
+      "# Backlog\n\n## Active\n- Keep this visible\n\n## Done\n- Hidden completed task\n"
+    );
+
+    const cache = getEmbeddingCache(tmp.path);
+    (cache as any)._setEntries([
+      { path: backlogPath, model: "nomic-embed-text", vec: [0.1, 0.2, 0.3] },
+    ]);
+
+    vi.mocked(cosineSimilarity).mockReturnValue(0.8);
+
+    const results = await vectorFallback(tmp.path, "backlog query", new Set(), 5);
+    expect(results.length).toBe(1);
+    expect(results[0].content).toContain("Keep this visible");
+    expect(results[0].content).not.toContain("Hidden completed task");
+  });
 });

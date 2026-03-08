@@ -57,6 +57,11 @@ interface PreparedFinding {
   tagWarning?: string;
 }
 
+interface AddFindingOptions {
+  skipLegacyDedup?: boolean;
+  extraAnnotations?: string[];
+}
+
 interface AddFindingWriteResult {
   content: string;
   citation: FindingCitation;
@@ -95,6 +100,7 @@ function prepareFinding(
   learning: string,
   project: string,
   fullHistory: string,
+  extraAnnotations?: string[],
   citationInput?: Partial<FindingCitation>,
   nowIso?: string,
   inferredRepo?: string,
@@ -123,6 +129,17 @@ function prepareFinding(
     const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
     bullet += ` <!-- conflicts_with: "${snippet}" -->`;
     debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
+  }
+  if (extraAnnotations && extraAnnotations.length > 0) {
+    const existing = new Set(
+      [...bullet.matchAll(/<!--\s*conflicts_with:\s*"([^"]+)"(?:\s*\(from project: [^)]+\))?\s*-->/g)].map((m) => m[0])
+    );
+    for (const annotation of extraAnnotations) {
+      if (!annotation.startsWith("<!--")) continue;
+      if (existing.has(annotation)) continue;
+      bullet += ` ${annotation}`;
+      existing.add(annotation);
+    }
   }
 
   const citation = buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit);
@@ -302,7 +319,7 @@ export function addFindingToFile(
   project: string,
   learning: string,
   citationInput?: Partial<FindingCitation>,
-  opts?: { skipLegacyDedup?: boolean }
+  opts?: AddFindingOptions
 ): CortexResult<string> {
   const denial = checkPermission(cortexPath, "write");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -335,7 +352,7 @@ export function addFindingToFile(
   if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
 
   const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
-    const preparedForNewFile = prepareFinding(learning, project, "", citationInput, nowIso, inferredRepo, headCommit);
+    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
         return cortexErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
@@ -368,7 +385,7 @@ export function addFindingToFile(
       : (legacyHistory ? `${content}\n${legacyHistory}` : content);
     const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
 
-    const prepared = prepareFinding(learning, project, historyForDedup, citationInput, nowIso, inferredRepo, headCommit);
+    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
       return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
     }
@@ -453,7 +470,8 @@ export function addFindingToFile(
 export function addFindingsToFile(
   cortexPath: string,
   project: string,
-  learnings: string[]
+  learnings: string[],
+  opts?: { extraAnnotationsByFinding?: string[][] }
 ): CortexResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   const denial = checkPermission(cortexPath, "write");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -477,13 +495,14 @@ export function addFindingsToFile(
   const contentResult: CortexResult<AddFindingsWriteResult> = withFileLock(learningsPath, () => {
     if (!fs.existsSync(learningsPath)) {
       let content = `# ${project} Findings\n\n## ${today}\n`;
-      for (const learning of learnings) {
+      for (const [index, learning] of learnings.entries()) {
+        const extraAnnotations = opts?.extraAnnotationsByFinding?.[index];
         const lengthError = validateFinding(learning);
         if (lengthError) {
           rejected.push({ text: learning, reason: lengthError });
           continue;
         }
-        const prepared = prepareFinding(learning, project, content, undefined, nowIso, inferredRepo, headCommit);
+        const prepared = prepareFinding(learning, project, content, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
           continue;
@@ -507,14 +526,15 @@ export function addFindingsToFile(
     const issues = validateFindingsFormat(content);
     if (issues.length > 0) debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
 
-    for (const learning of learnings) {
+    for (const [index, learning] of learnings.entries()) {
+      const extraAnnotations = opts?.extraAnnotationsByFinding?.[index];
       const lengthError = validateFinding(learning);
       if (lengthError) {
         rejected.push({ text: learning, reason: lengthError });
         continue;
       }
       const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
-      const prepared = prepareFinding(learning, project, fullHistory, undefined, nowIso, inferredRepo, headCommit);
+      const prepared = prepareFinding(learning, project, fullHistory, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
         continue;
