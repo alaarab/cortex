@@ -314,8 +314,9 @@ export async function searchDocumentsAsync(
     const merged = rrfMerge(tiers);
     if (merged.length === 0) return syncResult;
     return merged.slice(0, 12);
-  } catch {
+  } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
     return syncResult;
   }
 }
@@ -557,7 +558,8 @@ export function markStaleCitations(snippet: string): string {
                 // Line exists but is now empty — content has drifted
                 stale = true;
               }
-            } catch {
+            } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
               stale = true;
             }
           }

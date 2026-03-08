@@ -17,9 +17,11 @@
 
 I run 3-5 machines doing AI development at the same time. Claude Code, Codex, Cursor. Every session starts from zero. Every bug I've already traced gets traced again. Every decision I've already made gets made again.
 
-So I built this. A knowledge base that lives in my own GitHub and works across all of them. My work machine only sees work projects. My home machine only sees personal ones. Every agent on every machine reads from the same store.
+I didn't want to just dump everything into a CLAUDE.md and read the whole thing every time. That burns tokens and still doesn't give you what you actually need right now.
 
-When something comes up, my agents draw from what I've already figured out instead of starting from scratch. It only pulls what's relevant so it doesn't eat the context window. I can run more agents at the same time for less. And the more I work, the more it knows.
+So I built this. A knowledge base in my own GitHub. Every project, every machine. When something comes up, my agents pull only what's relevant. 550 tokens instead of the whole file. I can run more agents in parallel for the same cost and they're not producing slop from noise.
+
+The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go and making it smarter over time.
 
 > `npx @alaarab/cortex init` — 30 seconds. No account. Just a git repo you own.
 
@@ -98,19 +100,21 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
+**It's not just a CLAUDE.md.** CLAUDE.md loads the whole file every single time. Cortex searches what you actually wrote and injects only what matches. Same bug, same workaround, same decision — your agents find it when it's relevant, not all the time.
+
 **Your agents draw from what you already know.** Every bug, workaround, and decision gets saved. Next session your agent has it. You stop re-explaining things. They stop rediscovering things.
+
+**Findings match to entities. Old stuff fades. Good stuff sticks.** Knowledge doesn't just pile up. It decays. Patterns solidify. Things that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents are always drawing from what's actually useful right now.
 
 **All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets. It moves through git and just works.
 
 **Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
 
-**It doesn't eat your context window.** Loading all of `CLAUDE.md` into every session is expensive and slow. Cortex pulls in only what's relevant to the current prompt. Less token spend means you can run more agents at the same time for the same cost.
+**550 tokens per prompt, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
 
 **Your data stays in your own GitHub.** No account, no vendor. Markdown in a private repo you own. Read it, edit it, grep it, delete it.
 
 **It just runs.** Context gets injected before each prompt. Changes get saved and pushed after each response. You don't manage it.
-
-**Everything is visible in git.** `git log` shows what your agents learned. `git diff` shows what changed. It's just files.
 
 ---
 

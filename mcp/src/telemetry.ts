@@ -34,7 +34,9 @@ function telemetryPath(cortexPath: string): string {
 function migrateLegacy(cortexPath: string, newPath: string): void {
   const legacyPath = path.join(cortexPath, ".governance", "telemetry.json");
   if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
-    try { fs.renameSync(legacyPath, newPath); } catch { /* best effort */ }
+    try { fs.renameSync(legacyPath, newPath); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry migrate: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 }
 
@@ -52,7 +54,8 @@ function loadFromDisk(cortexPath: string): TelemetryData {
       config: { ...defaults.config, ...raw.config },
       stats: { ...defaults.stats, ...raw.stats },
     };
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry loadFromDisk: ${err instanceof Error ? err.message : String(err)}\n`);
     return defaults;
   }
 }
@@ -81,7 +84,9 @@ function flushTelemetryForPath(cortexPath: string): void {
   const file = telemetryPath(cortexPath);
   try {
     fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   pendingCounts.set(cortexPath, 0);
 }
 

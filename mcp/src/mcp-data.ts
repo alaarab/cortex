@@ -88,7 +88,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         let decoded: unknown;
         try {
           decoded = JSON.parse(rawData);
-        } catch {
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
@@ -236,7 +237,9 @@ export function register(server: McpServer, ctx: McpContext): void {
                   break;
                 }
               }
-            } catch { /* best-effort restore */ }
+            } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+            }
           }
           return mcpResponse({
             ok: false,
@@ -253,7 +256,9 @@ export function register(server: McpServer, ctx: McpContext): void {
                 fs.rmSync(path.join(cortexPath, entry), { recursive: true, force: true });
               }
             }
-          } catch { /* best-effort cleanup */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
         return mcpResponse({
           ok: true,

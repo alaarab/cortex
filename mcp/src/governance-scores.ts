@@ -147,7 +147,8 @@ function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
       .map((line: string) => {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
-        } catch {
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -177,7 +178,8 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
       .map((line: string) => {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
-        } catch {
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -190,8 +192,8 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
   } finally {
     try {
       fs.unlinkSync(claimedFile);
-    } catch {
-      // best effort
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
     }
   }
 }

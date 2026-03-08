@@ -221,7 +221,9 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
         }
       }
     }
-  } catch { /* best-effort: Ollama check failed, skip */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] init ollamaCheck: ${errorMessage(err)}\n`);
+  }
 
   log("\n─── Auto-capture (optional) ────────────────────────────────────────────");
   log("After each session, cortex scans the conversation for insight-signal phrases");
@@ -677,7 +679,9 @@ export async function runInit(opts: InitOptions = {}) {
           log("  (Set CORTEX_OLLAMA_URL=off to hide this message)");
         }
       }
-    } catch { /* best-effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] init ollamaInstallHint: ${errorMessage(err)}\n`);
+    }
   }
 
   // Write ~/.cortex/.env if auto-capture or semantic features were enabled in walkthrough

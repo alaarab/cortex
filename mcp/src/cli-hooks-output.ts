@@ -63,8 +63,8 @@ export function buildHookOutput(
       recordInjection(cortexPathLocal, injected.key, sessionId);
       try {
         recordRetrieval(cortexPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
-      } catch {
-        // best-effort
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] injectContext recordRetrieval: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -103,8 +103,8 @@ export function buildHookOutput(
       recordInjection(cortexPathLocal, key, sessionId);
       try {
         recordRetrieval(cortexPathLocal, doc.path ?? doc.filename, doc.type);
-      } catch {
-        // best-effort
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] injectContext recordRetrievalOrdered: ${err instanceof Error ? err.message : String(err)}\n`);
       }
       parts.push(`[${getDocSourceKey(doc, cortexPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));

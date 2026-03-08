@@ -142,7 +142,10 @@ export async function handleHookPrompt() {
   const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
   let raw = "";
-  try { raw = await readStdin(); } catch { process.exit(0); }
+  try { raw = await readStdin(); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt stdinRead: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(0);
+  }
 
   const input = parseHookInput(raw);
   if (!input) process.exit(0);
@@ -297,7 +300,9 @@ export async function handleHookPrompt() {
         for (const f of fs.readdirSync(getCortexPath())) {
           if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
           const fp = `${getCortexPath()}/${f}`;
-          try { fs.unlinkSync(fp); } catch { /* best effort */ }
+          try { fs.unlinkSync(fp); } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt staleNoticeUnlink: ${errorMessage(err)}\n`);
+          }
         }
       } catch (err: unknown) {
         debugLog(`stale notice cleanup failed: ${errorMessage(err)}`);
@@ -318,7 +323,9 @@ export async function handleHookPrompt() {
       }
 
       if (noticeFile) {
-        try { fs.writeFileSync(noticeFile, ""); } catch { /* best effort */ }
+        try { fs.writeFileSync(noticeFile, ""); } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt noticeFileWrite: ${errorMessage(err)}\n`);
+        }
       }
     }
 

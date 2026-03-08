@@ -80,7 +80,8 @@ export function validateCitation(citation: ParsedCitation): boolean {
           valid = true;
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] isCitationValid: ${err instanceof Error ? err.message : String(err)}\n`);
       valid = false;
     }
   }

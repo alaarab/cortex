@@ -129,14 +129,18 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
           debugLog(`embedding: migrated ${lines.length} entries from JSONL to SQLite`);
         }
       } catch (err) {
-        try { db.run("ROLLBACK"); } catch { /* ignore */ }
+        try { db.run("ROLLBACK"); } catch (e2: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding migrationRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+        }
         debugLog(`embedding: JSONL migration failed: ${errorMessage(err)}`);
       }
     }
 
     return db;
   } catch (err) {
-    try { db?.close(); } catch { /* ignore */ }
+    try { db?.close(); } catch (e2: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+    }
     throw err;
   }
 }
@@ -183,8 +187,11 @@ function persistDb(cortexPath: string, db: SqlJsDatabase): void {
             }
           }
         }
-      } catch {
-        try { onDisk?.close(); } catch { /* ignore */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+        try { onDisk?.close(); } catch (e2: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+        }
         onDisk = null;
       }
 
@@ -194,11 +201,13 @@ function persistDb(cortexPath: string, db: SqlJsDatabase): void {
         fs.writeFileSync(tmp, Buffer.from(target.export()));
         fs.renameSync(tmp, dbPath);
       } finally {
-        if (onDisk) try { onDisk.close(); } catch { /* ignore */ }
+        if (onDisk) try { onDisk.close(); } catch (e2: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+        }
       }
     });
-  } catch {
-    debugLog("embedding: failed to persist cache db");
+  } catch (err: unknown) {
+    debugLog(`embedding: failed to persist cache db: ${errorMessage(err)}`);
   }
 }
 
@@ -335,7 +344,9 @@ export async function getCachedEmbedding(
     debugLog(`embedding: getCachedEmbedding failed: ${errorMessage(err)}`);
     return [];
   } finally {
-    try { db?.close(); } catch { /* ignore */ }
+    try { db?.close(); } catch (e2: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+    }
   }
 }
 
@@ -387,7 +398,9 @@ export async function getCachedEmbeddings(
     debugLog(`embedding: getCachedEmbeddings failed: ${errorMessage(err)}`);
     return texts.map(() => []);
   } finally {
-    try { db?.close(); } catch { /* ignore */ }
+    try { db?.close(); } catch (e2: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+    }
   }
 }
 

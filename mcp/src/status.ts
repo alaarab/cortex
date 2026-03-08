@@ -20,7 +20,8 @@ function readPackageVersion(): string {
     const pkgPath = path.resolve(__dirname, "..", "..", "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
     return "unknown";
   }
 }
@@ -103,7 +104,9 @@ export async function runStatus() {
           )
         );
       });
-    } catch { /* malformed settings */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
   console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(in settings.json)${RESET}`);
   console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
@@ -122,7 +125,9 @@ export async function runStatus() {
         ftsIndexSize = stat.size;
       }
     }
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${(ftsIndexSize / 1024).toFixed(0)} KB)${RESET}`
     : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
@@ -134,7 +139,10 @@ export async function runStatus() {
     try {
       const raw = fs.readFileSync(filePath, "utf8");
       return raw.includes('"cortex"') || raw.includes("'cortex'");
-    } catch { return false; }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hasCortexEntry: ${err instanceof Error ? err.message : String(err)}\n`);
+      return false;
+    }
   }
   function agentConfigured(candidates: string[]): boolean {
     return candidates.some(hasCortexEntry);

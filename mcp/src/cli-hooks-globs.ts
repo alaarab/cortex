@@ -41,8 +41,8 @@ function parseProjectGlobs(cortexPathLocal: string, project: string): string[] |
         }
       }
     }
-  } catch {
-    // best effort
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectGlobs: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   projectGlobCache.set(project, globs);
   capCache(projectGlobCache);

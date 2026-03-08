@@ -136,7 +136,8 @@ function _resolveImportsRecursive(
     let normalized: string;
     try {
       normalized = fs.realpathSync.native(resolved);
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] resolveImports realpath: ${err instanceof Error ? err.message : String(err)}\n`);
       return `<!-- @import not found: ${trimmed} -->`;
     }
 
@@ -153,7 +154,8 @@ function _resolveImportsRecursive(
       childSeen.add(normalized);
       const imported = fs.readFileSync(normalized, "utf-8");
       return _resolveImportsRecursive(imported, cortexPath, childSeen, depth + 1);
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] resolveImports fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
       return `<!-- @import error: ${trimmed} -->`;
     }
   });
@@ -193,7 +195,9 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
       try {
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
-      } catch { /* skip */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   } else {
     const projectDirs = getProjectDirs(cortexPath, profile);
@@ -207,14 +211,18 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
           for (const f of mdFiles) matched.add(f);
         }
         for (const f of matched) files.push(path.join(dir, f));
-      } catch { /* skip unreadable dirs */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash globDir: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
     files.sort();
     for (const f of files) {
       try {
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
-      } catch { /* skip */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
 
@@ -222,7 +230,9 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
     try {
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
   }
   // Include global/ files (pulled via @import) so changes invalidate the cache
   const globalDir = path.join(cortexPath, "global");
@@ -233,7 +243,9 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
         const fp = path.join(globalDir, f);
         const stat = fs.statSync(fp);
         hash.update(`global:${f}:${stat.mtimeMs}:${stat.size}`);
-      } catch { /* skip */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
   // Include manual entity links so graph changes invalidate the cache
@@ -242,14 +254,18 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
     try {
       const stat = fs.statSync(manualLinksPath);
       hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
   }
   const indexPolicyPath = path.join(cortexPath, ".governance", "index-policy.json");
   if (fs.existsSync(indexPolicyPath)) {
     try {
       const stat = fs.statSync(indexPolicyPath);
       hash.update(`index-policy-file:${stat.mtimeMs}:${stat.size}`);
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
   }
   if (profile) hash.update(`profile:${profile}`);
   hash.update(`index-policy:${JSON.stringify(policy)}`);
@@ -271,7 +287,9 @@ function loadHashMap(cortexPath: string): { version?: number; hashes: Record<str
     if (fs.existsSync(hashFile)) {
       return JSON.parse(fs.readFileSync(hashFile, "utf-8"));
     }
-  } catch { /* corrupt file, treat as empty */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadHashMap: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   return { hashes: {} };
 }
 
@@ -288,7 +306,9 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
       try {
         const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
         if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
-      } catch { /* file missing or corrupt — treat as empty */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] saveHashMap readExisting: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
       const merged = { ...existing, ...hashes };
       // Remove entries for paths that no longer exist on disk
       for (const filePath of Object.keys(merged)) {
@@ -301,8 +321,8 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
         JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes: merged }, null, 2)
       );
     });
-  } catch {
-    debugLog("Failed to save index hash map");
+  } catch (err: unknown) {
+    debugLog(`Failed to save index hash map: ${errorMessage(err)}`);
   }
 }
 
@@ -417,7 +437,8 @@ function insertFileIntoIndex(
       scheduleEmbedding(cortexPath, entry.fullPath, content.slice(0, 8000));
     }
     return true;
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] insertFileIntoIndex: ${err instanceof Error ? err.message : String(err)}\n`);
     return false;
   }
 }
@@ -433,7 +454,9 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, cortexPath: string, docP
   // never returns deleted/stale documents.
   try {
     db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDoc]);
-  } catch { /* global_entities table may not exist in older cached DBs */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] deleteEntityLinksForDocPath globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 /**
@@ -445,8 +468,12 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
   const resolvedPath = path.resolve(filePath);
 
   // Delete old record
-  try { deleteEntityLinksForDocPath(db, cortexPath, resolvedPath); } catch { /* ignore */ }
-  try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch { /* ignore */ }
+  try { deleteEntityLinksForDocPath(db, cortexPath, resolvedPath); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateFileInIndex deleteEntityLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+  try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateFileInIndex deleteDocs: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // Re-insert if file still exists
   if (fs.existsSync(resolvedPath)) {
@@ -530,7 +557,9 @@ function isSentinelFresh(cortexPath: string, sentinel: { computedAt: number }): 
     try {
       const stat = fs.statSync(dir);
       if (stat.mtimeMs > sentinel.computedAt) return false;
-    } catch { /* dir doesn't exist, skip */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] isSentinelFresh statDir: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
   return true;
 }
@@ -546,7 +575,10 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
     const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
     const graphMtime = fs.statSync(graphPath).mtimeMs;
     const anyNewer = allFiles.some(f => {
-      try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch { return true; }
+      try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadCachedEntityGraph statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+        return true;
+      }
     });
     if (!anyNewer && graph.entities && graph.links) {
       for (const [id, name, type] of graph.entities) {
@@ -564,7 +596,9 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
               "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
               [entity, project, docKey]
             );
-          } catch { /* ignore */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadCachedEntityGraph globalEntitiesInsert2: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
       } else {
         // Older cache without globalEntities: re-derive from entity_links + entities
@@ -583,7 +617,9 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
                   "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
                   [name as string, proj, sourceDoc as string]
                 );
-              } catch { /* ignore */ }
+              } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadCachedEntityGraph globalEntitiesInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
             }
           }
         } catch (err: unknown) {
@@ -648,7 +684,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndexImpl userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
@@ -704,7 +741,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         }
 
         // Schema migration: add first_seen_at column if missing
-        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* already exists */ }
+        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* column already exists — expected */ }
 
         // Compute current file hashes and determine what changed
         const allFiles = globResult.entries;
@@ -721,7 +758,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
             } else if (savedHashes[entry.fullPath] !== fileHash) {
               changedFiles.push(entry);
             }
-          } catch { /* skip unreadable */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex hashFile: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
 
         // Check for files missing from the index (deleted files)
@@ -751,12 +790,19 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
           db.run("BEGIN");
           try {
             for (const missingPath of missingFromIndex) {
-              try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
-              try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
+              try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch (err: unknown) {
+                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex deleteEntityLinksForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
+              }
+              try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch (err: unknown) {
+                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex deleteDocForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
+              }
             }
             db.run("COMMIT");
-          } catch {
-            try { db.run("ROLLBACK"); } catch { /* ignore */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex incrementalDeleteCommit: ${err instanceof Error ? err.message : String(err)}\n`);
+            try { db.run("ROLLBACK"); } catch (e2: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+            }
           }
 
           let updatedCount = 0;
@@ -767,7 +813,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
                 const sourceDocKey = getEntrySourceDocKey(entry, cortexPath);
                 db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDocKey]);
                 // Q19: keep global_entities in sync with entity_links on updates
-                try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch { /* older cached DBs may not have this table */ }
+                try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch { /* table may not exist in older cached DBs */ }
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
@@ -783,7 +829,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
               db.run("COMMIT");
             } catch (err: unknown) {
-              try { db.run("ROLLBACK"); } catch { /* ignore */ }
+              try { db.run("ROLLBACK"); } catch (e2: unknown) {
+                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+              }
               throw err;
             }
           }
@@ -819,8 +867,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
           db?.close();
         }
       }
-    } catch {
-      debugLog(`Cache load failed, rebuilding index`);
+    } catch (err: unknown) {
+      debugLog(`Cache load failed, rebuilding index: ${errorMessage(err)}`);
     }
   }
 
@@ -850,7 +898,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   for (const entry of allFiles) {
     try {
       newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
-    } catch { /* skip */ }
+    } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     if (insertFileIntoIndex(db, entry, cortexPath, { scheduleEmbeddings: true })) {
       fileCount++;
       // Extract entities from finding files (if not loaded from cache)
@@ -903,11 +953,13 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     fs.writeFileSync(cacheFile, db.export());
     for (const f of fs.readdirSync(cacheDir)) {
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
-      try { fs.unlinkSync(path.join(cacheDir, f)); } catch { /* stale cache cleanup is best-effort */ }
+      try { fs.unlinkSync(path.join(cacheDir, f)); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex staleCacheCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
     debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);
-  } catch {
-    debugLog(`Failed to save FTS index cache`);
+  } catch (err: unknown) {
+    debugLog(`Failed to save FTS index cache: ${errorMessage(err)}`);
   }
 
   return db;
@@ -934,7 +986,8 @@ function isRebuildLockHeld(cortexPath: string): boolean {
     const stat = fs.statSync(lockPath);
     const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
     return Date.now() - stat.mtimeMs <= staleThreshold;
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] isRebuildLockHeld stat: ${err instanceof Error ? err.message : String(err)}\n`);
     return false;
   }
 }
@@ -945,7 +998,8 @@ async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): P
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadIndexSnapshotOrEmpty userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
@@ -1182,7 +1236,8 @@ export function findFtsCacheForPath(cortexPath: string, profile?: string): { exi
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findFtsCacheForPath userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);

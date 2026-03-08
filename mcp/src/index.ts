@@ -13,7 +13,12 @@ import {
   runtimeDir,
 } from "./shared.js";
 import { log as structuredLog } from "./logger.js";
-import { buildIndex, updateFileInIndex as updateFileInIndexFn } from "./shared-index.js";
+import {
+  buildIndex,
+  decodeStringRow,
+  queryRows,
+  updateFileInIndex as updateFileInIndexFn,
+} from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { register as registerSearch } from "./mcp-search.js";
 import { register as registerBacklog } from "./mcp-backlog.js";
@@ -29,7 +34,17 @@ import { register as registerExtract } from "./mcp-extract.js";
 import type { McpContext } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
 
-if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
+const argvCommand = process.argv[2];
+let handledTopLevelCommand = false;
+
+async function flushTopLevelOutput(): Promise<void> {
+  await Promise.all([
+    new Promise<void>((resolve) => process.stdout.write("", () => resolve())),
+    new Promise<void>((resolve) => process.stderr.write("", () => resolve())),
+  ]);
+}
+
+if (argvCommand === "--help" || argvCommand === "-h" || argvCommand === "help") {
   console.log(`cortex - Long-term memory for Claude Code
 
 Usage:
@@ -126,10 +141,10 @@ Examples:
   cortex maintain govern my-app          Queue stale memories for review
   cortex status                          Quick health check
 `);
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "init") {
+if (!handledTopLevelCommand && argvCommand === "init") {
   const initArgs = process.argv.slice(3);
   const machineIdx = initArgs.indexOf("--machine");
   const profileIdx = initArgs.indexOf("--profile");
@@ -151,22 +166,22 @@ if (process.argv[2] === "init") {
     dryRun: initArgs.includes("--dry-run"),
     yes: initArgs.includes("--yes") || initArgs.includes("-y"),
   });
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "uninstall") {
+if (!handledTopLevelCommand && argvCommand === "uninstall") {
   const { runUninstall } = await import("./init.js");
   await runUninstall();
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "status") {
+if (!handledTopLevelCommand && argvCommand === "status") {
   const { runStatus } = await import("./status.js");
   await runStatus();
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "verify") {
+if (!handledTopLevelCommand && argvCommand === "verify") {
   const { runPostInitVerify } = await import("./init.js");
   const cortexPath = process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex");
   const result = runPostInitVerify(cortexPath);
@@ -180,10 +195,11 @@ if (process.argv[2] === "verify") {
   if (!result.ok) {
     console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
   }
-  process.exit(result.ok ? 0 : 1);
+  if (!result.ok) process.exit(1);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "mcp-mode") {
+if (!handledTopLevelCommand && argvCommand === "mcp-mode") {
   const { runMcpMode } = await import("./init.js");
   try {
     await runMcpMode(process.argv[3]);
@@ -191,10 +207,10 @@ if (process.argv[2] === "mcp-mode") {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   }
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "hooks-mode") {
+if (!handledTopLevelCommand && argvCommand === "hooks-mode") {
   const { runHooksMode } = await import("./init.js");
   try {
     await runHooksMode(process.argv[3]);
@@ -202,10 +218,10 @@ if (process.argv[2] === "hooks-mode") {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   }
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "link") {
+if (!handledTopLevelCommand && argvCommand === "link") {
   const { runLink } = await import("./link.js");
   const linkArgs = process.argv.slice(3);
   const getFlag = (flag: string) => {
@@ -227,18 +243,18 @@ if (process.argv[2] === "link") {
     allTools: linkArgs.includes("--all-tools"),
     mcp: mcpMode,
   });
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-if (process.argv[2] === "--health") {
-  process.exit(0);
+if (!handledTopLevelCommand && argvCommand === "--health") {
+  handledTopLevelCommand = true;
 }
 
 // Terminal-first behavior: open shell for no-arg human invocations.
-if (!process.argv[2] && process.stdin.isTTY && process.stdout.isTTY) {
+if (!handledTopLevelCommand && !argvCommand && process.stdin.isTTY && process.stdout.isTTY) {
   const { runCliCommand } = await import("./cli.js");
   await runCliCommand("shell", []);
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
 // CLI subcommands (run before MCP server starts)
@@ -279,21 +295,28 @@ const CLI_COMMANDS = [
   "workflow",
   "access",
 ];
-if (CLI_COMMANDS.includes(process.argv[2])) {
+if (!handledTopLevelCommand && argvCommand && CLI_COMMANDS.includes(argvCommand)) {
   const { runCliCommand } = await import("./cli.js");
-  const cmd = process.argv[2];
+  const cmd = argvCommand;
   // Track CLI usage if telemetry is opt-in enabled
   try {
     const { trackCliCommand } = await import("./telemetry.js");
     trackCliCommand(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), cmd);
-  } catch { /* telemetry is best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli trackCliCommand: ${errorMessage(err)}\n`);
+  }
   await runCliCommand(cmd, process.argv.slice(3));
-  process.exit(0);
+  handledTopLevelCommand = true;
 }
 
-// MCP mode: first non-flag arg is the cortex path
-const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
-const cortexPath = findCortexPathWithArg(cortexArg);
+if (handledTopLevelCommand) {
+  await flushTopLevelOutput();
+}
+
+// MCP mode: first non-flag arg is the cortex path. Resolve it lazily so CLI commands
+// like `maintain` are not misinterpreted as a filesystem path after the command has run.
+const cortexArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
+const cortexPath = handledTopLevelCommand ? "" : findCortexPathWithArg(cortexArg);
 
 const __indexDirname = path.dirname(fileURLToPath(import.meta.url));
 const __packageRoot = path.join(__indexDirname, "..", "..");
@@ -301,7 +324,8 @@ const PACKAGE_VERSION = (() => {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__packageRoot, "package.json"), "utf8"));
     return pkg.version || "0.0.0";
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] PACKAGE_VERSION: ${errorMessage(err)}\n`);
     return "0.0.0";
   }
 })();
@@ -329,9 +353,13 @@ function cleanStaleLocks(cortexPath: string): void {
           fs.unlinkSync(lockPath);
           debugLog(`Cleaned stale lock: ${entry}`);
         }
-      } catch { /* lock may have been removed concurrently */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
+      }
     }
-  } catch { /* best effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
+  }
 }
 
 async function main() {
@@ -345,7 +373,9 @@ async function main() {
     // Load embedding cache and kick off background embedding (fire-and-forget)
     const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
     const embCache = getEmbeddingCache(cortexPath);
-    embCache.load().catch(() => {});
+    void embCache.load().catch((err: unknown) => {
+      debugLog(`Embedding cache startup load failed: ${errorMessage(err)}`);
+    });
     void backgroundEmbedMissingDocs(cortexPath, db, embCache);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -360,7 +390,9 @@ async function main() {
   async function rebuildIndex() {
     runCustomHooks(cortexPath, "pre-index");
     indexReady = false;
-    try { db?.close(); } catch { /* best effort */ }
+    try { db?.close(); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] rebuildIndex dbClose: ${errorMessage(err)}\n`);
+    }
     db = await buildIndex(cortexPath, profile);
     indexReady = true;
     runCustomHooks(cortexPath, "post-index");
@@ -427,7 +459,9 @@ async function main() {
           }],
         };
       }
-      try { trackToolCall(cortexPath, registeredName); } catch { /* best-effort */ }
+      try { trackToolCall(cortexPath, registeredName); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] trackToolCall: ${errorMessage(err)}\n`);
+      }
       return handler(...args);
     };
     if (registeredName !== name) {
@@ -478,13 +512,12 @@ async function backgroundEmbedMissingDocs(
     const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared-ollama.js");
     if (!getOllamaUrl()) return;
     if (!await checkOllamaAvailable()) return;
-    const results = db.exec("SELECT path, content FROM docs");
-    if (!results?.length || !results[0]?.values?.length) return;
+    const rows = queryRows(db, "SELECT path, content FROM docs", []);
+    if (!rows) return;
     const model = getEmbeddingModel();
     let count = 0;
-    for (const row of results[0].values) {
-      const docPath = String(row[0]);
-      const content = String(row[1]);
+    for (const row of rows) {
+      const [docPath, content] = decodeStringRow(row, 2, "backgroundEmbedMissingDocs");
       if (cache.get(docPath, model)) continue;
       const vec = await embedText(content.slice(0, 8000));
       if (vec) {
@@ -496,12 +529,14 @@ async function backgroundEmbedMissingDocs(
     }
     if (count > 0) await cache.flush();
     debugLog(`backgroundEmbedMissingDocs: embedded ${count} new docs`);
-  } catch (e) {
-    debugLog(`backgroundEmbedMissingDocs error: ${e instanceof Error ? e.message : String(e)}`);
+  } catch (e: unknown) {
+    debugLog(`backgroundEmbedMissingDocs error: ${errorMessage(e)}`);
   }
 }
 
-main().catch((err) => {
-  console.error("Failed to start cortex-mcp:", err);
-  process.exit(1);
-});
+if (!handledTopLevelCommand) {
+  main().catch((err) => {
+    console.error("Failed to start cortex-mcp:", err);
+    process.exit(1);
+  });
+}

@@ -19,7 +19,9 @@ function readLegacyHistoryContent(resolvedDir: string): string {
   const parts: string[] = [];
   for (const name of LEGACY_FINDINGS_CANDIDATES) {
     if (available.has(name.toLowerCase())) {
-      try { parts.push(fs.readFileSync(path.join(resolvedDir, name), "utf8")); } catch { /* best-effort */ }
+      try { parts.push(fs.readFileSync(path.join(resolvedDir, name), "utf8")); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readLegacyHistoryContent fileRead: ${errorMessage(err)}\n`);
+      }
     }
   }
   return parts.join("\n");
@@ -453,7 +455,9 @@ export function addFindingToFile(
       const runtimeDir = path.join(cortexPath, ".runtime");
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.writeFileSync(path.join(runtimeDir, "consolidation-needed.txt"), `${project}\n`);
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] addFinding consolidationMarker: ${errorMessage(err)}\n`);
+    }
     consolidationNotice = ` Note: ${activeCount} active findings exceeds consolidation cap (${CONSOLIDATION_CAP}). Consider running consolidation.`;
   }
 

@@ -21,7 +21,8 @@ function loadChecksums(cortexPath: string): ChecksumStore {
   if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadChecksums: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }

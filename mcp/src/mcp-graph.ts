@@ -237,7 +237,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         // 1. Find or create entity
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [entityName, resolvedEntityType, new Date().toISOString().slice(0, 10)]);
-        } catch { /* ignore */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings entityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
         const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, resolvedEntityType]);
         if (!entityResult?.length || !entityResult[0]?.values?.length) {
           return mcpResponse({ ok: false, error: "Failed to create entity." });
@@ -262,7 +264,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         // 3. Find or create document entity
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
-        } catch { /* ignore */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings docEntityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
         const docEntityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
         if (!docEntityResult?.length || !docEntityResult[0]?.values?.length) {
           return mcpResponse({ ok: false, error: "Failed to create document entity." });
@@ -275,7 +279,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
             [sourceId, targetId, relType, sourceDoc],
           );
-        } catch {
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings linkInsert: ${err instanceof Error ? err.message : String(err)}\n`);
           return mcpResponse({ ok: false, error: "Failed to insert entity link." });
         }
 
@@ -286,7 +291,9 @@ export function register(server: McpServer, ctx: McpContext): void {
             "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
             [entityName, project, sourceDoc],
           );
-        } catch { /* non-fatal: cross-project discovery is best-effort */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
 
         // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
         const manualLinksPath = runtimeFile(ctx.cortexPath, "manual-links.json");
@@ -294,7 +301,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           withFileLock(manualLinksPath, () => {
             let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
             if (fs.existsSync(manualLinksPath)) {
-              try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch { /* corrupt file — start fresh */ }
+              try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err: unknown) {
+                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings manualLinksRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              }
             }
             const newEntry = { entity: entityName, entityType: resolvedEntityType, sourceDoc, relType };
             const alreadyStored = existing.some(

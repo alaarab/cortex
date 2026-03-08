@@ -81,9 +81,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     fs.readFileSync(fsBenchFile, "utf8");
     fs.unlinkSync(fsBenchFile);
     fsMs = Date.now() - t0;
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor fsBenchmark: ${errorMessage(err)}\n`);
     fsMs = -1;
-    try { fs.unlinkSync(fsBenchFile); } catch { /* ignore */ }
+    try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+    }
   }
   const fsSlow = fsMs > 500 || fsMs < 0;
   checks.push({
@@ -190,7 +193,10 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   const runtimeHealthPath = path.join(cortexPath, ".governance", "runtime-health.json");
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
-    try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch { runtime = null; }
+    try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor runtimeHealth: ${errorMessage(err)}\n`);
+      runtime = null;
+    }
   }
   checks.push({
     name: "runtime-health-file",
