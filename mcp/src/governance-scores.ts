@@ -192,17 +192,19 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
   }
 }
 
-function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number }> {
-  const aggregated: Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number }> = {};
+function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number; lastUsedAt: string }> {
+  const aggregated: Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number; lastUsedAt: string }> = {};
   for (const entry of entries) {
     if (!aggregated[entry.key]) {
-      aggregated[entry.key] = { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 0 };
+      aggregated[entry.key] = { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: "" };
     }
     const current = aggregated[entry.key];
     if (entry.delta.impressions) current.impressions += entry.delta.impressions;
     if (entry.delta.helpful) current.helpful += entry.delta.helpful;
     if (entry.delta.repromptPenalty) current.repromptPenalty += entry.delta.repromptPenalty;
     if (entry.delta.regressionPenalty) current.regressionPenalty += entry.delta.regressionPenalty;
+    // Q24: carry the max journal timestamp so lastUsedAt is persisted correctly during flush
+    if (entry.at && entry.at > current.lastUsedAt) current.lastUsedAt = entry.at;
   }
   return aggregated;
 }
@@ -246,6 +248,10 @@ export function flushEntryScores(cortexPath: string): void {
       entry.helpful += deltas.helpful;
       entry.repromptPenalty += deltas.repromptPenalty;
       entry.regressionPenalty += deltas.regressionPenalty;
+      // Q24: persist the max journal timestamp into lastUsedAt so recency boost advances correctly
+      if (deltas.lastUsedAt && deltas.lastUsedAt > entry.lastUsedAt) {
+        entry.lastUsedAt = deltas.lastUsedAt;
+      }
     }
     saveEntryScores(cortexPath, scores);
   }
