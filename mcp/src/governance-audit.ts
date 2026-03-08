@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog as appendAuditLogShared, debugLog, runtimeFile } from "./shared.js";
+import { errorMessage } from "./utils.js";
 
 export interface AuditLogEntry {
   at: string;
@@ -29,7 +30,7 @@ export function readAuditLog(cortexPath: string, limit: number = 200): AuditLogE
         };
       });
   } catch (err: unknown) {
-    debugLog(`readAuditLog failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`readAuditLog failed: ${errorMessage(err)}`);
     return [];
   }
 }
@@ -55,6 +56,6 @@ export function recordRetrieval(cortexPath: string, file: string, section: strin
       fs.writeFileSync(logPath, lines.slice(-1000).join("\n") + "\n");
     }
   } catch (err: unknown) {
-    debugLog(`recordRetrieval rotation failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`recordRetrieval rotation failed: ${errorMessage(err)}`);
   }
 }

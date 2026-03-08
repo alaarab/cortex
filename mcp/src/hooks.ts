@@ -5,6 +5,7 @@ import { createHmac } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, type CortexErrorCode } from "./shared.js";
+import { errorMessage } from "./utils.js";
 
 export interface HookError {
   code: CortexErrorCode;
@@ -17,7 +18,7 @@ export function commandExists(cmd: string): boolean {
     execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
   } catch (err: unknown) {
-    debugLog(`commandExists: ${cmd} not found: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`commandExists: ${cmd} not found: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -52,7 +53,7 @@ function resolveToolBinary(tool: string): string | null {
       if (resolved !== wrapperPath) return candidate;
     }
   } catch (err: unknown) {
-    debugLog(`resolveToolBinary: failed for ${tool}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`resolveToolBinary: failed for ${tool}: ${errorMessage(err)}`);
     return null;
   }
   return null;
@@ -175,7 +176,7 @@ exit $status
     fs.chmodSync(wrapperPath, 0o755);
     return true;
   } catch (err: unknown) {
-    debugLog(`installSessionWrapper: failed for ${tool}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`installSessionWrapper: failed for ${tool}: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -248,7 +249,7 @@ function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs:
       : {};
     return { enabled, toolPrefs };
   } catch (err: unknown) {
-    debugLog(`readHookPreferences: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`readHookPreferences: ${errorMessage(err)}`);
     return { enabled: true, toolPrefs: {} };
   }
 }
@@ -323,7 +324,7 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
         )
     );
   } catch (err: unknown) {
-    debugLog(`readCustomHooks: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`readCustomHooks: ${errorMessage(err)}`);
     return [];
   }
 }
@@ -364,7 +365,7 @@ export function runCustomHooks(
       }
       fetch(hook.webhook, { method: "POST", headers, body: payload, signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT) })
         .catch((err: unknown) => {
-          const message = `${event}: ${hook.webhook}: ${err instanceof Error ? err.message : String(err)}`;
+          const message = `${event}: ${hook.webhook}: ${errorMessage(err)}`;
           debugLog(`runCustomHooks webhook: ${message}`);
           try {
             appendHookErrorLog(cortexPath, event, message);
@@ -382,11 +383,11 @@ export function runCustomHooks(
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {
-      const message = `${event}: ${hook.command}: ${err instanceof Error ? err.message : String(err)}`;
+      const message = `${event}: ${hook.command}: ${errorMessage(err)}`;
       debugLog(`runCustomHooks: ${message}`);
       errors.push({ code: CortexError.VALIDATION_ERROR, message });
       try {
-        appendHookErrorLog(cortexPath, event, err instanceof Error ? err.message : String(err));
+        appendHookErrorLog(cortexPath, event, errorMessage(err));
       } catch { /* best-effort logging */ }
     }
   }
@@ -430,7 +431,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: copilot failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`configureAllHooks: copilot failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(cortexPath, "copilot")) installSessionWrapper("copilot", cortexPath);
   }
@@ -454,7 +455,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: cursor failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`configureAllHooks: cursor failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(cortexPath, "cursor")) installSessionWrapper("cursor", cortexPath);
   }
@@ -477,7 +478,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: codex failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`configureAllHooks: codex failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(cortexPath, "codex")) installSessionWrapper("codex", cortexPath);
   }

@@ -15,6 +15,7 @@ import {
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
 import { cosineFallback, invalidateDfCache } from "./shared-search-fallback.js";
+import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
 
 // Re-export for backward compatibility
@@ -64,16 +65,22 @@ async function _drainEmbQueue(): Promise<void> {
   }
   for (const [cortexPath, docs] of byCortexPath) {
     const cache = getEmbeddingCache(cortexPath);
-    try { await cache.load(); } catch { /* best-effort */ }
+    try { await cache.load(); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embeddingQueue cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
     const model = getEmbeddingModel();
     for (const { docPath, content } of docs) {
       try {
         if (cache.get(docPath, model)) continue;
         const vec = await embedText(content);
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embeddingQueue embedText: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
-    try { await cache.flush(); } catch { /* best-effort */ }
+    try { await cache.flush(); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embeddingQueue cacheFlush: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 }
 
@@ -103,19 +110,16 @@ const IMPORT_RE = /^@import\s+(.+)$/gm;
 const MAX_IMPORT_DEPTH = 5;
 
 /**
- * Resolve `@import shared/file.md` directives in document content.
- * The import path is resolved relative to the cortex root (e.g. `shared/foo.md` -> `~/.cortex/global/shared/foo.md`).
- * Circular imports are detected and skipped. Depth is capped to prevent runaway recursion.
+ * Internal recursive helper for resolveImports. Tracks `seen` (cycle detection) and `depth` (runaway
+ * recursion guard) — callers should never pass these; use the public `resolveImports` instead.
  */
-export function resolveImports(
+function _resolveImportsRecursive(
   content: string,
   cortexPath: string,
-  seen?: Set<string>,
-  depth?: number,
+  seen: Set<string>,
+  depth: number,
 ): string {
-  const currentSeen = seen ?? new Set<string>();
-  const currentDepth = depth ?? 0;
-  if (currentDepth >= MAX_IMPORT_DEPTH) return content;
+  if (depth >= MAX_IMPORT_DEPTH) return content;
 
   return content.replace(IMPORT_RE, (_match, importPath: string) => {
     const trimmed = importPath.trim();
@@ -140,19 +144,31 @@ export function resolveImports(
       return `<!-- @import blocked: symlink traversal -->`;
     }
 
-    if (currentSeen.has(normalized)) {
+    if (seen.has(normalized)) {
       return `<!-- @import cycle: ${trimmed} -->`;
     }
 
     try {
-      const childSeen = new Set(currentSeen);
+      const childSeen = new Set(seen);
       childSeen.add(normalized);
       const imported = fs.readFileSync(normalized, "utf-8");
-      return resolveImports(imported, cortexPath, childSeen, currentDepth + 1);
+      return _resolveImportsRecursive(imported, cortexPath, childSeen, depth + 1);
     } catch {
       return `<!-- @import error: ${trimmed} -->`;
     }
   });
+}
+
+/**
+ * Resolve `@import shared/file.md` directives in document content.
+ * The import path is resolved relative to the cortex root (e.g. `shared/foo.md` -> `~/.cortex/global/shared/foo.md`).
+ * Circular imports are detected and skipped. Depth is capped to prevent runaway recursion.
+ */
+export function resolveImports(
+  content: string,
+  cortexPath: string,
+): string {
+  return _resolveImportsRecursive(content, cortexPath, new Set<string>(), 0);
 }
 
 import { findWasmBinary } from "./shared-sqljs.js";
@@ -163,7 +179,9 @@ function touchSentinel(cortexPath: string): void {
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(sentinelPath, Date.now().toString());
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] touchSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: string[]): string {
@@ -445,7 +463,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
         try {
           const content = fs.readFileSync(resolvedPath, "utf-8");
           extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
-        } catch { /* non-fatal */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateFileInIndex entityExtraction: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
     }
 
@@ -454,7 +474,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
       const hashData = loadHashMap(cortexPath);
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(cortexPath, hashData.hashes);
-    } catch { /* best-effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateFileInIndex hashMap: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   } else {
     // Remove stale embedding if file was deleted
     void (async () => {
@@ -463,7 +485,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
         const c = getEmbeddingCache(cortexPath);
         c.delete(resolvedPath);
         await c.flush();
-      } catch { /* best-effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] updateFileInIndex embeddingDelete: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     })();
   }
 
@@ -480,7 +504,9 @@ function readHashSentinel(cortexPath: string): { hash: string; computedAt: numbe
     if (typeof data.hash === "string" && typeof data.computedAt === "number") {
       return { hash: data.hash, computedAt: data.computedAt };
     }
-  } catch { /* corrupt or missing */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   return null;
 }
 
@@ -488,7 +514,9 @@ function writeHashSentinel(cortexPath: string, hash: string): void {
   try {
     const sentinelPath = runtimeFile(cortexPath, "index-sentinel.json");
     fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] writeHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 function isSentinelFresh(cortexPath: string, sentinel: { computedAt: number }): boolean {
@@ -507,8 +535,116 @@ function isSentinelFresh(cortexPath: string, sentinel: { computedAt: number }): 
   return true;
 }
 
+/**
+ * Attempt to restore the entity graph (entities, entity_links, global_entities) from a
+ * previously persisted JSON snapshot. Returns true if the graph was loaded, false if the
+ * caller must run full extraction instead.
+ */
+function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: FileEntry[]): boolean {
+  if (!fs.existsSync(graphPath)) return false;
+  try {
+    const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
+    const graphMtime = fs.statSync(graphPath).mtimeMs;
+    const anyNewer = allFiles.some(f => {
+      try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch { return true; }
+    });
+    if (!anyNewer && graph.entities && graph.links) {
+      for (const [id, name, type] of graph.entities) {
+        db.run("INSERT OR IGNORE INTO entities (id, name, type, first_seen_at) VALUES (?, ?, ?, ?)", [id, name, type, new Date().toISOString().slice(0, 10)]);
+      }
+      for (const [sourceId, targetId, relType, sourceDoc] of graph.links) {
+        db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
+      }
+      // Q19: also restore global_entities from cached graph so cross_project_entities
+      // is not empty after a cached-graph rebuild path.
+      if (Array.isArray(graph.globalEntities)) {
+        for (const [entity, project, docKey] of graph.globalEntities) {
+          try {
+            db.run(
+              "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+              [entity, project, docKey]
+            );
+          } catch { /* ignore */ }
+        }
+      } else {
+        // Older cache without globalEntities: re-derive from entity_links + entities
+        try {
+          const rows = db.exec(
+            `SELECT e.name, el.source_doc FROM entity_links el
+             JOIN entities e ON el.target_id = e.id
+             WHERE el.source_doc IS NOT NULL`
+          )[0]?.values ?? [];
+          for (const [name, sourceDoc] of rows) {
+            const projectMatch = typeof sourceDoc === "string" ? sourceDoc.match(/^([^/]+)\//) : null;
+            const proj = projectMatch ? projectMatch[1] : null;
+            if (proj && name) {
+              try {
+                db.run(
+                  "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+                  [name as string, proj, sourceDoc as string]
+                );
+              } catch { /* ignore */ }
+            }
+          }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityGraph globalEntitiesRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
+      }
+      return true;
+    }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityGraph cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+  return false;
+}
+
+/** Merge manual entity links (written by link_findings tool) into the live DB. Always runs on
+ * every build so hand-authored links survive a full index rebuild. */
+function mergeManualLinks(db: SqlJsDatabase, cortexPath: string): void {
+  const manualLinksPath = runtimeFile(cortexPath, 'manual-links.json');
+  if (!fs.existsSync(manualLinksPath)) return;
+  try {
+    const manualLinks: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> =
+      JSON.parse(fs.readFileSync(manualLinksPath, 'utf8'));
+    for (const link of manualLinks) {
+      try {
+        db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.entity, link.entityType, new Date().toISOString().slice(0, 10)]);
+        db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
+        const eRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.entity, link.entityType]);
+        const dRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.sourceDoc, "document"]);
+        const eId = eRes?.[0]?.values?.[0]?.[0];
+        const dId = dRes?.[0]?.values?.[0]?.[0];
+        if (eId != null && dId != null) {
+          db.run(
+            "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
+            [dId, eId, link.relType, link.sourceDoc]
+          );
+        }
+        // Also populate global_entities so manual links are discoverable via cross_project_entities
+        const projectMatch = link.sourceDoc.match(/^([^/]+)\//);
+        if (projectMatch) {
+          try {
+            db.run(
+              "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+              [link.entity, projectMatch[1], link.sourceDoc]
+            );
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] manualLinks globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] manualLinks entry: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] mergeManualLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
 async function buildIndexImpl(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
+
+  // ── Cache dir + hash sentinel ─────────────────────────────────────────────
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);
@@ -543,6 +679,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   const wasmBinary = findWasmBinary();
   const SQL = await initSqlJs(wasmBinary ? { wasmBinary } : {});
 
+  // ── Incremental update (cache hit path) ───────────────────────────────────
   // Load saved per-file hashes for incremental updates
   const savedHashData = loadHashMap(cortexPath);
   const savedHashes = savedHashData.hashes;
@@ -640,7 +777,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
                   try {
                     const content = fs.readFileSync(entry.fullPath, "utf-8");
                     extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
-                  } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
+                  } catch (err: unknown) { debugLog(`entity extraction failed: ${errorMessage(err)}`); }
                 }
               }
 
@@ -659,7 +796,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
           try {
             fs.mkdirSync(cacheDir, { recursive: true });
             fs.writeFileSync(cacheFile, db.export());
-          } catch { /* best-effort */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex incrementalCacheSave: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
 
           const incMs = Date.now() - t0;
           debugLog(`Incremental FTS update: ${updatedCount} changed, ${missingFromIndex.length} removed in ${incMs}ms`);
@@ -685,7 +824,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     }
   }
 
-  // Full rebuild
+  // ── Full rebuild ──────────────────────────────────────────────────────────
   const db = new SQL.Database();
   db.run(`
     CREATE VIRTUAL TABLE docs USING fts5(
@@ -706,58 +845,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
   // Try loading cached entity graph
   const graphPath = runtimeFile(cortexPath, 'entity-graph.json');
-  let entityGraphLoaded = false;
-  if (fs.existsSync(graphPath)) {
-    try {
-      const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
-      const graphMtime = fs.statSync(graphPath).mtimeMs;
-      const anyNewer = allFiles.some(f => {
-        try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch { return true; }
-      });
-      if (!anyNewer && graph.entities && graph.links) {
-        for (const [id, name, type] of graph.entities) {
-          db.run("INSERT OR IGNORE INTO entities (id, name, type, first_seen_at) VALUES (?, ?, ?, ?)", [id, name, type, new Date().toISOString().slice(0, 10)]);
-        }
-        for (const [sourceId, targetId, relType, sourceDoc] of graph.links) {
-          db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
-        }
-        // Q19: also restore global_entities from cached graph so cross_project_entities
-        // is not empty after a cached-graph rebuild path.
-        if (Array.isArray(graph.globalEntities)) {
-          for (const [entity, project, docKey] of graph.globalEntities) {
-            try {
-              db.run(
-                "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
-                [entity, project, docKey]
-              );
-            } catch { /* ignore */ }
-          }
-        } else {
-          // Older cache without globalEntities: re-derive from entity_links + entities
-          try {
-            const rows = db.exec(
-              `SELECT e.name, el.source_doc FROM entity_links el
-               JOIN entities e ON el.target_id = e.id
-               WHERE el.source_doc IS NOT NULL`
-            )[0]?.values ?? [];
-            for (const [name, sourceDoc] of rows) {
-              const projectMatch = typeof sourceDoc === "string" ? sourceDoc.match(/^([^/]+)\//) : null;
-              const proj = projectMatch ? projectMatch[1] : null;
-              if (proj && name) {
-                try {
-                  db.run(
-                    "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
-                    [name as string, proj, sourceDoc as string]
-                  );
-                } catch { /* ignore */ }
-              }
-            }
-          } catch { /* non-fatal */ }
-        }
-        entityGraphLoaded = true;
-      }
-    } catch { /* fall through to extract */ }
-  }
+  const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles);
 
   for (const entry of allFiles) {
     try {
@@ -770,7 +858,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         try {
           const content = fs.readFileSync(entry.fullPath, "utf-8");
           extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
-        } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
+        } catch (err: unknown) { debugLog(`entity extraction failed: ${errorMessage(err)}`); }
       }
     }
   }
@@ -784,44 +872,15 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
       // restore it without re-running extraction on every file.
       const globalEntityRows = db.exec("SELECT entity, project, doc_key FROM global_entities")[0]?.values ?? [];
       fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, globalEntities: globalEntityRows, ts: Date.now() }));
-    } catch { /* non-fatal */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildIndex entityGraphPersist: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   // Always merge manual links (survive rebuild)
-  const manualLinksPath = runtimeFile(cortexPath, 'manual-links.json');
-  if (fs.existsSync(manualLinksPath)) {
-    try {
-      const manualLinks: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> =
-        JSON.parse(fs.readFileSync(manualLinksPath, 'utf8'));
-      for (const link of manualLinks) {
-        try {
-          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.entity, link.entityType, new Date().toISOString().slice(0, 10)]);
-          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
-          const eRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.entity, link.entityType]);
-          const dRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.sourceDoc, "document"]);
-          const eId = eRes?.[0]?.values?.[0]?.[0];
-          const dId = dRes?.[0]?.values?.[0]?.[0];
-          if (eId != null && dId != null) {
-            db.run(
-              "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
-              [dId, eId, link.relType, link.sourceDoc]
-            );
-          }
-          // Also populate global_entities so manual links are discoverable via cross_project_entities
-          const projectMatch = link.sourceDoc.match(/^([^/]+)\//);
-          if (projectMatch) {
-            try {
-              db.run(
-                "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
-                [link.entity, projectMatch[1], link.sourceDoc]
-              );
-            } catch { /* global_entities table may not exist */ }
-          }
-        } catch { /* skip bad entries */ }
-      }
-    } catch { /* non-fatal */ }
-  }
+  mergeManualLinks(db, cortexPath);
 
+  // ── Finalize: persist hashes, save cache, log ─────────────────────────────
   saveHashMap(cortexPath, newHashes);
   touchSentinel(cortexPath);
   invalidateDfCache();
@@ -898,7 +957,7 @@ async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): P
     try {
       return new SQL.Database(fs.readFileSync(cacheFile));
     } catch (err: unknown) {
-      debugLog(`Failed to open cached FTS snapshot while rebuild lock held: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`Failed to open cached FTS snapshot while rebuild lock held: ${errorMessage(err)}`);
     }
   }
 
@@ -935,7 +994,7 @@ async function _buildIndexGuarded(cortexPath: string, profile?: string): Promise
       }
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     if (message.includes("could not acquire lock")) {
       debugLog(`FTS rebuild skipped because another process holds the rebuild lock: ${message}`);
       return loadIndexSnapshotOrEmpty(cortexPath, profile);
@@ -950,6 +1009,36 @@ export interface DocRow {
   type: string;
   content: string;
   path: string;
+}
+
+function describeSqlValue(value: SqlValue | undefined): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (value instanceof Uint8Array) return "Uint8Array";
+  return typeof value;
+}
+
+function expectRowWidth(row: DbRow, minColumns: number, context: string): void {
+  if (!Array.isArray(row) || row.length < minColumns) {
+    throw new Error(`${context}: expected at least ${minColumns} columns, got ${Array.isArray(row) ? row.length : typeof row}`);
+  }
+}
+
+export function decodeStringRow(row: DbRow, width: number, context: string): string[] {
+  expectRowWidth(row, width, context);
+  return row.slice(0, width).map((value, index) => {
+    if (typeof value !== "string") {
+      throw new Error(`${context}: expected column ${index} to be string, got ${describeSqlValue(value)}`);
+    }
+    return value;
+  });
+}
+
+export function decodeFiniteNumber(value: SqlValue | undefined, context: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${context}: expected finite number, got ${describeSqlValue(value)}`);
+  }
+  return value;
 }
 
 export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path">, cortexPath: string): string {
@@ -970,15 +1059,17 @@ export function normalizeMemoryId(rawId: string): string {
 }
 
 export function rowToDoc(row: DbRow): DocRow {
-  if (!Array.isArray(row) || row.length < 5) {
-    throw new Error(`rowToDoc: expected ≥5 columns, got ${Array.isArray(row) ? row.length : typeof row}`);
-  }
+  const [project, filename, type, content, path] = decodeStringRow(row, 5, "rowToDoc");
+  return { project, filename, type, content, path };
+}
+
+export function rowToDocWithRowid(row: DbRow): { rowid: number; doc: DocRow } {
+  expectRowWidth(row, 6, "rowToDocWithRowid");
+  const rowid = decodeFiniteNumber(row[0], "rowToDocWithRowid");
+  const [project, filename, type, content, path] = decodeStringRow(row.slice(1), 5, "rowToDocWithRowid.doc");
   return {
-    project: row[0] != null ? String(row[0]) : "",
-    filename: row[1] != null ? String(row[1]) : "",
-    type: row[2] != null ? String(row[2]) : "",
-    content: row[3] != null ? String(row[3]) : "",
-    path: row[4] != null ? String(row[4]) : "",
+    rowid,
+    doc: { project, filename, type, content, path },
   };
 }
 
@@ -1103,7 +1194,9 @@ export function findFtsCacheForPath(cortexPath: string, profile?: string): { exi
       const stat = fs.statSync(cacheFile);
       return { exists: true, sizeBytes: stat.size };
     }
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findFtsCacheForPath: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   return { exists: false };
 }
 

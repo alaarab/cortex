@@ -22,7 +22,7 @@ import {
   addFindingToFile,
   KNOWN_OBSERVATION_TAGS,
 } from "./shared-content.js";
-import { runGit, isFeatureEnabled } from "./utils.js";
+import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -45,7 +45,10 @@ function readStdinJson<T>(): T | null {
   if (process.stdin.isTTY) return null;
   try {
     return JSON.parse(fs.readFileSync(0, "utf-8")) as T;
-  } catch { return null; }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readStdinJson: ${errorMessage(err)}\n`);
+    return null;
+  }
 }
 
 /** Validate that a transcript path points to a safe, expected location.
@@ -124,7 +127,7 @@ function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMet
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
   } catch (err: unknown) {
-    debugLog(`parseSessionMetrics: failed to read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`parseSessionMetrics: failed to read ${file}: ${errorMessage(err)}`);
     return {};
   }
 }
@@ -209,7 +212,7 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
       if (ageMs <= 2 * 60 * 60 * 1000) return false;
       fs.unlinkSync(markers.lock);
     } catch (err: unknown) {
-      debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${errorMessage(err)}`);
       return false;
     }
   }
@@ -228,8 +231,9 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
     let fd: number;
     try {
       fd = fs.openSync(markers.lock, "wx");
-    } catch {
+    } catch (err: unknown) {
       // Another process already claimed the lock
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance lockClaim: ${errorMessage(err)}\n`);
       return false;
     }
     try {
@@ -258,22 +262,32 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
     });
     child.on("exit", (code, signal) => {
       const msg = `[${new Date().toISOString()}] exit code=${code ?? "null"} signal=${signal ?? "none"}\n`;
-      try { fs.appendFileSync(logPath, msg); } catch { /* best effort */ }
-      if (code === 0) {
-        try { fs.writeFileSync(markers.done, new Date().toISOString() + "\n"); } catch { /* best effort */ }
+      try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance exitLog: ${errorMessage(err)}\n`);
       }
-      try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+      if (code === 0) {
+        try { fs.writeFileSync(markers.done, new Date().toISOString() + "\n"); } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance doneMarker: ${errorMessage(err)}\n`);
+        }
+      }
+      try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnExit: ${errorMessage(err)}\n`);
+      }
     });
-    child.on("error", (err) => {
-      const msg = `[${new Date().toISOString()}] spawn error: ${err.message}\n`;
-      try { fs.appendFileSync(logPath, msg); } catch { /* best effort */ }
-      try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+    child.on("error", (spawnErr) => {
+      const msg = `[${new Date().toISOString()}] spawn error: ${spawnErr.message}\n`;
+      try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance errorLog: ${errorMessage(err)}\n`);
+      }
+      try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnError: ${errorMessage(err)}\n`);
+      }
     });
     fs.closeSync(logFd);
     child.unref();
     return true;
   } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+    const errMsg = errorMessage(err);
     try {
       const logDir = path.join(cortexPathLocal, ".governance");
       fs.mkdirSync(logDir, { recursive: true });
@@ -281,8 +295,12 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
         path.join(logDir, "background-maintenance.log"),
         `[${new Date().toISOString()}] spawn failed: ${errMsg}\n`
       );
-    } catch { /* best effort */ }
-    try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance logSpawnFailure: ${errorMessage(err)}\n`);
+    }
+    try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnFailure: ${errorMessage(err)}\n`);
+    }
     return false;
   }
 }
@@ -310,7 +328,7 @@ async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: bool
       }).trim();
       return { ok: true, output };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       if (attempt < retries && isTransientGitError(message)) {
         const delayMs = 500 * (attempt + 1);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -342,7 +360,9 @@ export async function handleHookSessionStart() {
   const doctor = await runDoctor(getCortexPath(), false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
 
-  try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch { /* best-effort */ }
+  try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart trackSession: ${errorMessage(err)}\n`);
+  }
 
   updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
   appendAuditLog(
@@ -412,7 +432,9 @@ function loadCortexDotEnv(cortexPathLocal: string): void {
       const val = /^(["'])(.*)\1$/.test(raw) ? raw.slice(1, -1) : raw;
       if (key && !(key in process.env)) process.env[key] = val;
     }
-  } catch { /* file not found or unreadable — skip */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadCortexDotEnv: ${errorMessage(err)}\n`);
+  }
 }
 
 export async function handleHookStop() {
@@ -479,7 +501,7 @@ export async function handleHookStop() {
         }
       }
     } catch (err: unknown) {
-      debugLog(`auto-capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`auto-capture failed: ${errorMessage(err)}`);
     }
   }
 
@@ -538,7 +560,9 @@ export async function handleHookStop() {
   try {
     const stat = fs.statSync(lastPushMarker);
     if (Date.now() - stat.mtimeMs < DEBOUNCE_MS) shouldPush = false;
-  } catch { /* marker doesn't exist, push normally */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookStop lastPushMarker: ${errorMessage(err)}\n`);
+  }
 
   if (!shouldPush) {
     // Debounced: commit is saved locally, push will happen on the next non-debounced stop.
@@ -589,7 +613,7 @@ function scheduleWeeklyGovernance(): void {
       }
     }
   } catch (err: unknown) {
-    debugLog(`hook_stop: governance scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`hook_stop: governance scheduling failed: ${errorMessage(err)}`);
   }
 }
 
@@ -690,7 +714,8 @@ export async function handleHookTool() {
     if (!process.stdin.isTTY) {
       try {
         raw = fs.readFileSync(0, "utf-8");
-      } catch {
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool stdinRead: ${errorMessage(err)}\n`);
         process.exit(0);
       }
     }
@@ -698,7 +723,8 @@ export async function handleHookTool() {
     let data: Record<string, unknown>;
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool stdinParse: ${errorMessage(err)}\n`);
       process.exit(0);
     }
 
@@ -742,8 +768,8 @@ export async function handleHookTool() {
       const logFile = runtimeFile(getCortexPath(), "tool-log.jsonl");
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
-    } catch {
-      // best effort
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool toolLog: ${errorMessage(err)}\n`);
     }
 
     const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
@@ -758,7 +784,9 @@ export async function handleHookTool() {
           activeProject = null;
         }
       }
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool cooldownStat: ${errorMessage(err)}\n`);
+    }
 
     if (activeProject && sessionId) {
       try {
@@ -771,7 +799,9 @@ export async function handleHookTool() {
           debugLog(`hook-tool: session cap reached (${count}/${SESSION_CAP}), skipping extraction`);
           activeProject = null;
         }
-      } catch { /* best effort */ }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool sessionCapCheck: ${errorMessage(err)}\n`);
+      }
     }
 
     if (activeProject) {
@@ -785,19 +815,25 @@ export async function handleHookTool() {
         }
 
         if (candidates.length > 0) {
-          try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch { /* best effort */ }
+          try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool cooldownWrite: ${errorMessage(err)}\n`);
+          }
           if (sessionId) {
             try {
               const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
               let count = 0;
-              try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch { /* new file */ }
+              try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch (err: unknown) {
+                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool capFileRead: ${errorMessage(err)}\n`);
+              }
               count += candidates.length;
               fs.writeFileSync(capFile, count.toString());
-            } catch { /* best effort */ }
+            } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool capFileWrite: ${errorMessage(err)}\n`);
+            }
           }
         }
       } catch (err: unknown) {
-        debugLog(`hook-tool: finding extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+        debugLog(`hook-tool: finding extraction failed: ${errorMessage(err)}`);
       }
     }
 

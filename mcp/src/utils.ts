@@ -1,22 +1,37 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
+import { spawnSync } from "child_process";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { findCortexPath } from "./shared.js";
 
 const _synonymsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "synonyms.json");
 const _synonymsJson: Record<string, string[]> = (() => {
-  try { return JSON.parse(fs.readFileSync(_synonymsPath, "utf8")); } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(_synonymsPath, "utf8")); } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synonyms.json load failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    return {};
+  }
 })();
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
 export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogFn?: (msg: string) => void): string | null {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: timeoutMs }).trim();
+    const result = spawnSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: timeoutMs,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      const stderr = (result.stderr ?? "").trim();
+      const suffix = stderr ? `: ${stderr}` : result.signal ? ` (signal: ${result.signal})` : "";
+      throw new Error(`git ${args[0]} exited with status ${result.status ?? "unknown"}${suffix}`);
+    }
+    return (result.stdout ?? "").trim();
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (debugLogFn) debugLogFn(`runGit: git ${args[0]} failed in ${cwd}: ${msg}`);
     return null;
   }
@@ -157,7 +172,8 @@ function parseSynonymsYaml(filePath: string): Record<string, string[]> {
       if (synonyms.length > 0) loaded[key] = synonyms;
     }
     return loaded;
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
@@ -184,26 +200,32 @@ function loadUserSynonyms(project?: string | null): Record<string, string[]> {
 export function buildRobustFtsQuery(raw: string, project?: string | null): string {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
+
+  // Step 1: Sanitize — strip FTS5 special chars, enforce length limits
   const safe = sanitizeFts5Query(raw);
   if (!safe) return "";
+
+  // Step 2: Merge built-in and per-project synonym maps
   const synonymsMap = {
     ...SYNONYMS,
     ...loadUserSynonyms(project),
   };
 
+  // Step 3: Tokenize — split sanitized input into individual words (min length 2)
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
   if (baseWords.length === 0) return "";
 
-  // Filter stop words from tokens before generating bigrams
-  const filteredWords = baseWords.filter((t) => !STOP_WORDS.has(t.toLowerCase()));
+  // Step 4: Filter stop words — remove common English words that add no search signal
+  const filteredTerms = baseWords.filter((t) => !STOP_WORDS.has(t.toLowerCase()));
 
-  // Build bigrams from adjacent non-stop-words
+  // Step 5: Build bigrams — sliding window over adjacent filtered terms for phrase matching
   const bigrams: string[] = [];
-  for (let i = 0; i < filteredWords.length - 1; i++) {
-    bigrams.push(`${filteredWords[i]} ${filteredWords[i + 1]}`);
+  for (let i = 0; i < filteredTerms.length - 1; i++) {
+    bigrams.push(`${filteredTerms[i]} ${filteredTerms[i + 1]}`);
   }
 
-  // Determine which words are consumed by bigrams that match synonym keys
+  // Step 6: Match bigrams against synonym keys — bigram matches are promoted to quoted
+  // phrases and their constituent words are marked consumed (not repeated as singletons)
   const consumedIndices = new Set<number>();
   const matchedBigrams: string[] = [];
   for (let i = 0; i < bigrams.length; i++) {
@@ -215,36 +237,38 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
     }
   }
 
-  // Core terms: bigrams (quoted phrases) + unconsumed individual words (deduplicated)
-  const coreTerms: string[] = [];
+  // Step 7: Assemble and deduplicate core terms — matched bigrams (as quoted phrases)
+  // first, then unconsumed individual words; duplicates removed via seenTerms
+  const dedupedTerms: string[] = [];
   const seenTerms = new Set<string>();
   for (const bg of matchedBigrams) {
     const clean = bg.replace(/"/g, "").trim().toLowerCase();
     if (!seenTerms.has(clean)) {
       seenTerms.add(clean);
-      coreTerms.push(`"${bg.replace(/"/g, "").trim()}"`);
+      dedupedTerms.push(`"${bg.replace(/"/g, "").trim()}"`);
     }
   }
-  for (let i = 0; i < filteredWords.length; i++) {
+  for (let i = 0; i < filteredTerms.length; i++) {
     if (!consumedIndices.has(i)) {
-      const w = filteredWords[i].replace(/"/g, "").trim();
+      const w = filteredTerms[i].replace(/"/g, "").trim();
       const wLow = w.toLowerCase();
       if (w.length > 1 && !seenTerms.has(wLow)) {
         seenTerms.add(wLow);
-        coreTerms.push(`"${w}"`);
+        dedupedTerms.push(`"${w}"`);
       }
     }
   }
 
-  if (coreTerms.length === 0) return "";
+  if (dedupedTerms.length === 0) return "";
 
-  // Build query clauses: each core term AND'd, with synonym OR alternatives
-  let totalTermCount = coreTerms.length;
+  // Step 8: Expand synonyms — for up to MAX_SYNONYM_GROUPS core terms, add OR alternatives
+  // from the synonym map; total term count is capped at MAX_TOTAL_TERMS to keep queries sane
+  let totalTermCount = dedupedTerms.length;
   let groupsExpanded = 0;
-  const clauses: string[] = [];
+  const expandedClauses: string[] = [];
 
-  for (const coreTerm of coreTerms) {
-    const termText = coreTerm.slice(1, -1).toLowerCase(); // strip quotes
+  for (const coreTerm of dedupedTerms) {
+    const termText = coreTerm.slice(1, -1).toLowerCase(); // strip surrounding quotes
     const synonyms: string[] = [];
 
     if (groupsExpanded < MAX_SYNONYM_GROUPS && synonymsMap[termText]) {
@@ -260,11 +284,12 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
     }
 
     if (synonyms.length > 0) {
-      clauses.push(`(${coreTerm} OR ${synonyms.join(" OR ")})`);
+      expandedClauses.push(`(${coreTerm} OR ${synonyms.join(" OR ")})`);
     } else {
-      clauses.push(coreTerm);
+      expandedClauses.push(coreTerm);
     }
   }
 
-  return clauses.join(" AND ");
+  // Step 9: Join all clauses with AND — every core term (with its OR synonyms) must match
+  return expandedClauses.join(" AND ");
 }

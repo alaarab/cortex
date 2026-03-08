@@ -236,7 +236,7 @@ describe("keywordFallbackSearch with project filter", () => {
     expect(result).not.toBeNull();
     // All returned rows should be from proj-a (since the SQL filters by project)
     for (const row of result!) {
-      expect(row[0]).toBe("proj-a");
+      expect(row.project).toBe("proj-a");
     }
   });
 

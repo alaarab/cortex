@@ -7,7 +7,7 @@
 
 # cortex
 
-**Long-term memory for AI agents.**
+**Your AI agents are building something. Make it count.**
 
 [![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
@@ -15,11 +15,13 @@
 
 <br>
 
-Your agents forget everything between sessions. Cortex fixes that.
+You run Claude Code, Codex, Cursor — maybe on three machines at once. Every session starts from zero. Every bug you traced, pattern you found, decision you made: gone when the context clears.
 
-A shared knowledge base for all your agents. Findings, decisions, task queues, project context. Stored as markdown in a git repo you own. Matching context shows up before each prompt. Findings save when the session ends. Works across Claude Code, Copilot CLI, Cursor, and Codex.
+Cortex captures it all. Stored as markdown in a **private git repo you own**. Work machine keeps work projects. Home machine keeps personal ones. Every agent on every machine reads from the same store — and every session builds on the last.
 
-> `npx @alaarab/cortex init` — 30 seconds, no account needed.
+The more you work, the smarter your agents get. That's the whole idea.
+
+> `npx @alaarab/cortex init` — 30 seconds. No account. Your data never leaves unless you push it.
 
 <br>
 </div>
@@ -96,17 +98,17 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
-**It runs itself.** Hooks handle context injection and saving. Before each prompt, matching context from your store shows up in the agent's window. After each response, changes get committed and pushed. Trust filtering checks confidence, age, and citations so stale stuff fades on its own.
+**It compounds.** Every bug, pattern, and decision your agents encounter gets saved. Session 47 knows everything sessions 1 through 46 learned. It doesn't just remember — it accumulates. The more you work, the more context your agents carry.
 
-**Agents share one brain.** Run five agents in parallel on different parts of a codebase. They all write to the same store. A pitfall one agent hits at 2 AM shows up in another agent's context the next morning. The more you use it, the more each agent knows.
+**Your data, your repo.** No vendor. No cloud service. No account required. A private git repo you control. What your work machine knows stays on the work profile. What your home machine knows stays on the personal one. Nobody else touches it.
 
-**You can see what they know.** Everything is markdown in git. `git log` shows what your agents learned and when. `git diff` shows what changed between sessions. Grep across projects to find where something went wrong. No dashboards, no vendor portals. Just files.
+**All your agents, one brain.** Claude Code hits a pitfall at 2 AM. Codex on another machine gets that context tomorrow morning. The finding travels through git — no coordination code, no message passing. Just a shared repo every tool reads from.
 
-**It's just files.** No database, no vector store, no account. Markdown in a git repo you own. Fork it, back it up, delete it. Nothing leaves your machine unless you push it.
+**It runs itself.** Before each prompt, relevant context gets pulled in. After each response, changes commit and push. Trust filtering drops stale and low-confidence entries automatically. You don't manage it.
 
-**Search that finds what you need.** FTS5 full-text search, token-overlap matching, and optional vector embeddings. Results merged with Reciprocal Rank Fusion. "throttling" finds "rate limit" and "429". Old findings rank lower than recent ones.
+**You can see what they know.** Everything is markdown in git. `git log` shows what your agents learned and when. `git diff` shows what changed between sessions. No dashboards — just files you can grep, edit, and read.
 
-**Every machine, same brain.** Push to a private repo, clone on another machine, run init. Profiles control which projects each machine sees. Work laptop gets work projects. Home machine gets side projects.
+**Search that finds what you need.** FTS5 full-text search, token-overlap matching, and optional vector embeddings. "throttling" finds "rate limit" and "429". Recent findings rank higher than old ones.
 
 ---
 

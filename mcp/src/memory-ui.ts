@@ -16,7 +16,7 @@ import {
   readReviewQueue,
   rejectQueueItem,
 } from "./data-access.js";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 
@@ -1958,7 +1958,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
           res.end(JSON.stringify({ ok: true }));
         } catch (err: unknown) {
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
         }
       });
       return;

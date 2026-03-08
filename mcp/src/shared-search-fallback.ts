@@ -3,7 +3,7 @@ import { debugLog } from "./shared.js";
 import { STOP_WORDS } from "./utils.js";
 import { porterStem } from "./shared-stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
-import { classifyFile, normalizeIndexedContent } from "./shared-index.js";
+import { classifyFile, normalizeIndexedContent, rowToDocWithRowid } from "./shared-index.js";
 import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { getEmbeddingCache } from "./shared-embedding-cache.js";
 import * as fs from "fs";
@@ -158,7 +158,8 @@ export function cosineFallback(
     if (countResult?.length && countResult[0]?.values?.length) {
       totalDocs = Number(countResult[0].values[0][0]);
     }
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback count: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 
@@ -183,7 +184,9 @@ export function cosineFallback(
         try {
           const ftsRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ${COSINE_CANDIDATE_CAP}`, [safeQ]);
           if (ftsRes?.length && ftsRes[0]?.values?.length) ftsRows.push(...ftsRes[0].values);
-        } catch { /* FTS pre-filter optional */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback FTS pre-filter: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
       // If FTS gave fewer than cap, supplement with random sample of remaining docs
       if (ftsRows.length < COSINE_CANDIDATE_CAP) {
@@ -196,13 +199,16 @@ export function cosineFallback(
               if (!ftsRowIds.has(Number(r[0]))) ftsRows.push(r);
             }
           }
-        } catch { /* sample optional */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback randomSample: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
       }
       if (ftsRows.length === 0) return [];
       allRows = ftsRows;
       debugLog(`cosineFallback: pre-filtered ${totalDocs} docs to ${allRows.length} candidates`);
     }
-  } catch {
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback loadDocs: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 
@@ -211,17 +217,10 @@ export function cosineFallback(
   const docMeta: { project: string; filename: string; type: string; content: string; path: string }[] = [];
 
   for (const row of allRows ?? []) {
-    const rowid = Number(row[0]);
+    const { rowid, doc } = rowToDocWithRowid(row);
     if (excludeRowids.has(rowid)) continue;
-    const content = String(row[4]);
-    docContents.push(content);
-    docMeta.push({
-      project: String(row[1]),
-      filename: String(row[2]),
-      type: String(row[3]),
-      content,
-      path: String(row[5]),
-    });
+    docContents.push(doc.content);
+    docMeta.push(doc);
   }
 
   if (docContents.length === 0) return [];
@@ -260,7 +259,9 @@ export async function vectorFallback(
   // Ensure the cache is loaded from disk — in hook subprocesses the singleton
   // starts empty because load() is only called in the MCP server / CLI entry.
   if (cache.size() === 0) {
-    try { await cache.load(); } catch { /* best-effort */ }
+    try { await cache.load(); } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
   if (cache.size() === 0) return [];
 
@@ -308,8 +309,8 @@ export async function vectorFallback(
         const raw = fs.readFileSync(e.path, "utf-8");
         content = normalizeIndexedContent(raw, type, cortexPath, 10000);
       }
-    } catch {
-      // best-effort: leave content empty if file is unreadable
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
     }
 
     return { project: entryProject, filename, type, content, path: e.path };

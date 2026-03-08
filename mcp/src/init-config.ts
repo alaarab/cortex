@@ -10,7 +10,7 @@ import { buildLifecycleCommands } from "./hooks.js";
 import {
   EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
-import { isFeatureEnabled } from "./utils.js";
+import { isFeatureEnabled, errorMessage } from "./utils.js";
 
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-preferences.js";
 import { resolveEntryScript, VERSION } from "./init-shared.js";
@@ -34,7 +34,7 @@ export function patchJsonFile(filePath: string, patch: (data: Record<string, any
     try {
       data = JSON.parse(fs.readFileSync(filePath, "utf8"));
     } catch (err) {
-      throw new Error(`Malformed JSON in ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Malformed JSON in ${filePath}: ${errorMessage(err)}`);
     }
   } else {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });

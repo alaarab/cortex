@@ -27,6 +27,7 @@ import { register as registerSkills } from "./mcp-skills.js";
 import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
 import type { McpContext } from "./mcp-types.js";
+import { errorMessage } from "./utils.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
   console.log(`cortex - Long-term memory for Claude Code
@@ -312,6 +313,9 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
+/** Throttle delay between embedding requests in the background embed loop. */
+const BACKGROUND_EMBED_THROTTLE_MS = 50;
+
 function cleanStaleLocks(cortexPath: string): void {
   const dir = runtimeDir(cortexPath);
   try {
@@ -373,7 +377,7 @@ async function main() {
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
         ]);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         if (message.includes("Write timeout") || message.includes("Write queue full")) {
           debugLog(`Write queue timeout: ${message}`);
           return { ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" } as T;
@@ -488,7 +492,7 @@ async function backgroundEmbedMissingDocs(
         count++;
         if (count % 10 === 0) await cache.flush();
       }
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, BACKGROUND_EMBED_THROTTLE_MS));
     }
     if (count > 0) await cache.flush();
     debugLog(`backgroundEmbedMissingDocs: embedded ${count} new docs`);

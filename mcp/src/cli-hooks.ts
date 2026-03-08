@@ -23,7 +23,7 @@ import {
 import {
   checkConsolidationNeeded,
 } from "./shared-content.js";
-import { buildRobustFtsQuery, extractKeywords, isFeatureEnabled, clampInt } from "./utils.js";
+import { buildRobustFtsQuery, extractKeywords, isFeatureEnabled, clampInt, errorMessage } from "./utils.js";
 import { getHooksEnabledPreference } from "./init.js";
 import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
@@ -131,7 +131,7 @@ export function parseHookInput(raw: string): HookPromptInput | null {
     if (!prompt.trim()) return null;
     return { prompt, cwd: data.cwd, sessionId: data.session_id };
   } catch (err: unknown) {
-    debugLog(`parseHookInput: failed to parse hook JSON: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`parseHookInput: failed to parse hook JSON: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -207,7 +207,7 @@ export async function handleHookPrompt() {
           await handleExtractMemories(detectedProject, cwd, true);
           fs.writeFileSync(marker, "");
         } catch (err: unknown) {
-          debugLog(`auto-extract failed for ${detectedProject}: ${err instanceof Error ? err.message : String(err)}`);
+          debugLog(`auto-extract failed for ${detectedProject}: ${errorMessage(err)}`);
         }
       }
     }
@@ -300,7 +300,7 @@ export async function handleHookPrompt() {
           try { fs.unlinkSync(fp); } catch { /* best effort */ }
         }
       } catch (err: unknown) {
-        debugLog(`stale notice cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+        debugLog(`stale notice cleanup failed: ${errorMessage(err)}`);
       }
 
       const needed = checkConsolidationNeeded(getCortexPath(), profile);
@@ -331,7 +331,7 @@ export async function handleHookPrompt() {
 
     console.log(parts.join("\n"));
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     process.stdout.write(`\n<cortex-error>cortex hook failed: ${msg}. Check ~/.cortex/.runtime/debug.log for details.</cortex-error>\n`);
     debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);

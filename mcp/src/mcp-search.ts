@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { createHash } from "crypto";
-import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
+import { isValidProjectName, buildRobustFtsQuery, errorMessage } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { readFindings } from "./data-access.js";
 import {
@@ -13,14 +13,17 @@ import {
   FINDING_TAGS,
 } from "./shared.js";
 import {
+  decodeStringRow,
   queryRows,
+  queryDocRows,
   cosineFallback,
   queryEntityLinks,
   extractSnippet,
   queryDocBySourceKey,
   normalizeMemoryId,
+  rowToDocWithRowid,
+  type DocRow,
   type SqlJsDatabase,
-  type DbRow,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, } from "./shared-governance.js";
@@ -50,7 +53,9 @@ export function logSearchMiss(cortexPath: string, query: string, project?: strin
     });
     const missFile = runtimeFile(cortexPath, "search-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
-  } catch { /* best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -142,7 +147,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         type: z.enum(DOC_TYPES)
           .optional()
           .describe("Filter by document type: claude, findings, reference, summary, backlog, skill"),
-        tag: z.enum(FINDING_TAGS)
+        tag: z.preprocess(
+          value => typeof value === "string" ? value.toLowerCase() : value,
+          z.enum(FINDING_TAGS)
+        )
           .optional()
           .describe("Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
@@ -181,7 +189,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         sql += " ORDER BY rank LIMIT ?";
         params.push(fetchLimit);
 
-        let rows = queryRows(db, sql, params);
+        let rows = queryDocRows(db, sql, params);
         let usedFallback = false;
 
         // Hybrid search: if FTS5 returns fewer than 3 results, try cosine fallback
@@ -196,15 +204,16 @@ export function register(server: McpServer, ctx: McpContext): void {
             rowidParams.push(maxResults);
             const rowidResult = db.exec(rowidSql, rowidParams);
             if (rowidResult?.length && rowidResult[0]?.values?.length) {
-              for (const r of rowidResult[0].values) ftsRowids.add(Number(r[0]));
+              for (const row of rowidResult[0].values) {
+                ftsRowids.add(rowToDocWithRowid(row).rowid);
+              }
             }
-          } catch (err: unknown) { debugLog(`rowid dedup query failed: ${err instanceof Error ? err.message : String(err)}`); }
+          } catch (err: unknown) { debugLog(`rowid dedup query failed: ${errorMessage(err)}`); }
 
           const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length)
             .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
           if (cosineResults.length > 0) {
-            const cosineRows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
-            rows = [...rows, ...cosineRows];
+            rows = [...rows, ...cosineResults];
             usedFallback = true;
           }
         }
@@ -214,7 +223,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const cosineResults = cosineFallback(db, query, new Set<number>(), maxResults)
             .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
           if (cosineResults.length > 0) {
-            rows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
+            rows = cosineResults;
             usedFallback = true;
           }
         }
@@ -232,14 +241,14 @@ export function register(server: McpServer, ctx: McpContext): void {
               if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
               if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
               const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-              const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
+              const allDocs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
               if (allDocs) {
-                const existingPaths = new Set(rows!.map((r: DbRow) => String(r[4] ?? "")));
-                const candidates = allDocs.filter(doc => !existingPaths.has(String(doc[4])));
+                const existingPaths = new Set(rows!.map(row => row.path));
+                const candidates = allDocs.filter(doc => !existingPaths.has(doc.path));
                 if (candidates.length > 0) {
-                  const scored: Array<{ row: DbRow; score: number }> = [];
+                  const scored: Array<{ row: DocRow; score: number }> = [];
                   for (const doc of candidates) {
-                    const docEmbed = await sharedEmbedText(String(doc[3]).slice(0, 2000));
+                    const docEmbed = await sharedEmbedText(doc.content.slice(0, 2000));
                     if (!docEmbed) continue;
                     const sim = cosineSimilarity(queryEmbed, docEmbed);
                     if (sim > 0.3) scored.push({ row: doc, score: sim });
@@ -258,7 +267,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error("cloud embedding timeout")), API_EMBEDDING_TIMEOUT_MS)),
             ]);
           } catch (err: unknown) {
-            debugLog(`cloud embedding fallback failed: ${err instanceof Error ? err.message : String(err)}`);
+            debugLog(`cloud embedding fallback failed: ${errorMessage(err)}`);
           }
         }
 
@@ -275,14 +284,14 @@ export function register(server: McpServer, ctx: McpContext): void {
                 if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
                 if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
                 const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-                const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
+                const allDocs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
                 if (allDocs) {
-                  const existingPaths = new Set(rows!.map((r: DbRow) => r[4]));
-                  const candidates = allDocs.filter(doc => !existingPaths.has(doc[4]));
+                  const existingPaths = new Set(rows!.map(row => row.path));
+                  const candidates = allDocs.filter(doc => !existingPaths.has(doc.path));
                   if (candidates.length > 0) {
-                    const candidateTexts = candidates.map(doc => String(doc[3]).slice(0, 2000));
+                    const candidateTexts = candidates.map(doc => doc.content.slice(0, 2000));
                     const candidateEmbeddings = await getCachedEmbeddings(cortexPath, candidateTexts, apiKey, model);
-                    const scored: Array<{ row: DbRow; score: number }> = [];
+                    const scored: Array<{ row: DocRow; score: number }> = [];
                     for (let i = 0; i < candidates.length; i++) {
                       const sim = cosineSimilarity(queryEmbed, candidateEmbeddings[i]);
                       if (sim > 0.3) scored.push({ row: candidates[i], score: sim });
@@ -301,7 +310,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error("embedding timeout")), API_EMBEDDING_TIMEOUT_MS)),
               ]);
             } catch (err: unknown) {
-              debugLog(`API embedding fallback failed: ${err instanceof Error ? err.message : String(err)}`);
+              debugLog(`API embedding fallback failed: ${errorMessage(err)}`);
             }
           }
         }
@@ -324,22 +333,21 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (rows && rows.length < maxResults) {
           try {
             const { vectorFallback } = await import("./shared-search-fallback.js");
-            const alreadyFoundPaths = new Set(rows.map((r: DbRow) => String(r[4] ?? "")));
+            const alreadyFoundPaths = new Set(rows.map(row => row.path));
             const vecRows = await vectorFallback(cortexPath, query, alreadyFoundPaths, maxResults - rows.length);
             for (const vr of vecRows) {
-              rows.push([vr.project, vr.filename, vr.type, vr.content, vr.path] as unknown as DbRow);
+              rows.push(vr);
             }
             if (vecRows.length > 0) usedFallback = true;
-          } catch { /* best-effort */ }
+          } catch (err: unknown) {
+            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
 
         // Filter by observation tag if requested
         if (filterTag && rows) {
-          const tagPattern = `[${filterTag}]`;
-          rows = rows.filter((row: DbRow) => {
-            const content = (row[3] as string).toLowerCase();
-            return content.includes(tagPattern);
-          });
+          const tagPattern = `[${filterTag.toLowerCase()}]`;
+          rows = rows.filter(row => row.content.toLowerCase().includes(tagPattern));
           if (rows.length === 0) {
             logSearchMiss(cortexPath, query, filterProject);
             return mcpResponse({ ok: true, message: `No results found with tag [${filterTag}].`, data: { query, results: [] } });
@@ -379,9 +387,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           if (sinceDate && !isNaN(sinceDate.getTime())) {
             const sinceMs = sinceDate.getTime();
-            rows = rows.filter((row: DbRow) => {
-              const content = row[3] as string;
-              const createdDates = [...content.matchAll(/<!-- created: (\d{4}-\d{2}-\d{2}) -->/g)];
+            rows = rows.filter(row => {
+              const createdDates = [...row.content.matchAll(/<!-- created: (\d{4}-\d{2}-\d{2}) -->/g)];
               if (createdDates.length === 0) return true;
               return createdDates.some(m => new Date(`${m[1]}T00:00:00Z`).getTime() >= sinceMs);
             });
@@ -399,20 +406,19 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         // Filter out superseded entries from results
         if (rows) {
-          rows = rows.map((row: DbRow) => {
-            const content = row[3] as string;
-            if (!content.includes("<!-- superseded_by:")) return row;
-            const filteredLines = content.split("\n").filter(l => !l.includes("<!-- superseded_by:"));
-            return [row[0], row[1], row[2], filteredLines.join("\n"), row[4]];
+          rows = rows.map(row => {
+            if (!row.content.includes("<!-- superseded_by:")) return row;
+            const filteredLines = row.content.split("\n").filter(line => !line.includes("<!-- superseded_by:"));
+            return { ...row, content: filteredLines.join("\n") };
           });
         }
 
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        const scored = rows.map((row: DbRow, idx: number) => {
-          const filePath = row[4] as string;
-          const rowProject = row[0] as string;
-          const filename = row[1] as string;
-          const content = row[3] as string;
+        const scored = rows.map((row, idx) => {
+          const filePath = row.path;
+          const rowProject = row.project;
+          const filename = row.filename;
+          const content = row.content;
           let boost = 1.0;
           try {
             const mtime = fs.statSync(filePath).mtimeMs;
@@ -427,22 +433,23 @@ export function register(server: McpServer, ctx: McpContext): void {
         scored.sort((a, b) => b.rank - a.rank);
 
         const results = scored.map(({ row }) => {
-          const [proj, filename, docType, content, filePath] = row as string[];
-          const snippet = extractSnippet(content, query);
-          return { project: proj, filename, type: docType, snippet, path: filePath };
+          const snippet = extractSnippet(row.content, query);
+          return { project: row.project, filename: row.filename, type: row.type, snippet, path: row.path };
         });
 
         let relatedEntities: string[] = [];
         try {
-          const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
-          for (const term of queryTerms) {
+          const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+          for (const term of terms) {
             const links = queryEntityLinks(db, term);
             if (links.related.length > 0) {
               relatedEntities.push(...links.related);
             }
           }
           relatedEntities = [...new Set(relatedEntities)].slice(0, 10);
-        } catch { /* entity graph is optional */ }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityGraph query: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
 
         const formatted = results.map((r) =>
           `### ${r.project}/${r.filename} (${r.type})\n${r.snippet}\n\n\`${r.path}\``
@@ -472,11 +479,13 @@ export function register(server: McpServer, ctx: McpContext): void {
                   const oldest = cacheKeys.sort((a, b) => synthCache[a].ts - synthCache[b].ts).slice(0, cacheKeys.length - 100);
                   for (const k of oldest) delete synthCache[k];
                 }
-                try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch { /* best-effort */ }
+                try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch (err: unknown) {
+                  if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
+                }
               }
             }
           } catch (err: unknown) {
-            debugLog(`search synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
+            debugLog(`search synthesis failed: ${errorMessage(err)}`);
           }
         }
 
@@ -490,7 +499,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined, ...(synthesis ? { synthesis } : {}) },
         });
       } catch (err: unknown) {
-        return mcpResponse({ ok: false, error: `Search error: ${err instanceof Error ? err.message : String(err)}`, errorCode: "INTERNAL_ERROR" });
+        return mcpResponse({ ok: false, error: `Search error: ${errorMessage(err)}`, errorCode: "INTERNAL_ERROR" });
       }
     }
   );
@@ -506,27 +515,26 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ name }) => {
       const db = ctx.db();
-      const files = queryRows(db, "SELECT filename, type, path FROM docs WHERE project = ?", [name]);
+      const docs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [name]);
 
-      if (!files) {
+      if (!docs) {
         const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
-        const names = projectRows ? projectRows.map((r: DbRow) => r[0]) : [];
+        const names = projectRows ? projectRows.map(row => decodeStringRow(row, 1, "get_project_summary.projects")[0]) : [];
         return mcpResponse({ ok: false, error: `Project "${name}" not found.`, data: { available: names } });
       }
 
-      const summaryRow = queryRows(db, "SELECT content, path FROM docs WHERE project = ? AND type = 'summary'", [name]);
-      const claudeRow = queryRows(db, "SELECT content, path FROM docs WHERE project = ? AND type = 'claude'", [name]);
-
-      const indexedFiles = files.map((f: DbRow) => ({ filename: f[0], type: f[1], path: f[2] }));
+      const summaryDoc = docs.find(doc => doc.type === "summary");
+      const claudeDoc = docs.find(doc => doc.type === "claude");
+      const indexedFiles = docs.map(doc => ({ filename: doc.filename, type: doc.type, path: doc.path }));
 
       const parts: string[] = [`# ${name}`];
-      if (summaryRow) {
-        parts.push(`\n## Summary\n${summaryRow[0][0]}`);
+      if (summaryDoc) {
+        parts.push(`\n## Summary\n${summaryDoc.content}`);
       } else {
         parts.push("\n*No summary.md found for this project.*");
       }
-      if (claudeRow) {
-        parts.push(`\n## CLAUDE.md path\n\`${claudeRow[0][1]}\``);
+      if (claudeDoc) {
+        parts.push(`\n## CLAUDE.md path\n\`${claudeDoc.path}\``);
       }
       const fileList = indexedFiles.map((f) => `- ${f.filename} (${f.type})`).join("\n");
       parts.push(`\n## Indexed files\n${fileList}`);
@@ -536,8 +544,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         message: parts.join("\n"),
         data: {
           name,
-          summary: summaryRow ? summaryRow[0][0] : null,
-          claudeMdPath: claudeRow ? claudeRow[0][1] : null,
+          summary: summaryDoc?.content ?? null,
+          claudeMdPath: claudeDoc?.path ?? null,
           files: indexedFiles,
         },
       });
@@ -561,7 +569,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
       if (!projectRows) return mcpResponse({ ok: true, message: "No projects indexed.", data: { projects: [], total: 0 } });
 
-      const projects = projectRows.map((r: DbRow) => r[0] as string);
+      const projects = projectRows.map(row => decodeStringRow(row, 1, "list_projects.projects")[0]);
       const pageSize = page_size ?? 20;
       const pageNum = page ?? 1;
       const start = Math.max(0, (pageNum - 1) * pageSize);
@@ -576,11 +584,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", backlog: "backlog" };
 
       const projectList = pageProjects.map((proj) => {
-        const rows = queryRows(db, "SELECT filename, type, content FROM docs WHERE project = ?", [proj]) ?? [];
-        const types = rows.map((r) => r[1] as string);
-        const summaryRow = rows.find((r) => r[1] === "summary");
-        const claudeRow = rows.find((r) => r[1] === "claude");
-        const source = (summaryRow ?? claudeRow)?.[2] as string | undefined;
+        const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [proj]) ?? [];
+        const types = rows.map(row => row.type);
+        const summaryRow = rows.find(row => row.type === "summary");
+        const claudeRow = rows.find(row => row.type === "claude");
+        const source = summaryRow?.content ?? claudeRow?.content;
         let brief = "";
         if (source) {
           const firstLine = source.split("\n").find(l => l.trim() && !l.startsWith("#"));

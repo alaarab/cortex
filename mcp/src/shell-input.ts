@@ -46,6 +46,7 @@ import {
   backlogsByFilter,
   queueByFilter,
 } from "./shell-palette.js";
+import { errorMessage } from "./utils.js";
 
 /** Interface for the shell methods that executePalette needs */
 export interface PaletteHost {
@@ -126,7 +127,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       }).trim();
       host.setMessage(out.split("\n").slice(0, 14).join("\n") || "  No results.");
     } catch (err: unknown) {
-      host.setMessage(`  Search failed: ${err instanceof Error ? err.message : String(err)}`);
+      host.setMessage(`  Search failed: ${errorMessage(err)}`);
     }
     return;
   }
@@ -366,7 +367,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       }).trim();
       host.setMessage(`  ${out || "Governance scan completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     } catch (err: unknown) {
-      host.setMessage(`  Governance failed: ${err instanceof Error ? err.message : String(err)}`);
+      host.setMessage(`  Governance failed: ${errorMessage(err)}`);
     }
     return;
   }
@@ -382,7 +383,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       }).trim();
       host.setMessage(`  ${out || "Consolidation completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     } catch (err: unknown) {
-      host.setMessage(`  Consolidation failed: ${err instanceof Error ? err.message : String(err)}`);
+      host.setMessage(`  Consolidation failed: ${errorMessage(err)}`);
     }
     return;
   }
@@ -429,7 +430,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
       host.setMessage(lines.length ? lines.join("\n") : "  No conflicts found.");
     } catch (err: unknown) {
-      host.setMessage(`  Conflict check failed: ${err instanceof Error ? err.message : String(err)}`);
+      host.setMessage(`  Conflict check failed: ${errorMessage(err)}`);
     }
     return;
   }
@@ -717,7 +718,7 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
             host.setMessage(`  Removed ${item.name}`);
             host.setCursor(Math.max(0, cursor - 1));
           } catch (err: unknown) {
-            host.setMessage(`  Failed: ${err instanceof Error ? err.message : String(err)}`);
+            host.setMessage(`  Failed: ${errorMessage(err)}`);
           }
         });
       } else if (key === "a") {

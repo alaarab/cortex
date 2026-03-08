@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as path from "path";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import {
   removeFinding as removeFindingCore,
   removeFindings as removeFindingsCore,
@@ -115,7 +115,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
-            return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });
+            return mcpResponse({ ok: false, error: errorMessage(err), errorCode: "VALIDATION_ERROR" });
           }
           throw err;
         }
@@ -355,7 +355,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             });
           }
         } catch (err: unknown) {
-          return mcpResponse({ ok: false, error: `Save failed: ${err instanceof Error ? err.message : String(err)}`, errorCode: "INTERNAL_ERROR" });
+          return mcpResponse({ ok: false, error: `Save failed: ${errorMessage(err)}`, errorCode: "INTERNAL_ERROR" });
         }
       });
     }

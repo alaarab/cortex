@@ -8,32 +8,25 @@ import { safeProjectPath } from "./utils.js";
 
 const MAX_CACHE_ENTRIES = 500;
 
-type TimestampedCacheEntry<T> = {
-  result: T;
-  ts: number;
-  timestamp?: number;
-  cachedAt?: number;
-};
+// Disk format: any of the three timestamp fields may be present (legacy compat).
+type RawCacheEntry<T> = { result: T; ts?: number; timestamp?: number; cachedAt?: number };
 
-function getCacheEntryTimestamp<T>(entry: TimestampedCacheEntry<T> | undefined): number {
-  if (!entry) return 0;
-  if (typeof entry.ts === "number") return entry.ts;
-  if (typeof entry.timestamp === "number") return entry.timestamp;
-  if (typeof entry.cachedAt === "number") return entry.cachedAt;
-  return 0;
-}
+// In-memory format: ts is always normalized by loadCache.
+type TimestampedCacheEntry<T> = { result: T; ts: number };
 
 function loadCache<T>(cachePath: string): Record<string, TimestampedCacheEntry<T>> {
   if (!fs.existsSync(cachePath)) return {};
-  const raw = JSON.parse(fs.readFileSync(cachePath, "utf8")) as Record<string, TimestampedCacheEntry<T>>;
+  const raw = JSON.parse(fs.readFileSync(cachePath, "utf8")) as Record<string, RawCacheEntry<T>>;
   const now = Date.now();
-
-  for (const entry of Object.values(raw)) {
-    const ts = getCacheEntryTimestamp(entry) || now;
-    entry.ts = ts;
+  const normalized: Record<string, TimestampedCacheEntry<T>> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    const ts = (typeof entry.ts === "number" ? entry.ts
+      : typeof entry.timestamp === "number" ? entry.timestamp
+      : typeof entry.cachedAt === "number" ? entry.cachedAt
+      : now);
+    normalized[key] = { result: entry.result, ts };
   }
-
-  return raw;
+  return normalized;
 }
 
 function trimCache<T>(cache: Record<string, TimestampedCacheEntry<T>>): void {
@@ -41,7 +34,7 @@ function trimCache<T>(cache: Record<string, TimestampedCacheEntry<T>>): void {
   if (entries.length <= MAX_CACHE_ENTRIES) return;
 
   entries
-    .sort(([, a], [, b]) => getCacheEntryTimestamp(a) - getCacheEntryTimestamp(b))
+    .sort(([, a], [, b]) => a.ts - b.ts)
     .slice(0, entries.length - MAX_CACHE_ENTRIES)
     .forEach(([key]) => {
       delete cache[key];
@@ -57,6 +50,35 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const LLM_TIMEOUT_MS = 10_000;
+
+function parseOpenAiResponse(data: unknown): string {
+  const d = data as { choices?: Array<{ message?: { content?: string } }> };
+  return d.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+/** POST to an LLM endpoint with a combined per-call timeout + parent abort relay. */
+async function fetchLlm(
+  url: string,
+  init: Omit<RequestInit, "signal">,
+  signal: AbortSignal | undefined,
+  parseResponse: (data: unknown) => string,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  if (!response.ok) throw new Error(`LLM API error: ${response.status}`);
+  return parseResponse(await response.json());
+}
+
+// Default maxTokens is 10 — callers that only need YES/NO or CONFLICT/OK responses
+// need just 3-5 tokens. Callers expecting longer output pass an explicit override (e.g. 60).
 export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 10): Promise<string> {
   // Check abort before starting any work to avoid unnecessary API calls
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -70,90 +92,76 @@ export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 
   if (endpoint) {
     // Custom endpoint: use CORTEX_LLM_KEY, fall back to any available key
     const key = customKey || openaiKey || anthropicKey || "";
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-    let response: Response;
-    try {
-      response = await fetch(`${endpoint.replace(/\/$/, "")}/chat/completions`, {
+    return fetchLlm(
+      `${endpoint.replace(/\/$/, "")}/chat/completions`,
+      {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(key ? { "Authorization": `Bearer ${key}` } : {}),
-        },
-        body: JSON.stringify({
-          model: model || "gpt-4o-mini",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: maxTokens,
-          temperature: 0,
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (!response.ok) throw new Error(`LLM API error: ${response.status}`);
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content?.trim() ?? "";
+        headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({ model: model || "gpt-4o-mini", messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0 }),
+      },
+      signal,
+      parseOpenAiResponse,
+    );
   } else if (anthropicKey) {
     // Anthropic REST API fallback (no SDK required)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-    let response: Response;
-    try {
-      response = await fetch("https://api.anthropic.com/v1/messages", {
+    return fetchLlm(
+      "https://api.anthropic.com/v1/messages",
+      {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: model || "claude-haiku-4-5-20251001",
-          max_tokens: maxTokens,
-          messages: [{ role: "user", content: prompt }],
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
-    const data = await response.json() as { content?: Array<{ type: string; text?: string }> };
-    const block = data.content?.[0];
-    return (block?.type === "text" ? block.text ?? "" : "").trim();
+        headers: { "content-type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: model || "claude-haiku-4-5-20251001", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+      },
+      signal,
+      (data) => {
+        const d = data as { content?: Array<{ type: string; text?: string }> };
+        const block = d.content?.[0];
+        return (block?.type === "text" ? block.text ?? "" : "").trim();
+      },
+    );
   } else if (openaiKey) {
     // OpenAI REST API fallback
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-    let response: Response;
-    try {
-      response = await fetch("https://api.openai.com/v1/chat/completions", {
+    return fetchLlm(
+      "https://api.openai.com/v1/chat/completions",
+      {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: model || "gpt-4o-mini",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: maxTokens,
-          temperature: 0,
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content?.trim() ?? "";
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+        body: JSON.stringify({ model: model || "gpt-4o-mini", messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0 }),
+      },
+      signal,
+      parseOpenAiResponse,
+    );
   } else {
     // No LLM configured — return empty to signal "not duplicate" / "no conflict"
     return "";
   }
+}
+
+// ── Cache TTL constants ───────────────────────────────────────────────────────
+
+const DEDUP_CACHE_TTL_MS = 86_400_000;   // 1 day
+const CONFLICT_CACHE_TTL_MS = 7 * 86_400_000; // 7 days
+
+// ── Metadata stripping helpers ────────────────────────────────────────────────
+
+/**
+ * Strip HTML comments only (timestamp metadata, citations).
+ * Use this when you only need to remove <!-- ... --> markers.
+ */
+function stripHtmlComments(s: string): string {
+  return s.replace(/<!--.*?-->/gs, "");
+}
+
+/**
+ * Strip all common finding metadata:
+ * - HTML comments: <!-- ... -->
+ * - "migrated from" annotations: (migrated from ...)
+ * - Leading bullet dash: "- " at the start of the string
+ */
+function stripMetadata(s: string): string {
+  return s
+    .replace(/<!--.*?-->/gs, "")
+    .replace(/\(migrated from [^)]+\)/gi, "")
+    .replace(/^-\s+/, "");
 }
 
 // Stop words for lightweight semantic overlap checks
@@ -227,11 +235,8 @@ export function detectConflicts(newFinding: string, existingLines: string[]): st
 }
 
 export function isDuplicateFinding(existingContent: string, newLearning: string, threshold = 0.6): boolean {
-  // Strip HTML comments (timestamp metadata, citations) before comparing
-  const stripComments = (s: string) => s.replace(/<!--.*?-->/g, "").trim();
-
   const normalize = (text: string): string[] => {
-    return stripComments(text)
+    return stripHtmlComments(text).trim()
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
@@ -264,9 +269,8 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
     }
 
     // Second pass: Jaccard similarity (strip metadata before comparing)
-    const stripMeta = (s: string) => s.replace(/<!--.*?-->/g, "").replace(/\(migrated from [^)]+\)/gi, "").replace(/^-\s+/, "");
-    const newTokens = jaccardTokenize(stripMeta(newLearning));
-    const existingTokens = jaccardTokenize(stripMeta(bullet));
+    const newTokens = jaccardTokenize(stripMetadata(newLearning));
+    const existingTokens = jaccardTokenize(stripMetadata(bullet));
     if (newTokens.size < 3 || existingTokens.size < 3) continue; // too few tokens for reliable Jaccard
     const jaccard = jaccardSimilarity(newTokens, existingTokens);
     if (jaccard > 0.55) {
@@ -406,13 +410,11 @@ export async function checkSemanticDedup(
   if (!fs.existsSync(findingsPath)) return false;
 
   const existingContent = fs.readFileSync(findingsPath, "utf8");
-  const stripMeta = (s: string) =>
-    s.replace(/<!--.*?-->/g, "").replace(/\(migrated from [^)]+\)/gi, "").replace(/^-\s+/, "").trim();
   const bullets = existingContent.split("\n").filter((l) => l.startsWith("- ") && !l.includes("<!-- superseded_by:"));
 
   for (const bullet of bullets) {
-    const a = stripMeta(newLearning);
-    const b = stripMeta(bullet);
+    const a = stripMetadata(newLearning).trim();
+    const b = stripMetadata(bullet).trim();
     const tokA = jaccardTokenize(a);
     const tokB = jaccardTokenize(b);
     if (tokA.size < 3 || tokB.size < 3) continue;
@@ -433,12 +435,14 @@ async function semanticDedup(a: string, b: string, cortexPath: string, signal?: 
   // Check cache
   try {
     const cache = loadCache<boolean>(cachePath);
-    if (cache[key] && Date.now() - getCacheEntryTimestamp(cache[key]) < 86400000) {
+    if (cache[key] && Date.now() - cache[key].ts < DEDUP_CACHE_TTL_MS) {
       cache[key].ts = Date.now();
       persistCache(cachePath, cache);
       return cache[key].result;
     }
-  } catch { /* ignore */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] dedupCache load: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   try {
     const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`, signal);
@@ -449,7 +453,9 @@ async function semanticDedup(a: string, b: string, cortexPath: string, signal?: 
       const cache = loadCache<boolean>(cachePath);
       cache[key] = { result, ts: Date.now() };
       persistCache(cachePath, cache);
-    } catch { /* non-fatal */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] dedupCache persist: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
 
     return result;
   } catch (error) {
@@ -510,7 +516,10 @@ export async function checkSemanticConflicts(
         if (!fs.existsSync(fp)) return null;
         try {
           return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };
-        } catch { return null; }
+        } catch (err: unknown) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] crossProjectScan stat: ${err instanceof Error ? err.message : String(err)}\n`);
+          return null;
+        }
       })
       .filter((x): x is { name: string; mtime: number; fp: string } => x !== null)
       .sort((a, b) => b.mtime - a.mtime);
@@ -520,7 +529,9 @@ export async function checkSemanticConflicts(
       const bullets = content.split("\n").filter((l) => l.startsWith("- "));
       if (bullets.length > 0) sources.push({ bullets, sourceProject: proj.name });
     }
-  } catch { /* non-fatal: cross-project scan is best-effort */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] crossProjectScan: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   const annotations: string[] = [];
   const deadline = Date.now() + CONFLICT_CHECK_TOTAL_TIMEOUT_MS;
@@ -539,7 +550,7 @@ export async function checkSemanticConflicts(
 
       const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath, signal);
       if (result === "CONFLICT") {
-        const snippet = line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
+        const snippet = stripMetadata(line).trim().slice(0, 80);
         const sourceLabel = sourceProject ? ` (from project: ${sourceProject})` : "";
         annotations.push(`<!-- conflicts_with: "${snippet}"${sourceLabel} -->`);
       }
@@ -562,12 +573,14 @@ async function llmConflictCheck(
   // 7-day cache
   try {
     const cache = loadCache<"CONFLICT" | "OK">(cachePath);
-    if (cache[key] && Date.now() - getCacheEntryTimestamp(cache[key]) < 7 * 86400000) {
+    if (cache[key] && Date.now() - cache[key].ts < CONFLICT_CACHE_TTL_MS) {
       cache[key].ts = Date.now();
       persistCache(cachePath, cache);
       return cache[key].result;
     }
-  } catch { /* ignore */ }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] conflictCache load: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   try {
     const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`, signal);
@@ -580,7 +593,9 @@ async function llmConflictCheck(
       const cache = loadCache<"CONFLICT" | "OK">(cachePath);
       cache[key] = { result, ts: Date.now() };
       persistCache(cachePath, cache);
-    } catch { /* non-fatal */ }
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] conflictCache persist: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
 
     return result;
   } catch (error) {

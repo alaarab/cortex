@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 
 // Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
 export const EXEC_TIMEOUT_MS = 30_000;
@@ -340,7 +340,7 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
       debugLog(`Audit log skipped (lock timeout): ${event} ${details}`);
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     debugLog(`Audit log write failed: ${msg}`);
   } finally {
     if (hasLock) try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }

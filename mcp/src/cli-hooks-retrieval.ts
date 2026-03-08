@@ -24,6 +24,17 @@ export type { GitContext } from "./cli-hooks-session.js";
 import { vectorFallback } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 
+// ── Scoring constants ─────────────────────────────────────────────────────────
+
+/** Number of docs sampled for token-overlap semantic fallback search. */
+const SEMANTIC_FALLBACK_SAMPLE_LIMIT = 100;
+
+/** Minimum overlap score for a doc to be included in semantic fallback results. */
+const SEMANTIC_OVERLAP_MIN_SCORE = 0.25;
+
+/** Fraction of bullets that must be low-value before applying the low-value penalty. */
+const LOW_VALUE_BULLET_FRACTION = 0.5;
+
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
 export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
@@ -70,8 +81,8 @@ export function branchMatchBoost(content: string, branch: string | undefined): n
   const text = content.toLowerCase();
   const tokens = branchTokens(branch);
   let score = 0;
-  for (const t of tokens) {
-    if (text.includes(t)) score += 1;
+  for (const token of tokens) {
+    if (text.includes(token)) score += 1;
   }
   return Math.min(3, score);
 }
@@ -88,15 +99,15 @@ function lowValuePenalty(content: string, docType: string): number {
   const fragments = configured.length ? configured : defaults;
   const pattern = new RegExp(`(${fragments.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "i");
   const low = bullets.filter((b) => pattern.test(b) || b.length < 16).length;
-  return low >= Math.ceil(bullets.length * 0.5) ? 2 : 0;
+  return low >= Math.ceil(bullets.length * LOW_VALUE_BULLET_FRACTION) ? 2 : 0;
 }
 
 // ── Token and snippet helpers ────────────────────────────────────────────────
 
 function normalizeToken(token: string): string {
-  let t = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  if (t.length > 4 && t.endsWith("s") && !t.endsWith("ss")) t = t.slice(0, -1);
-  return t;
+  let normalized = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (normalized.length > 4 && normalized.endsWith("s") && !normalized.endsWith("ss")) normalized = normalized.slice(0, -1);
+  return normalized;
 }
 
 function tokenizeForOverlap(text: string): string[] {
@@ -114,19 +125,23 @@ function overlapScore(queryTokens: string[], content: string): number {
   const contentTokens = new Set(tokenizeForOverlap(content));
   if (!contentTokens.size) return 0;
   let matched = 0;
-  for (const t of queryTokens) {
-    if (contentTokens.has(t)) matched += 1;
+  for (const token of queryTokens) {
+    if (contentTokens.has(token)) matched += 1;
   }
   const denominator = Math.max(2, Math.min(queryTokens.length, 10));
   return matched / denominator;
 }
+
+// k=60 is the standard RRF constant from Cormack et al. (2009); higher values reduce
+// the impact of top-ranked results, lower values amplify them. 60 is the community default.
+const RRF_K = 60;
 
 /**
  * Item 4: Reciprocal Rank Fusion — merges ranked result lists from multiple search tiers.
  * Documents appearing in multiple tiers get a higher combined score.
  * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
  */
-export function rrfMerge(tiers: DocRow[][], k = 60): DocRow[] {
+export function rrfMerge(tiers: DocRow[][], k = RRF_K): DocRow[] {
   const scores = new Map<string, number>();
   const docs = new Map<string, DocRow>();
   for (const tier of tiers) {
@@ -143,9 +158,9 @@ export function rrfMerge(tiers: DocRow[][], k = 60): DocRow[] {
 }
 
 function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: string | null): DocRow[] {
-  const queryTokens = tokenizeForOverlap(prompt);
-  if (!queryTokens.length) return [];
-  const sampleLimit = 100;
+  const terms = tokenizeForOverlap(prompt);
+  if (!terms.length) return [];
+  const sampleLimit = SEMANTIC_FALLBACK_SAMPLE_LIMIT;
   // ORDER BY RANDOM() avoids insertion-order bias — older docs get equal sampling probability.
   const docs = project
     ? queryDocRows(
@@ -162,10 +177,10 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   const scored = docs
     .map((doc) => {
       const corpus = `${doc.project} ${doc.filename} ${doc.type} ${doc.path}\n${doc.content.slice(0, 5000)}`;
-      const score = overlapScore(queryTokens, corpus);
+      const score = overlapScore(terms, corpus);
       return { doc, score };
     })
-    .filter((x) => x.score >= 0.25)
+    .filter((x) => x.score >= SEMANTIC_OVERLAP_MIN_SCORE)
     .sort((a, b) => b.score - a.score)
     .slice(0, 8)
     .map((x) => x.doc);

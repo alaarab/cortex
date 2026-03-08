@@ -8,6 +8,7 @@ import {
   runtimeDir,
 } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
+import { errorMessage } from "./utils.js";
 
 // ---------------------------------------------------------------------------
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
@@ -26,6 +27,7 @@ interface SqlJsStatic {
 
 const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<SqlJsStatic>;
+let sqlJsLoader = initSqlJs;
 
 const EMBED_CACHE_DB = "embed-cache.db";
 const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
@@ -60,10 +62,31 @@ let sqlResolved: SqlJsStatic | null = null;
 function getSql(): Promise<SqlJsStatic> {
   if (!sqlPromise) {
     const wasmBinary = findWasmBinary();
-    sqlPromise = initSqlJs(wasmBinary ? { wasmBinary } : {});
-    sqlPromise.then(s => { sqlResolved = s; }).catch(() => {});
+    sqlPromise = sqlJsLoader(wasmBinary ? { wasmBinary } : {})
+      .then(sql => {
+        sqlResolved = sql;
+        return sql;
+      })
+      .catch((err: unknown) => {
+        sqlPromise = null;
+        sqlResolved = null;
+        debugLog(`embedding: sql.js init failed: ${errorMessage(err)}`);
+        throw err;
+      });
   }
   return sqlPromise;
+}
+
+export function setSqlJsLoaderForTests(loader: (config?: Record<string, unknown>) => Promise<SqlJsStatic>): void {
+  sqlJsLoader = loader;
+  sqlPromise = null;
+  sqlResolved = null;
+}
+
+export function resetSqlJsStateForTests(): void {
+  sqlJsLoader = initSqlJs;
+  sqlPromise = null;
+  sqlResolved = null;
 }
 
 async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
@@ -107,7 +130,7 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
         }
       } catch (err) {
         try { db.run("ROLLBACK"); } catch { /* ignore */ }
-        debugLog(`embedding: JSONL migration failed: ${err instanceof Error ? err.message : String(err)}`);
+        debugLog(`embedding: JSONL migration failed: ${errorMessage(err)}`);
       }
     }
 
@@ -309,7 +332,7 @@ export async function getCachedEmbedding(
     embeddingOps.persistDb(cortexPath, db);
     return embedding;
   } catch (err) {
-    debugLog(`embedding: getCachedEmbedding failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`embedding: getCachedEmbedding failed: ${errorMessage(err)}`);
     return [];
   } finally {
     try { db?.close(); } catch { /* ignore */ }
@@ -361,7 +384,7 @@ export async function getCachedEmbeddings(
 
     return results.map(result => result ?? []);
   } catch (err) {
-    debugLog(`embedding: getCachedEmbeddings failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`embedding: getCachedEmbeddings failed: ${errorMessage(err)}`);
     return texts.map(() => []);
   } finally {
     try { db?.close(); } catch { /* ignore */ }

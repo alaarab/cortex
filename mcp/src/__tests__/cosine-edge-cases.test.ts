@@ -125,4 +125,30 @@ describe("cosineFallback: edge cases", () => {
     const results = cosineFallback(db, "redis caching strategy", new Set(), 2);
     expect(results.length).toBeLessThanOrEqual(2);
   });
+
+  it("scores document content, not path text", () => {
+    const fakeDb: SqlJsDatabase = {
+      run: () => {},
+      exec: (sql: string) => {
+        if (sql.includes("COUNT(*)")) {
+          return [{ columns: ["COUNT(*)"], values: [[2]] }];
+        }
+        if (sql.includes("SELECT rowid, project, filename, type, content, path FROM docs")) {
+          return [{
+            columns: ["rowid", "project", "filename", "type", "content", "path"],
+            values: [
+              [1, "proj", "path-match.md", "findings", "totally unrelated prose", "/notes/redis-caching.md"],
+              [2, "proj", "content-match.md", "findings", "redis caching strategy with ttl tuning", "/notes/unrelated.md"],
+            ],
+          }];
+        }
+        return [];
+      },
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+
+    const results = cosineFallback(fakeDb, "redis caching strategy", new Set(), 10);
+    expect(results[0]?.filename).toBe("content-match.md");
+  });
 });

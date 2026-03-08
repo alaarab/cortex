@@ -6,6 +6,7 @@ import {
   findCortexPath,
   getProjectDirs,
   EXEC_TIMEOUT_QUICK_MS,
+  debugLog,
 } from "./shared.js";
 import { detectProject } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
@@ -48,7 +49,7 @@ function countQueueItems(cortexPath: string, project: string): number {
 }
 
 function runGit(cwd: string, args: string[]): string | null {
-  return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS);
+  return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS, debugLog);
 }
 
 export async function runStatus() {

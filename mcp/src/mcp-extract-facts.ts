@@ -8,7 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
-import { safeProjectPath, isFeatureEnabled } from "./utils.js";
+import { safeProjectPath, isFeatureEnabled, errorMessage } from "./utils.js";
 import { callLlm } from "./content-dedup.js";
 
 const FACT_EXTRACT_FLAG = "CORTEX_FEATURE_FACT_EXTRACT";
@@ -43,7 +43,7 @@ function writeExtractedFacts(cortexPath: string, project: string, facts: Extract
     fs.writeFileSync(tmp, JSON.stringify(trimmed, null, 2));
     fs.renameSync(tmp, p);
   } catch (err: unknown) {
-    debugLog(`writeExtractedFacts: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`writeExtractedFacts: ${errorMessage(err)}`);
   }
 }
 
@@ -75,6 +75,6 @@ export function extractFactFromFinding(cortexPath: string, project: string, find
       writeExtractedFacts(cortexPath, project, existing);
     })
     .catch((err: unknown) => {
-      debugLog(`extractFactFromFinding: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`extractFactFromFinding: ${errorMessage(err)}`);
     });
 }

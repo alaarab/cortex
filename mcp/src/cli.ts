@@ -10,14 +10,14 @@ import {
 } from "./shared-governance.js";
 import {
   buildIndex,
+  queryDocRows,
   queryRows,
   extractSnippet,
-  type DbRow,
 } from "./shared-index.js";
 import {
   upsertCanonical,
 } from "./shared-content.js";
-import { buildRobustFtsQuery, isValidProjectName } from "./utils.js";
+import { buildRobustFtsQuery, isValidProjectName, errorMessage } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { addFinding as addFindingCore } from "./core-finding.js";
 import * as fs from "fs";
@@ -186,7 +186,70 @@ function printSearchUsage() {
   console.error("  type: claude|summary|findings|reference|backlog|changelog|canonical|memory-queue|skill|other");
 }
 
+/** Validate and normalize the parsed flag values into a SearchOptions, or exit on error. */
+function validateAndNormalizeSearchOptions(
+  queryParts: string[],
+  project: string | undefined,
+  type: string | undefined,
+  limit: number,
+  showHistory: boolean,
+  fromHistory: number | undefined,
+  searchAll: boolean,
+): SearchOptions | null {
+  // ── History shortcuts ──
+  if (showHistory) {
+    return { query: "", limit, showHistory: true };
+  }
+
+  if (fromHistory !== undefined) {
+    const history = readSearchHistory();
+    if (fromHistory > history.length || fromHistory < 1) {
+      console.error(`No search at position ${fromHistory}. History has ${history.length} entries.`);
+      process.exit(1);
+    }
+    const entry = history[fromHistory - 1];
+    return {
+      query: entry.query,
+      limit,
+      project: entry.project,
+      type: entry.type,
+    };
+  }
+
+  // ── Validation ──
+  if (project && !isValidProjectName(project)) {
+    console.error(`Invalid project name: "${project}"`);
+    process.exit(1);
+  }
+
+  let normalizedType: string | undefined;
+  if (type) {
+    normalizedType = SEARCH_TYPE_ALIASES[type.toLowerCase()] || type.toLowerCase();
+    if (!SEARCH_TYPES.has(normalizedType)) {
+      console.error(`Invalid --type value: "${type}"`);
+      printSearchUsage();
+      process.exit(1);
+    }
+  }
+
+  const query = queryParts.join(" ").trim();
+  if (!query && !project) {
+    console.error("Provide a query, or pass --project to browse a project's indexed docs.");
+    printSearchUsage();
+    process.exit(1);
+  }
+
+  return {
+    query,
+    limit,
+    project,
+    type: normalizedType,
+    searchAll,
+  };
+}
+
 function parseSearchArgs(args: string[]): SearchOptions | null {
+  // ── Flag parsing ──
   const queryParts: string[] = [];
   let project: string | undefined;
   let type: string | undefined;
@@ -263,54 +326,8 @@ function parseSearchArgs(args: string[]): SearchOptions | null {
     queryParts.push(arg);
   }
 
-  if (showHistory) {
-    return { query: "", limit, showHistory: true };
-  }
-
-  if (fromHistory !== undefined) {
-    const history = readSearchHistory();
-    if (fromHistory > history.length || fromHistory < 1) {
-      console.error(`No search at position ${fromHistory}. History has ${history.length} entries.`);
-      process.exit(1);
-    }
-    const entry = history[fromHistory - 1];
-    return {
-      query: entry.query,
-      limit,
-      project: entry.project,
-      type: entry.type,
-    };
-  }
-
-  if (project && !isValidProjectName(project)) {
-    console.error(`Invalid project name: "${project}"`);
-    process.exit(1);
-  }
-
-  let normalizedType: string | undefined;
-  if (type) {
-    normalizedType = SEARCH_TYPE_ALIASES[type.toLowerCase()] || type.toLowerCase();
-    if (!SEARCH_TYPES.has(normalizedType)) {
-      console.error(`Invalid --type value: "${type}"`);
-      printSearchUsage();
-      process.exit(1);
-    }
-  }
-
-  const query = queryParts.join(" ").trim();
-  if (!query && !project) {
-    console.error("Provide a query, or pass --project to browse a project's indexed docs.");
-    printSearchUsage();
-    process.exit(1);
-  }
-
-  return {
-    query,
-    limit,
-    project,
-    type: normalizedType,
-    searchAll,
-  };
+  // ── Validation / normalization ──
+  return validateAndNormalizeSearchOptions(queryParts, project, type, limit, showHistory, fromHistory, searchAll);
 }
 
 // ── CLI router ───────────────────────────────────────────────────────────────
@@ -438,7 +455,7 @@ async function handleSearch(opts: SearchOptions) {
     sql += opts.query ? " ORDER BY rank LIMIT ?" : " ORDER BY project, type, filename LIMIT ?";
     params.push(opts.limit);
 
-    let rows = queryRows(db, sql, params);
+    let rows = queryDocRows(db, sql, params);
 
     if (!rows && opts.query) {
       const fallbackRows = keywordFallbackSearch(db, opts.query, { project: opts.project, type: opts.type, limit: opts.limit });
@@ -472,14 +489,13 @@ async function handleSearch(opts: SearchOptions) {
     }
 
     for (const row of rows) {
-      const [project, filename, docType, content] = row as string[];
-      const snippet = extractSnippet(content, opts.query, 7);
-      console.log(`[${project}/${filename}] (${docType})`);
+      const snippet = extractSnippet(row.content, opts.query, 7);
+      console.log(`[${row.project}/${row.filename}] (${row.type})`);
       console.log(snippet);
       console.log();
     }
   } catch (err: unknown) {
-    console.error(`Search error: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`Search error: ${errorMessage(err)}`);
     process.exit(1);
   }
 }
@@ -1172,7 +1188,7 @@ async function handleDebugInjection(args: string[]) {
   } catch (err: unknown) {
     const stderr = err instanceof Error && "stderr" in err ? String((err as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "").trim() : "";
     if (stderr) console.error(stderr);
-    console.error(`debug-injection failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`debug-injection failed: ${errorMessage(err)}`);
     process.exit(1);
   }
 }

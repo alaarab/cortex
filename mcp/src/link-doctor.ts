@@ -9,6 +9,7 @@ import {
   isRecord,
 } from "./shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
+import { errorMessage } from "./utils.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { validateBacklogFormat, validateFindingsFormat } from "./shared-content.js";
 import { detectInstalledTools } from "./hooks.js";
@@ -37,7 +38,7 @@ export function isWrapperActive(tool: string): boolean {
     }).trim();
     return path.resolve(resolved) === path.resolve(wrapperPath);
   } catch (err: unknown) {
-    debugLog(`isWrapperActive: which ${tool} failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`isWrapperActive: which ${tool} failed: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -120,7 +121,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   try {
     globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
   } catch (err: unknown) {
-    debugLog(`doctor: global CLAUDE.md symlink check failed: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
     globalLinkOk = false;
   }
   checks.push({
@@ -144,7 +145,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       try {
         ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(src);
       } catch (err: unknown) {
-        debugLog(`doctor: symlink check failed for ${dest}: ${err instanceof Error ? err.message : String(err)}`);
+        debugLog(`doctor: symlink check failed for ${dest}: ${errorMessage(err)}`);
         ok = false;
       }
       checks.push({
@@ -169,7 +170,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const startHookOk = startHooks.includes("hook-session-start") || startHooks.includes("doctor --fix");
     lifecycleOk = stopHookOk && startHookOk;
   } catch (err: unknown) {
-    debugLog(`doctor: failed to read Claude settings for hook check: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
     hookOk = false;
     lifecycleOk = false;
   }
@@ -226,7 +227,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     checks.push({
       name: "fts-index",
       ok: false,
-      detail: `index build/query failed: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `index build/query failed: ${errorMessage(err)}`,
     });
   }
 

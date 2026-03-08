@@ -3,6 +3,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { debugLog } from "./shared.js";
+import { errorMessage } from "./utils.js";
 import { buildLifecycleCommands } from "./hooks.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -41,7 +42,7 @@ export function parseSkillFrontmatter(rawContent: string): { frontmatter: Record
     const parsed = yaml.load(match[1]) as Record<string, unknown>;
     return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
   } catch (err: unknown) {
-    debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${errorMessage(err)}`);
     return { frontmatter: null, body: content };
   }
 }
@@ -170,7 +171,7 @@ function getPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return pkg.version || "1.0.0";
   } catch (err: unknown) {
-    debugLog(`getPackageVersion: failed to read package.json: ${err instanceof Error ? err.message : String(err)}`);
+    debugLog(`getPackageVersion: failed to read package.json: ${errorMessage(err)}`);
     return "1.0.0";
   }
 }

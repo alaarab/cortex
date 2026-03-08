@@ -22,6 +22,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
+import { errorMessage } from "./utils.js";
 
 let _cortexPath: string | undefined;
 function getCortexPath(): string {
@@ -553,7 +554,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       `status=ok projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
     );
   } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+    const errMsg = errorMessage(err);
     updateRuntimeHealth(getCortexPath(), {
       lastGovernance: {
         at: startedAt,
