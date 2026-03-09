@@ -334,7 +334,7 @@ describe("handleMaintainMigrate", () => {
   it("handles project-names migration in dry-run mode", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "WebProject2", { "FINDINGS.md": "# Findings\n" });
+    makeProject(cortex, "SamplePortal", { "FINDINGS.md": "# Findings\n" });
     const { handleMaintainMigrate } = await importGovern(cortex);
     await handleMaintainMigrate(["project-names", "--dry-run"]);
   });

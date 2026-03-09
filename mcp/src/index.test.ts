@@ -208,12 +208,12 @@ describe("isValidProjectName", () => {
 
 describe("extractKeywords", () => {
   it("removes stop words", () => {
-    const result = extractKeywords("fix the rate limiter in alphalens");
+    const result = extractKeywords("fix the rate limiter in sampleatlas");
     expect(result).not.toContain("the");
     expect(result).not.toContain("in");
     expect(result).toContain("rate");
     expect(result).toContain("limiter");
-    expect(result).toContain("alphalens");
+    expect(result).toContain("sampleatlas");
   });
 
   it("returns empty string for only stop words", () => {
@@ -285,7 +285,7 @@ describe("isValidProjectName", () => {
 
   it("rejects uppercase project names", () => {
     expect(isValidProjectName("Cortex")).toBe(false);
-    expect(isValidProjectName("WebProject2")).toBe(false);
+    expect(isValidProjectName("SamplePortal")).toBe(false);
   });
 
   it("rejects punctuation outside hyphen and underscore", () => {

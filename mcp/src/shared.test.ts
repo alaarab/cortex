@@ -2408,39 +2408,39 @@ describe("migrateProjectNames", () => {
 
   it("renames mixed-case project dirs, updates profiles, and renames native memory files", () => {
     const cortex = path.join(tmpRoot, ".cortex");
-    fs.mkdirSync(path.join(cortex, "WebProject2"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "SamplePortal"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortex, "profiles", "personal.yaml"), "projects:\n  - WebProject2\n");
+    fs.writeFileSync(path.join(cortex, "profiles", "personal.yaml"), "projects:\n  - SamplePortal\n");
     const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
     fs.mkdirSync(memDir, { recursive: true });
-    fs.writeFileSync(path.join(memDir, "MEMORY-WebProject2.md"), "# notes");
+    fs.writeFileSync(path.join(memDir, "MEMORY-SamplePortal.md"), "# notes");
 
     const result = migrateProjectNames(cortex);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const cortexEntries = fs.readdirSync(cortex);
-    expect(cortexEntries).toContain("web-project-2");
-    expect(cortexEntries).not.toContain("WebProject2");
-    expect(fs.readFileSync(path.join(cortex, "profiles", "personal.yaml"), "utf8")).toContain("web-project-2");
+    expect(cortexEntries).toContain("sampleportal");
+    expect(cortexEntries).not.toContain("SamplePortal");
+    expect(fs.readFileSync(path.join(cortex, "profiles", "personal.yaml"), "utf8")).toContain("sampleportal");
     const memoryEntries = fs.readdirSync(memDir);
-    expect(memoryEntries).toContain("MEMORY-web-project-2.md");
-    expect(memoryEntries).not.toContain("MEMORY-WebProject2.md");
+    expect(memoryEntries).toContain("MEMORY-sampleportal.md");
+    expect(memoryEntries).not.toContain("MEMORY-SamplePortal.md");
   });
 
   it("archives duplicate native memory files when lowercase target already exists", () => {
     const cortex = path.join(tmpRoot, ".cortex");
-    fs.mkdirSync(path.join(cortex, "AlphaLens"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "SampleAtlas"), { recursive: true });
     const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
     fs.mkdirSync(memDir, { recursive: true });
-    fs.writeFileSync(path.join(memDir, "MEMORY-AlphaLens.md"), "# same");
-    fs.writeFileSync(path.join(memDir, "MEMORY-alphalens.md"), "# same");
+    fs.writeFileSync(path.join(memDir, "MEMORY-SampleAtlas.md"), "# same");
+    fs.writeFileSync(path.join(memDir, "MEMORY-sampleatlas.md"), "# same");
 
     const result = migrateProjectNames(cortex);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const memoryEntries = fs.readdirSync(memDir);
-    expect(memoryEntries).toContain("MEMORY-AlphaLens.md.case-migration.bak");
-    expect(memoryEntries).toContain("MEMORY-alphalens.md");
+    expect(memoryEntries).toContain("MEMORY-SampleAtlas.md.case-migration.bak");
+    expect(memoryEntries).toContain("MEMORY-sampleatlas.md");
   });
 });
 

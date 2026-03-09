@@ -1446,14 +1446,14 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
   });
 
   it("migrate project-names dry-run reports pending project rename", () => {
-    fs.mkdirSync(path.join(cortexDir, "WebProject2"), { recursive: true });
+    fs.mkdirSync(path.join(cortexDir, "SamplePortal"), { recursive: true });
     const { stdout, exitCode } = runCli(
       ["maintain", "migrate", "project-names", "--dry-run"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Project name migration");
-    expect(stdout).toContain("WebProject2 -> web-project-2");
+    expect(stdout).toContain("SamplePortal -> sampleportal");
   });
 });
 
