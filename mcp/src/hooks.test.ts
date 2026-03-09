@@ -26,11 +26,11 @@ describe("hooks", () => {
       expect(tools).toBeInstanceOf(Set);
     });
 
-    it("detects cursor when ~/.cursor exists", () => {
+    it("does not detect cursor from a bare ~/.cursor config directory", () => {
       const cursorDir = path.join(os.homedir(), ".cursor");
       if (fs.existsSync(cursorDir)) {
         const tools = detectInstalledTools();
-        expect(tools.has("cursor")).toBe(true);
+        expect(tools.has("cursor")).toBe(false);
       }
     });
 
@@ -430,7 +430,7 @@ describe("hooks", () => {
       tmp.cleanup();
     });
 
-    it("detects all tools from home-directory markers when binaries are absent", () => {
+    it("detects only tools with reliable home-directory markers when binaries are absent", () => {
       const tmp = makeTempDir("hooks-detect-home-");
       const homeDir = path.join(tmp.path, "home");
       process.env.HOME = homeDir;
@@ -442,7 +442,7 @@ describe("hooks", () => {
       fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
 
       const detected = detectInstalledTools();
-      expect(detected).toEqual(new Set(["copilot", "cursor", "codex"]));
+      expect(detected).toEqual(new Set(["copilot", "codex"]));
 
       tmp.cleanup();
     });
@@ -468,7 +468,7 @@ describe("hooks", () => {
       expect(cmds.sessionStart).not.toContain("npx @alaarab/cortex");
     });
 
-    it("configureAllHooks() wires configs from auto-detected tools", () => {
+    it("configureAllHooks() ignores stale cursor config without a real cursor binary", () => {
       const tmp = makeTempDir("hooks-config-detect-");
       const tmpRoot = tmp.path;
       const homeDir = path.join(tmpRoot, "home");
@@ -487,7 +487,7 @@ describe("hooks", () => {
       );
 
       const configured = configureAllHooks(cortexPath);
-      expect(configured).toEqual(["Copilot CLI", "Cursor", "Codex"]);
+      expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
       const lifecycle = buildLifecycleCommands(cortexPath);
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
@@ -495,10 +495,7 @@ describe("hooks", () => {
       expect(copilot.hooks.userPromptSubmitted[0].bash).toBe(lifecycle.userPromptSubmit);
       expect(copilot.hooks.sessionEnd[0].bash).toBe(lifecycle.stop);
 
-      const cursor = JSON.parse(fs.readFileSync(path.join(homeDir, ".cursor", "hooks.json"), "utf8"));
-      expect(cursor.sessionStart.command).toBe(lifecycle.sessionStart);
-      expect(cursor.beforeSubmitPrompt.command).toBe(lifecycle.userPromptSubmit);
-      expect(cursor.stop.command).toBe(lifecycle.stop);
+      expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
 
       const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
       expect(codex.hooks.SessionStart[0].command).toBe(lifecycle.sessionStart);
