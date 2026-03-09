@@ -30,7 +30,7 @@ export function badge(label: string, colorFn: (s: string) => string): string {
 }
 
 export function separator(width = 50): string {
-  return style.dim("─".repeat(width));
+  return style.dim("━".repeat(width));
 }
 
 export function stripAnsi(s: string): string {
@@ -53,6 +53,49 @@ export function truncateLine(s: string, cols: number): string {
   if (visible.length <= cols) return s;
   return visible.slice(0, cols - 1) + "…" + "\x1b[0m";
 }
+
+// ── Cortex theme ────────────────────────────────────────────────────────────
+
+// Neural gradient palette: purple → blue → cyan (256-color ANSI)
+export const CORTEX_GRADIENT = [
+  "\x1b[38;5;93m",   // vivid purple
+  "\x1b[38;5;99m",   // purple-blue
+  "\x1b[38;5;105m",  // blue-purple
+  "\x1b[38;5;111m",  // sky blue
+  "\x1b[38;5;75m",   // dodger blue
+  "\x1b[38;5;81m",   // cyan-blue
+  "\x1b[38;5;87m",   // bright cyan
+];
+
+// Apply gradient coloring across non-whitespace characters
+export function gradient(text: string, colors: string[] = CORTEX_GRADIENT): string {
+  const plain = stripAnsi(text);
+  const chars = [...plain];
+  const nonSpaceCount = chars.filter(ch => !/\s/.test(ch)).length;
+  if (!nonSpaceCount || !colors.length) return text;
+  let result = "";
+  let vi = 0;
+  for (const ch of chars) {
+    if (/\s/.test(ch)) {
+      result += ch;
+    } else {
+      const ci = Math.min(Math.floor(vi * colors.length / nonSpaceCount), colors.length - 1);
+      result += colors[ci] + ch;
+      vi++;
+    }
+  }
+  return result + RESET;
+}
+
+// Block-letter logo for startup animation
+const CORTEX_LOGO = [
+  " ██████╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗",
+  "██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝",
+  "██║     ██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝ ",
+  "██║     ██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗ ",
+  "╚██████╗╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ╚██╗",
+  " ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝",
+];
 
 // ── Line-based viewport: edge-triggered scroll (stable, no jumpiness) ─────────
 
@@ -134,14 +177,30 @@ export function clearToEnd(): void {
 }
 
 export function shellStartupFrames(version: string): string[] {
-  const logoStages = ["c", "cor", "cortex"];
-  const spinners = ["◜", "◠", "◝"];
+  const cols = process.stdout.columns || 80;
   const tagline = style.dim("local memory for working agents");
   const versionBadge = badge(`v${version}`, style.boldBlue);
 
-  return logoStages.map((stage, index) => [
+  if (cols >= 56) {
+    const logo = CORTEX_LOGO.map(line => "  " + gradient(line));
+    const sep = gradient("━".repeat(Math.min(52, cols)));
+
+    return [
+      // Frame 1: Top half of logo emerging
+      ["", ...logo.slice(0, 3), "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      // Frame 2: Full logo materializes
+      ["", ...logo, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      // Frame 3: Complete with brand separator
+      ["", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("cortex")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
+    ];
+  }
+
+  // Narrow terminal: progressive text reveal with gradient
+  const stages = ["c", "cor", "cortex"];
+  const spinners = ["◜", "◠", "◝"];
+  return stages.map((stage, i) => [
     "",
-    `  ${style.boldCyan(stage)} ${style.dim(spinners[index] ?? spinners[spinners.length - 1])}`,
+    `  ${gradient(stage)} ${style.dim(spinners[i])}`,
     "",
     `  ${versionBadge}  ${tagline}`,
     "",

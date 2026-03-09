@@ -318,7 +318,7 @@ describe("CortexShell", () => {
     expect(output).toContain("◈ Review Queue");
     expect(output).toContain("Review");
     expect(output).toContain("Stale");
-    expect(output).toMatch(/─{10,}/);
+    expect(output).toMatch(/━{10,}/);
   });
 
   it(":undo restores file after destructive :complete action", async () => {
