@@ -18,7 +18,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
-import { STOP_WORDS } from "./utils.js";
+import { buildRelaxedFtsQuery, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
@@ -26,6 +26,7 @@ import type { GitContext } from "./cli-hooks-session.js";
 export type { GitContext } from "./cli-hooks-session.js";
 import { vectorFallback } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
+import { keywordFallbackSearch } from "./core-search.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ const LOW_FOCUS_SNIPPET_SCORE = 0.3;
 const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
 const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
 const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
+const BACKLOG_RESCUE_MIN_OVERLAP = 0.3;
+const BACKLOG_RESCUE_OVERLAP_MARGIN = 0.12;
+const BACKLOG_RESCUE_SCORE_MARGIN = 0.6;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -124,19 +128,21 @@ function normalizeToken(token: string): string {
   return normalized;
 }
 
-function tokenizeForOverlap(text: string): string[] {
+function tokenizeForOverlap(text: string, maxTokens = 24): string[] {
   const tokens = text
     .toLowerCase()
     .replace(/[^a-z0-9_\-\s]/g, " ")
     .split(/\s+/)
     .map(normalizeToken)
     .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
-  return [...new Set(tokens)].slice(0, 24);
+  const uniqueTokens = [...new Set(tokens)];
+  if (!Number.isFinite(maxTokens) || maxTokens < 1) return uniqueTokens;
+  return uniqueTokens.slice(0, maxTokens);
 }
 
 function overlapScore(queryTokens: string[], content: string): number {
   if (!queryTokens.length) return 0;
-  const contentTokens = new Set(tokenizeForOverlap(content));
+  const contentTokens = new Set(tokenizeForOverlap(content, Number.POSITIVE_INFINITY));
   if (!contentTokens.size) return 0;
   let matched = 0;
   for (const token of queryTokens) {
@@ -343,11 +349,13 @@ export function searchDocuments(
   prompt: string,
   keywords: string,
   detectedProject: string | null,
-  searchAllProjects = false
+  searchAllProjects = false,
+  cortexPath?: string
 ): DocRow[] | null {
   // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
   const ftsDocs: DocRow[] = [];
   const ftsSeenKeys = new Set<string>();
+  const relaxedQuery = buildRelaxedFtsQuery(keywords || prompt, detectedProject, cortexPath);
 
   const addFtsRows = (rows: DocRow[] | null) => {
     if (!rows) return;
@@ -356,29 +364,37 @@ export function searchDocuments(
       if (!ftsSeenKeys.has(key)) { ftsSeenKeys.add(key); ftsDocs.push(doc); }
     }
   };
+  const runScopedFtsQuery = (query: string) => {
+    if (!query) return;
+    if (detectedProject) {
+      addFtsRows(queryDocRows(
+        db,
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7",
+        [query, detectedProject]
+      ));
+    }
 
-  if (detectedProject) {
-    addFtsRows(queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7",
-      [safeQuery, detectedProject]
-    ));
-  }
+    if (searchAllProjects || !detectedProject) {
+      addFtsRows(queryDocRows(
+        db,
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
+        [query]
+      ));
+      return;
+    }
 
-  if (searchAllProjects || !detectedProject) {
-    addFtsRows(queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
-      [safeQuery]
-    ));
-  } else {
     const scopeProjects = [detectedProject, ...SHARED_PROJECTS];
     const placeholders = scopeProjects.map(() => "?").join(", ");
     addFtsRows(queryDocRows(
       db,
       `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project IN (${placeholders}) ORDER BY rank LIMIT 10`,
-      [safeQuery, ...scopeProjects]
+      [query, ...scopeProjects]
     ));
+  };
+
+  runScopedFtsQuery(safeQuery);
+  if (ftsDocs.length === 0 && relaxedQuery && relaxedQuery !== safeQuery) {
+    runScopedFtsQuery(relaxedQuery);
   }
 
   // Tier 2: Token-overlap semantic — always run, scored independently
@@ -405,7 +421,15 @@ export async function searchDocumentsAsync(
   cortexPath?: string
 ): Promise<DocRow[] | null> {
   // Sync result (Tier 1 + Tier 2)
-  const syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects);
+  let syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, cortexPath);
+  if (!syncResult || syncResult.length === 0) {
+    const keywordRows = keywordFallbackSearch(
+      db,
+      prompt,
+      { project: detectedProject ?? undefined, limit: 8 }
+    );
+    if (keywordRows?.length) syncResult = keywordRows;
+  }
 
   // Tier 3: Real vector search — only if embeddings are available and cortexPath provided
   const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());
@@ -648,12 +672,31 @@ export function rankResults(
 
     return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
   });
+
+  const rescuedBacklogPaths = new Set<string>();
+  if (intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog" && queryTokens.length > 0) {
+    const bestBacklog = scored.find((entry) => entry.doc.type === "backlog");
+    if (bestBacklog && bestBacklog.queryOverlap >= BACKLOG_RESCUE_MIN_OVERLAP) {
+      const bestNonBacklog = scored.find((entry) => entry.doc.type !== "backlog");
+      if (
+        !bestNonBacklog
+        || bestBacklog.queryOverlap >= bestNonBacklog.queryOverlap + BACKLOG_RESCUE_OVERLAP_MARGIN
+        || bestBacklog.score >= bestNonBacklog.score + BACKLOG_RESCUE_SCORE_MARGIN
+      ) {
+        rescuedBacklogPaths.add(bestBacklog.doc.path || `${bestBacklog.doc.project}/${bestBacklog.doc.filename}`);
+      }
+    }
+  }
   ranked = scored.map((s) => s.doc);
 
   ranked = ranked.slice(0, 8);
 
   if (intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog") {
-    ranked = ranked.filter((r) => r.type !== "backlog");
+    ranked = ranked.filter((r) => {
+      if (r.type !== "backlog") return true;
+      const key = r.path || `${r.project}/${r.filename}`;
+      return rescuedBacklogPaths.has(key);
+    });
   }
 
   return ranked;

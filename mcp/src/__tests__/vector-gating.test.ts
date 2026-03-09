@@ -102,4 +102,46 @@ describe("searchDocumentsAsync vector gating", () => {
 
     expect(vectorFallback).toHaveBeenCalledOnce();
   });
+
+  it("rescues zero-result searches with keyword fallback before vector search", async () => {
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: (sql: string) => {
+        if (sql.includes("SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs")) {
+          return [{ columns: ["min", "max", "count"], values: [[1, 1, 0]] }];
+        }
+        if (sql.includes("SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ?")) {
+          return [];
+        }
+        if (sql === "SELECT project, filename, type, content, path FROM docs") {
+          return [{
+            columns: ["project", "filename", "type", "content", "path"],
+            values: [[
+              "cortex",
+              "FINDINGS.md",
+              "findings",
+              "Semantic opt-in during init should finish at the dependency level",
+              "/tmp/cortex/FINDINGS.md",
+            ]],
+          }];
+        }
+        return [];
+      },
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+
+    const rows = await searchDocumentsAsync(
+      db,
+      "\"semantic\" AND \"search\" AND \"setup\" AND \"init\" AND \"ollama\"",
+      "semantic search setup during init with ollama",
+      "semantic search setup during init ollama",
+      null,
+      true,
+      "/tmp/cortex"
+    );
+
+    expect(rows?.[0]?.path).toBe("/tmp/cortex/FINDINGS.md");
+    expect(vectorFallback).not.toHaveBeenCalled();
+  });
 });

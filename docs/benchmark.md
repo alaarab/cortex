@@ -85,6 +85,8 @@ The harness outputs a markdown results table showing:
 The retrieval runner writes JSON with:
 - lexical path latency and token stats
 - gated semantic path latency and token stats
+- hit and miss counts per mode
+- semantic-only and lexical-only hit deltas
 - persistent vector-index candidate counts
 - per-query top-document summaries
 
@@ -102,21 +104,33 @@ Every benchmark run should publish:
 
 The bundled runners now emit a `conditions` block in their JSON output. If you publish numbers in docs or release notes, copy that block with the results.
 
-## March 9, 2026 Author-Local Retrieval Run
+## March 9, 2026 Author-Local Retrieval Runs
 
-The final post-fix live-store run against the author's `~/.cortex` corpus (139 embedded docs, 10 real queries, Node `v24.13.0`) produced:
+After the relaxed lexical rescue pass and the long-document overlap fix, the legacy apples-to-apples run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
 
-- lexical path: `19.81ms` average total latency, `16.57ms` p50, `24.62ms` p95
-- gated semantic path: `66.97ms` average total latency, `18.12ms` p50, `183.59ms` p95
-- lexical injected tokens: `212.5` average
-- gated semantic injected tokens: `227.9` average
-- persistent vector candidate pruning: `8.7` average candidates out of `139` eligible docs
-- benchmark misses that remained in both modes: `semantic search setup during init with ollama`, `alerts to external webhook instead of discord`
+- lexical path: `15.93ms` average total latency, `11.91ms` p50, `16.25ms` p95
+- gated semantic path: `12.90ms` average total latency, `11.59ms` p50, `16.52ms` p95
+- lexical injected tokens: `341.8` average
+- gated semantic injected tokens: `341.8` average
+- hits: lexical `10/10`, gated semantic `10/10`
+- semantic-only hits: `0`
+- persistent vector candidate pruning: `8.7` average candidates out of `139` eligible docs (`6.3%` of the corpus)
+
+The widened 16-query run on the same warm store produced:
+
+- lexical path: `14.71ms` average total latency, `12.56ms` p50, `17.45ms` p95
+- gated semantic path: `13.60ms` average total latency, `12.45ms` p50, `18.39ms` p95
+- lexical injected tokens: `326.0` average
+- gated semantic injected tokens: `326.0` average
+- hits: lexical `16/16`, gated semantic `16/16`
+- semantic-only hits: `0`
+- persistent vector candidate pruning: `12.0` average candidates out of `139` eligible docs (`8.6%` of the corpus)
 
 Interpretation:
-- local semantic recovery is still a recall tool, not a raw latency win on this corpus
-- after gating and snippet compaction, token inflation stayed modest (`+15.4` tokens average)
-- the persistent vector index changed the scoring workload shape substantially, but on a 139-doc corpus the cosine stage was still around `0.1ms`, so query embedding latency remained the dominant semantic cost
+- the two previously published miss cases now resolve on the live store
+- the strengthened lexical path is now good enough on this corpus that the vector gate usually stays closed, so hybrid and lexical timings converge
+- the vector index still changes worst-case scaling by shrinking the cosine stage to a small candidate set, but on a 139-doc corpus the cosine math is only about `0.06-0.07ms`; the expensive semantic step is still query embedding when it happens
+- these numbers are evidence for this corpus and this query set, not proof that semantic recovery is obsolete everywhere
 
 ## Results Table
 

@@ -89,6 +89,30 @@ describe("mcp-search vector fallback", () => {
     expect(res.data.results[0].project).toBe("proj");
   });
 
+  it("retries with a relaxed lexical query before invoking vector fallback", async () => {
+    db.exec = (sql: string, params?: unknown[]) => {
+      if (!sql.includes("MATCH")) return [];
+      const query = String(params?.[0] ?? "");
+      if (!query.includes(" OR ")) return [];
+      return [{
+        columns: ["project", "filename", "type", "content", "path"],
+        values: [[
+          "cortex",
+          "FINDINGS.md",
+          "findings",
+          "Semantic opt-in during init should finish at the dependency level",
+          `${tmp.path}/cortex/FINDINGS.md`,
+        ]],
+      }];
+    };
+
+    const res = parseResult(await server.call("search_knowledge", { query: "semantic search setup during init with ollama" }));
+    expect(res.ok).toBe(true);
+    expect(vectorFallback).not.toHaveBeenCalled();
+    expect(res.data.results).toHaveLength(1);
+    expect(res.data.results[0].project).toBe("cortex");
+  });
+
   it("applies type filters to vector fallback results", async () => {
     vi.mocked(vectorFallback).mockResolvedValue([
       {

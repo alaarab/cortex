@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { createHash } from "crypto";
-import { isValidProjectName, buildRobustFtsQuery, errorMessage } from "./utils.js";
+import { isValidProjectName, buildFtsQueryVariants, errorMessage } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { readFindings } from "./data-access.js";
 import {
@@ -168,7 +168,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (filterProject && !isValidProjectName(filterProject)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
-        const safeQuery = buildRobustFtsQuery(query, filterProject, cortexPath);
+        const queryVariants = buildFtsQueryVariants(query, filterProject, cortexPath);
+        const safeQuery = queryVariants[0] ?? "";
 
         if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
 
@@ -189,7 +190,19 @@ export function register(server: McpServer, ctx: McpContext): void {
         sql += " ORDER BY rank LIMIT ?";
         params.push(fetchLimit);
 
+        let activeFtsQuery = safeQuery;
         let rows = queryDocRows(db, sql, params);
+        if ((!rows || rows.length === 0) && queryVariants.length > 1) {
+          for (const variant of queryVariants.slice(1)) {
+            const relaxedParams = [...params];
+            relaxedParams[0] = variant;
+            rows = queryDocRows(db, sql, relaxedParams);
+            if (rows?.length) {
+              activeFtsQuery = variant;
+              break;
+            }
+          }
+        }
         let usedFallback = false;
 
         // Hybrid search: if FTS5 returns fewer than 3 results, try cosine fallback
@@ -197,7 +210,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const ftsRowids = new Set<number>();
           try {
             let rowidSql = "SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ?";
-            const rowidParams: (string | number)[] = [safeQuery];
+            const rowidParams: (string | number)[] = [activeFtsQuery];
             if (filterProject) { rowidSql += " AND project = ?"; rowidParams.push(filterProject); }
             if (filterType) { rowidSql += " AND type = ?"; rowidParams.push(filterType); }
             rowidSql += " ORDER BY rank LIMIT ?";

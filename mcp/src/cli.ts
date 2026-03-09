@@ -21,7 +21,7 @@ import {
 import {
   upsertCanonical,
 } from "./shared-content.js";
-import { buildRobustFtsQuery, isValidProjectName, errorMessage } from "./utils.js";
+import { buildFtsQueryVariants, isValidProjectName, errorMessage } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { addFinding as addFindingCore } from "./core-finding.js";
 import * as fs from "fs";
@@ -435,9 +435,11 @@ async function handleSearch(opts: SearchOptions) {
     let sql = "SELECT project, filename, type, content, path FROM docs";
     const where: string[] = [];
     const params: Array<string | number> = [];
+    let queryVariants: string[] = [];
 
     if (opts.query) {
-      const safeQuery = buildRobustFtsQuery(opts.query, opts.project, getCortexPath());
+      queryVariants = buildFtsQueryVariants(opts.query, opts.project, getCortexPath());
+      const safeQuery = queryVariants[0] ?? "";
       if (!safeQuery) {
         console.error("Query empty after sanitization.");
         process.exit(1);
@@ -461,6 +463,14 @@ async function handleSearch(opts: SearchOptions) {
     params.push(opts.limit);
 
     let rows = queryDocRows(db, sql, params);
+    if ((!rows || rows.length === 0) && queryVariants.length > 1) {
+      for (const variant of queryVariants.slice(1)) {
+        const relaxedParams = [...params];
+        relaxedParams[0] = variant;
+        rows = queryDocRows(db, sql, relaxedParams);
+        if (rows?.length) break;
+      }
+    }
 
     if (!rows && opts.query) {
       const fallbackRows = keywordFallbackSearch(db, opts.query, { project: opts.project, type: opts.type, limit: opts.limit });

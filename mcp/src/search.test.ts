@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
 import { extractSnippet } from "./shared-index.js";
 
 
@@ -34,6 +34,28 @@ describe("buildRobustFtsQuery edge cases", () => {
     expect(result.length).toBeGreaterThan(0);
     // Terms without synonym matches are AND'd together
     expect(result).toContain("AND");
+  });
+});
+
+describe("buildRelaxedFtsQuery", () => {
+  it("builds a pairwise relaxed rescue query for longer prompts", () => {
+    const query = buildRelaxedFtsQuery("semantic search setup during init with ollama");
+    expect(query).toContain(" OR ");
+    expect(query).toContain(" AND ");
+    expect(query).toContain("\"semantic\"");
+  });
+
+  it("returns empty string when there are not enough clauses to relax", () => {
+    expect(buildRelaxedFtsQuery("auth cache")).toBe("");
+  });
+});
+
+describe("buildFtsQueryVariants", () => {
+  it("returns strict query first and appends a distinct relaxed fallback", () => {
+    const variants = buildFtsQueryVariants("alerts to external webhook instead of discord");
+    expect(variants.length).toBeGreaterThan(1);
+    expect(variants[0]).toContain("\"alerts\"");
+    expect(variants[1]).toContain(" OR ");
   });
 });
 
