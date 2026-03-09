@@ -309,15 +309,16 @@ Cortex now shares the same staged hybrid shape across hook injection and \texttt
 
 \subsection{Measured Retrieval Notes}
 
-An author-local run on March 9, 2026 used 10 real queries against a live cortex store with 130 embedded documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
+An author-local run on March 9, 2026 used 10 real queries against a live cortex store with 139 embedded documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
 \begin{itemize}
-  \item the lexical path averaged 15.85\,ms total latency (p50 11.9\,ms, p95 19.66\,ms);
-  \item the gated semantic path averaged 49.01\,ms total latency (p50 16.38\,ms, p95 123.07\,ms);
-  \item average injected payload moved from 222.6 tokens (lexical) to 231.1 tokens (gated semantic);
-  \item the persistent vector index reduced the average cosine-scoring candidate set from 130 eligible documents to 7.7 candidates, but the cosine stage itself remained below 0.1\,ms on this corpus.
+  \item the lexical path averaged 19.81\,ms total latency (p50 16.57\,ms, p95 24.62\,ms);
+  \item the gated semantic path averaged 66.97\,ms total latency (p50 18.12\,ms, p95 183.59\,ms);
+  \item average injected payload moved from 212.5 tokens (lexical) to 227.9 tokens (gated semantic);
+  \item the persistent vector index reduced the average cosine-scoring candidate set from 139 eligible documents to 8.7 candidates, but the cosine stage itself remained around 0.1\,ms on this corpus;
+  \item two benchmark queries still missed in both modes, so the current retrieval stack is improved but not exhaustive.
 \end{itemize}
 
-The interpretation is important: the current semantic layer is a recall tool, not a blanket speed claim. Gating and snippet compaction made the token overhead modest, but when vector recovery fires the dominant latency cost is still query embedding, not cosine math over 130 local vectors.
+The interpretation is important: the current semantic layer is a recall tool, not a blanket speed claim. Gating and snippet compaction made the token overhead modest, but when vector recovery fires the dominant latency cost is still query embedding, not cosine math over 139 local vectors.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -331,6 +332,8 @@ The interpretation is important: the current semantic layer is a recall tool, no
 \textbf{Ranking quality.} BM25 is not calibrated to agent-context relevance. The quality feedback loop requires usage history; new projects start cold.
 
 \textbf{Semantic recovery latency.} On small corpora, vector candidate pruning changes asymptotic behavior but does not automatically improve wall-clock latency. Query embedding remains the dominant cost when semantic recovery fires.
+
+\textbf{Residual retrieval misses.} Even with full local embedding coverage, some paraphrase-heavy or weakly-represented queries still miss. Current measurements should be treated as bounded evidence for the published corpus and query set, not as proof of full semantic completeness.
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided by \texttt{npx @alaarab/cortex init}; advanced policy configuration requires direct CLI commands.
 
