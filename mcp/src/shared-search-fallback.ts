@@ -6,6 +6,7 @@ import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
 import { classifyFile, normalizeIndexedContent, rowToDocWithRowid } from "./shared-index.js";
 import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { getEmbeddingCache } from "./shared-embedding-cache.js";
+import { getPersistentVectorIndex } from "./shared-vector-index.js";
 import * as fs from "fs";
 
 const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
@@ -284,7 +285,14 @@ export async function vectorFallback(
   });
   if (entries.length === 0) return [];
 
+  const eligiblePaths = new Set(entries.map((entry) => entry.path));
+  const vectorIndex = getPersistentVectorIndex(cortexPath);
+  vectorIndex.ensure(cache.getAllEntries());
+  const indexedPaths = vectorIndex.query(model, queryVec, limit, eligiblePaths);
+  const candidatePaths = indexedPaths.length > 0 ? new Set(indexedPaths) : eligiblePaths;
+
   const scored = entries
+    .filter((entry) => candidatePaths.has(entry.path))
     .map(e => ({ path: e.path, score: cosineSimilarity(queryVec, e.vec) }))
     .filter(e => e.score > 0.50)
     .sort((a, b) => b.score - a.score)

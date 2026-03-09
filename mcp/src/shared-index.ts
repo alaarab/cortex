@@ -415,6 +415,10 @@ function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
   return globAllFiles(cortexPath, profile).entries;
 }
 
+export function listIndexedDocumentPaths(cortexPath: string, profile?: string): string[] {
+  return globAllFiles(cortexPath, profile).filePaths;
+}
+
 export function normalizeIndexedContent(content: string, type: string, cortexPath: string, maxChars?: number): string {
   let normalized = content
     .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")

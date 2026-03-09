@@ -35,6 +35,7 @@
     "validate-docs": "bash scripts/validate-docs.sh",
     "test": "vitest run mcp/src",
     "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
+    "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {

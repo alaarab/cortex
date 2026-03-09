@@ -10,7 +10,7 @@ import {
   hookConfigPath,
   homeDir,
 } from "./shared.js";
-import { detectProject, findFtsCacheForPath } from "./shared-index.js";
+import { detectProject, findFtsCacheForPath, listIndexedDocumentPaths } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
@@ -132,6 +132,33 @@ export async function runStatus() {
     ? `${GREEN}ok${RESET} ${DIM}(${(ftsIndexSize / 1024).toFixed(0)} KB)${RESET}`
     : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
   console.log(`  ${BOLD}FTS index:${RESET} ${ftsLabel}`);
+
+  try {
+    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+    const ollamaUrl = getOllamaUrl();
+    if (!ollamaUrl) {
+      console.log(`  ${BOLD}Semantic:${RESET} ${DIM}disabled${RESET}`);
+    } else {
+      const available = await checkOllamaAvailable();
+      if (!available) {
+        console.log(`  ${BOLD}Semantic:${RESET} ${YELLOW}offline${RESET} ${DIM}(${ollamaUrl})${RESET}`);
+      } else {
+        const modelReady = await checkModelAvailable();
+        const model = getEmbeddingModel();
+        if (!modelReady) {
+          console.log(`  ${BOLD}Semantic:${RESET} ${YELLOW}model missing${RESET} ${DIM}(${model})${RESET}`);
+        } else {
+          const cache = getEmbeddingCache(cortexPath);
+          await cache.load().catch(() => {});
+          const coverage = cache.coverage(listIndexedDocumentPaths(cortexPath, profile || undefined));
+          console.log(`  ${BOLD}Semantic:${RESET} ${GREEN}ready${RESET} ${DIM}(${model}; ${formatEmbeddingCoverage(coverage)})${RESET}`);
+        }
+      }
+    }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 
   // Agent integration status
   function hasCortexEntry(filePath: string): boolean {

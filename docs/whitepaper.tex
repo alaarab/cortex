@@ -142,7 +142,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \end{tikzpicture}%
 }% end resizebox
 \end{center}
-\captionof{figure}{Cortex data flow. Every prompt cycle: keyword extraction \textrightarrow\ FTS5 search \textrightarrow\ trust filter \textrightarrow\ context injection. SessionStart warms the FTS5 cache (dashed). Writes (MCP tools or Stop hook) commit to git and pass through governance checks.}
+\captionof{figure}{Cortex data flow. Every prompt cycle: keyword extraction \textrightarrow\ lexical retrieval \textrightarrow\ optional vector recovery \textrightarrow\ trust filter \textrightarrow\ context injection. SessionStart warms the FTS5 cache (dashed); init can pre-warm semantic coverage when enabled. Writes (MCP tools or Stop hook) commit locally and schedule background sync when a remote exists.}
 \label{fig:arch}
 
 % ─── BODY: two columns for dense technical content ───────────────────────────
@@ -152,14 +152,14 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \subsection{Storage and Retrieval}
 Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
 
-Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search.
+Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
 
 \subsection{Lifecycle Automation}
 Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hooks}:
 \begin{enumerate}
   \item \texttt{SessionStart}: pulls the cortex repo and warms the index cache.
   \item \texttt{UserPromptSubmit}: extracts keywords, searches the index, and injects relevant snippets within the token budget. Fires a consolidation notice when thresholds are met.
-  \item \texttt{Stop}: auto-commits and pushes all cortex changes after every response.
+  \item \texttt{Stop}: auto-commits local cortex changes after every response and schedules background sync when a remote exists.
 \end{enumerate}
 
 \subsection{Token Budget and Progressive Disclosure}
@@ -305,7 +305,19 @@ Cortex is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback la
 \subsection{Hybrid Retrieval: Current State}
 \label{sec:hybrid}
 
-Cortex does not have a single unified hybrid pipeline. The manual search path (\texttt{search\_knowledge}) chains FTS5 \textrightarrow\ TF-IDF cosine fallback \textrightarrow\ optional embedding fallback when configured. The hook-injection path is more conservative: FTS5 ranking with a smaller heuristic fallback and tighter token budgets. Benchmark results from one path should not be generalized to the other.
+Cortex now shares the same staged hybrid shape across hook injection and \texttt{search\_knowledge}: FTS5 first, token-overlap fallback second, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{cortex-bench}.
+
+\subsection{Measured Retrieval Notes}
+
+An author-local run on March 9, 2026 used 10 real queries against a live cortex store with 130 embedded documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
+\begin{itemize}
+  \item the lexical path averaged 15.85\,ms total latency (p50 11.9\,ms, p95 19.66\,ms);
+  \item the gated semantic path averaged 49.01\,ms total latency (p50 16.38\,ms, p95 123.07\,ms);
+  \item average injected payload moved from 222.6 tokens (lexical) to 231.1 tokens (gated semantic);
+  \item the persistent vector index reduced the average cosine-scoring candidate set from 130 eligible documents to 7.7 candidates, but the cosine stage itself remained below 0.1\,ms on this corpus.
+\end{itemize}
+
+The interpretation is important: the current semantic layer is a recall tool, not a blanket speed claim. Gating and snippet compaction made the token overhead modest, but when vector recovery fires the dominant latency cost is still query embedding, not cosine math over 130 local vectors.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -318,7 +330,7 @@ Cortex does not have a single unified hybrid pipeline. The manual search path (\
 
 \textbf{Ranking quality.} BM25 is not calibrated to agent-context relevance. The quality feedback loop requires usage history; new projects start cold.
 
-\textbf{Read-path side effects.} Trust filtering can queue stale entries during retrieval, meaning some reads mutate repo state.
+\textbf{Semantic recovery latency.} On small corpora, vector candidate pruning changes asymptotic behavior but does not automatically improve wall-clock latency. Query embedding remains the dominant cost when semantic recovery fires.
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided by \texttt{npx @alaarab/cortex init}; advanced policy configuration requires direct CLI commands.
 
@@ -364,6 +376,7 @@ Managed alternatives are a reasonable choice for teams already fully committed t
 \bibitem{cortex-shared} Cortex: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}
 \bibitem{cortex-hooks} Cortex: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
 \bibitem{cortex-index} Cortex: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
+\bibitem{cortex-bench} Cortex: \texttt{scripts/bench-retrieval-modes.ts}. \url{https://github.com/alaarab/cortex/blob/main/scripts/bench-retrieval-modes.ts}
 \end{thebibliography}
 \end{multicols}
 

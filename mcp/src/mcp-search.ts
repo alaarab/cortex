@@ -29,12 +29,8 @@ import {
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
-import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
-import { embedText as sharedEmbedText, getCloudEmbeddingUrl, getEmbeddingModel } from "./shared-ollama.js";
 import { rankResults, shouldRunVectorExpansion } from "./cli-hooks-retrieval.js";
-
-const API_EMBEDDING_CANDIDATE_CAP = 500;
-const API_EMBEDDING_TIMEOUT_MS = 10_000;
+import { vectorFallback } from "./shared-search-fallback.js";
 
 /**
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
@@ -232,95 +228,6 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
-        // Cloud embedding fallback via CORTEX_EMBEDDING_API_URL (shared-ollama path).
-        // Activates when CORTEX_EMBEDDING_API_URL is set and results are sparse.
-        // This unifies the hook path (shared-ollama embedText) with the MCP search path.
-        const shouldRunEmbeddingFallback = shouldRunVectorExpansion(rows, query, maxResults);
-
-        if (rows && rows.length < maxResults && shouldRunEmbeddingFallback && getCloudEmbeddingUrl()) {
-          try {
-            const cloudWork = async () => {
-              const queryEmbed = await sharedEmbedText(query);
-              if (!queryEmbed) return;
-              const filterParts: string[] = [];
-              const filterParams: (string | number)[] = [];
-              if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
-              if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
-              const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-              const allDocs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
-              if (allDocs) {
-                const existingPaths = new Set(rows!.map(row => row.path));
-                const candidates = allDocs.filter(doc => !existingPaths.has(doc.path));
-                if (candidates.length > 0) {
-                  const scored: Array<{ row: DocRow; score: number }> = [];
-                  for (const doc of candidates) {
-                    const docEmbed = await sharedEmbedText(doc.content.slice(0, 2000));
-                    if (!docEmbed) continue;
-                    const sim = cosineSimilarity(queryEmbed, docEmbed);
-                    if (sim > 0.3) scored.push({ row: doc, score: sim });
-                  }
-                  scored.sort((a, b) => b.score - a.score);
-                  const toAdd = scored.slice(0, maxResults - rows!.length);
-                  if (toAdd.length > 0) {
-                    rows = [...rows!, ...toAdd.map(s => s.row)];
-                    usedFallback = true;
-                  }
-                }
-              }
-            };
-            await Promise.race([
-              cloudWork(),
-              new Promise<never>((_, reject) => setTimeout(() => reject(new Error("cloud embedding timeout")), API_EMBEDDING_TIMEOUT_MS)),
-            ]);
-          } catch (err: unknown) {
-            debugLog(`cloud embedding fallback failed: ${errorMessage(err)}`);
-          }
-        }
-
-        // API embedding fallback: if results < 3 and CORTEX_EMBEDDING_PROVIDER=api
-        if (rows && rows.length < 3 && shouldRunEmbeddingFallback && process.env.CORTEX_EMBEDDING_PROVIDER === "api") {
-          const apiKey = process.env.OPENAI_API_KEY || "";
-          const model = process.env.CORTEX_EMBEDDING_MODEL || "text-embedding-3-small";
-          if (apiKey) {
-            try {
-              const embeddingWork = async () => {
-                const queryEmbed = await getCachedEmbedding(cortexPath, query, apiKey, model);
-                const filterParts: string[] = [];
-                const filterParams: (string | number)[] = [];
-                if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
-                if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
-                const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-                const allDocs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
-                if (allDocs) {
-                  const existingPaths = new Set(rows!.map(row => row.path));
-                  const candidates = allDocs.filter(doc => !existingPaths.has(doc.path));
-                  if (candidates.length > 0) {
-                    const candidateTexts = candidates.map(doc => doc.content.slice(0, 2000));
-                    const candidateEmbeddings = await getCachedEmbeddings(cortexPath, candidateTexts, apiKey, model);
-                    const scored: Array<{ row: DocRow; score: number }> = [];
-                    for (let i = 0; i < candidates.length; i++) {
-                      const sim = cosineSimilarity(queryEmbed, candidateEmbeddings[i]);
-                      if (sim > 0.3) scored.push({ row: candidates[i], score: sim });
-                    }
-                    scored.sort((a, b) => b.score - a.score);
-                    const toAdd = scored.slice(0, maxResults - rows!.length);
-                    if (toAdd.length > 0) {
-                      rows = [...rows!, ...toAdd.map(s => s.row)];
-                      usedFallback = true;
-                    }
-                  }
-                }
-              };
-              await Promise.race([
-                embeddingWork(),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error("embedding timeout")), API_EMBEDDING_TIMEOUT_MS)),
-              ]);
-            } catch (err: unknown) {
-              debugLog(`API embedding fallback failed: ${errorMessage(err)}`);
-            }
-          }
-        }
-
         if (!rows) {
           // Keyword overlap fallback: scan all docs and rank by term overlap
           const fallbackRows = keywordFallbackSearch(db, query, { project: filterProject, type: filterType, limit: maxResults });
@@ -328,26 +235,28 @@ export function register(server: McpServer, ctx: McpContext): void {
             rows = fallbackRows;
             usedFallback = true;
           }
-
-          if (!rows) {
-            logSearchMiss(cortexPath, query, filterProject);
-            return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
-          }
         }
 
-        // Vector semantic fallback (uses pre-computed Ollama embeddings)
-        if (rows && rows.length < maxResults && shouldRunVectorExpansion(rows, query, maxResults)) {
+        // Vector semantic fallback: reuse the persistent embedding cache/index path
+        // instead of query-time random sampling and ad hoc re-embedding.
+        if (shouldRunVectorExpansion(rows, query, maxResults)) {
           try {
-            const { vectorFallback } = await import("./shared-search-fallback.js");
-            const alreadyFoundPaths = new Set(rows.map(row => row.path));
-            const vecRows = await vectorFallback(cortexPath, query, alreadyFoundPaths, maxResults - rows.length);
-            for (const vr of vecRows) {
-              rows.push(vr);
+            const existingRows = rows ?? [];
+            const alreadyFoundPaths = new Set(existingRows.map(row => row.path));
+            const vecRows = await vectorFallback(cortexPath, query, alreadyFoundPaths, maxResults - existingRows.length, filterProject);
+            const filteredVecRows = filterType ? vecRows.filter((row) => row.type === filterType) : vecRows;
+            if (filteredVecRows.length > 0) {
+              rows = [...existingRows, ...filteredVecRows];
+              usedFallback = true;
             }
-            if (vecRows.length > 0) usedFallback = true;
           } catch (err: unknown) {
             if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
           }
+        }
+
+        if (!rows || rows.length === 0) {
+          logSearchMiss(cortexPath, query, filterProject);
+          return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
         }
 
         // Filter by observation tag if requested

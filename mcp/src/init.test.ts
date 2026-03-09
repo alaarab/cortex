@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -21,6 +21,7 @@ import {
   runPostInitVerify,
   setHooksEnabledPreference,
   setMcpEnabledPreference,
+  warmSemanticSearch,
 } from "./init.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
@@ -512,6 +513,70 @@ describe("runInit walkthrough integration", () => {
     // But _walkthroughProject is only read when !hasExistingInstall, and yes=true means walkthrough is skipped
     // So we test the rename path directly by checking the init sets up correctly
     expect(fs.existsSync(cortexPath)).toBe(true);
+  });
+});
+
+describe("warmSemanticSearch", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("cortex-semantic-warmup-");
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    tmp.cleanup();
+  });
+
+  it("warms embeddings during init and reports warm/cold coverage", async () => {
+    const ollama = await import("./shared-ollama.js");
+    const index = await import("./shared-index.js");
+    const embeddingCache = await import("./shared-embedding-cache.js");
+    const startup = await import("./startup-embedding.js");
+    const vectorIndex = await import("./shared-vector-index.js");
+
+    vi.spyOn(ollama, "getOllamaUrl").mockReturnValue("http://localhost:11434");
+    vi.spyOn(ollama, "getEmbeddingModel").mockReturnValue("nomic-embed-text");
+    vi.spyOn(ollama, "checkOllamaAvailable").mockResolvedValue(true);
+    vi.spyOn(ollama, "checkModelAvailable").mockResolvedValue(true);
+
+    const fakeDb = {
+      run: () => {},
+      exec: () => [],
+      export: () => new Uint8Array(),
+      close: vi.fn(),
+    };
+    vi.spyOn(index, "buildIndex").mockResolvedValue(fakeDb as any);
+    vi.spyOn(index, "listIndexedDocumentPaths").mockReturnValue(["/a.md", "/b.md", "/c.md"]);
+
+    const cache = {
+      load: vi.fn().mockResolvedValue(undefined),
+      coverage: vi.fn()
+        .mockReturnValueOnce({ total: 3, embedded: 1, missing: 2, pct: 33, missingPct: 67, state: "warming" })
+        .mockReturnValueOnce({ total: 3, embedded: 3, missing: 0, pct: 100, missingPct: 0, state: "warm" }),
+      size: vi.fn().mockReturnValue(3),
+      getAllEntries: vi.fn().mockReturnValue([
+        { path: "/a.md", model: "nomic-embed-text", vec: [0.1] },
+        { path: "/b.md", model: "nomic-embed-text", vec: [0.2] },
+        { path: "/c.md", model: "nomic-embed-text", vec: [0.3] },
+      ]),
+    };
+    vi.spyOn(embeddingCache, "getEmbeddingCache").mockReturnValue(cache as any);
+    vi.spyOn(startup, "backgroundEmbedMissingDocs").mockResolvedValue(2);
+
+    const ensure = vi.fn();
+    vi.spyOn(vectorIndex, "getPersistentVectorIndex").mockReturnValue({ ensure } as any);
+
+    const message = await warmSemanticSearch(tmp.path, "personal");
+
+    expect(message).toContain("Semantic search warmed");
+    expect(message).toContain("nomic-embed-text");
+    expect(message).toContain("3/3 docs embedded (100% warm, 0% cold)");
+    expect(message).toContain("embedded 2 new docs during init");
+    expect(startup.backgroundEmbedMissingDocs).toHaveBeenCalledOnce();
+    expect(ensure).toHaveBeenCalledOnce();
+    expect(fakeDb.close).toHaveBeenCalledOnce();
   });
 });
 
