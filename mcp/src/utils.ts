@@ -194,18 +194,13 @@ function loadUserSynonyms(project?: string | null, cortexPath?: string | null): 
   };
 }
 
-// Build a defensive FTS5 MATCH query:
-// - sanitizes user input
-// - extracts bigrams and treats them as quoted phrases
-// - expands known synonyms (capped at 10 total terms)
-// - applies AND between core terms, with synonyms as OR alternatives
-export function buildRobustFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
+function buildFtsClauses(raw: string, project?: string | null, cortexPath?: string): string[] {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
 
   // Step 1: Sanitize — strip FTS5 special chars, enforce length limits
   const safe = sanitizeFts5Query(raw);
-  if (!safe) return "";
+  if (!safe) return [];
 
   // Step 2: Merge built-in and per-project synonym maps
   const synonymsMap = {
@@ -215,7 +210,7 @@ export function buildRobustFtsQuery(raw: string, project?: string | null, cortex
 
   // Step 3: Tokenize — split sanitized input into individual words (min length 2)
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
-  if (baseWords.length === 0) return "";
+  if (baseWords.length === 0) return [];
 
   // Step 4: Filter stop words — remove common English words that add no search signal
   const filteredTerms = baseWords.filter((t) => !STOP_WORDS.has(t.toLowerCase()));
@@ -261,7 +256,7 @@ export function buildRobustFtsQuery(raw: string, project?: string | null, cortex
     }
   }
 
-  if (dedupedTerms.length === 0) return "";
+  if (dedupedTerms.length === 0) return [];
 
   // Step 8: Expand synonyms — for up to MAX_SYNONYM_GROUPS core terms, add OR alternatives
   // from the synonym map; total term count is capped at MAX_TOTAL_TERMS to keep queries sane
@@ -293,5 +288,68 @@ export function buildRobustFtsQuery(raw: string, project?: string | null, cortex
   }
 
   // Step 9: Join all clauses with AND — every core term (with its OR synonyms) must match
-  return expandedClauses.join(" AND ");
+  return expandedClauses;
+}
+
+function clauseSignalScore(clause: string): number {
+  const normalized = clause
+    .replace(/[()"]/g, " ")
+    .replace(/\bOR\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!normalized) return 0;
+  const tokens = normalized.split(" ").filter(Boolean);
+  const longestToken = tokens.reduce((max, token) => Math.max(max, token.length), 0);
+  const phraseBonus = tokens.length > 1 ? 1.5 : 0;
+  const synonymBonus = /\bOR\b/i.test(clause) ? 0.5 : 0;
+  return longestToken + phraseBonus + synonymBonus;
+}
+
+// Build a defensive FTS5 MATCH query:
+// - sanitizes user input
+// - extracts bigrams and treats them as quoted phrases
+// - expands known synonyms (capped at 10 total terms)
+// - applies AND between core terms, with synonyms as OR alternatives
+export function buildRobustFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
+  const clauses = buildFtsClauses(raw, project, cortexPath);
+  if (clauses.length === 0) return "";
+  return clauses.join(" AND ");
+}
+
+// Build a relaxed lexical rescue query that matches any 2 of the most informative
+// clauses. This is only intended as a fallback when the stricter AND query returns
+// nothing; it trades precision for recall while staying in the FTS index.
+export function buildRelaxedFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
+  const clauses = buildFtsClauses(raw, project, cortexPath);
+  if (clauses.length < 3) return "";
+
+  const salientClauses = clauses
+    .map((clause, index) => ({ clause, index, score: clauseSignalScore(clause) }))
+    .sort((a, b) => {
+      const scoreDelta = b.score - a.score;
+      if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
+      return a.index - b.index;
+    })
+    .slice(0, Math.min(4, clauses.length))
+    .sort((a, b) => a.index - b.index);
+
+  if (salientClauses.length < 2) return "";
+
+  const combos: string[] = [];
+  for (let i = 0; i < salientClauses.length - 1; i++) {
+    for (let j = i + 1; j < salientClauses.length; j++) {
+      combos.push(`(${salientClauses[i].clause} AND ${salientClauses[j].clause})`);
+    }
+  }
+
+  return combos.join(" OR ");
+}
+
+export function buildFtsQueryVariants(raw: string, project?: string | null, cortexPath?: string): string[] {
+  const variants = [
+    buildRobustFtsQuery(raw, project, cortexPath),
+    buildRelaxedFtsQuery(raw, project, cortexPath),
+  ].filter(Boolean);
+  return [...new Set(variants)];
 }

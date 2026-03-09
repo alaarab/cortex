@@ -218,13 +218,17 @@ Search is intentionally staged so cheap lexical paths win first and vector work 
 ```
 Query
   |
-  +-> Tier 1: FTS5 (primary)
-  |     sanitize input -> expand synonyms (cap at 20 terms)
-  |     -> FTS5 MATCH with quoted OR terms
+  +-> Tier 1: Strict FTS5 (primary)
+  |     sanitize input -> expand synonyms (cap at 10 total terms)
+  |     -> FTS5 MATCH with quoted clauses
   |
-  +-> Tier 2: Token-overlap fallback
-  |     TF-IDF cosine similarity over indexed documents
-  |     cache invalidated on incremental index updates
+  +-> Tier 1b: Relaxed lexical rescue
+  |     if strict FTS misses, retry with "match any 2 salient clauses"
+  |     then use keyword-overlap rescue on zero-result paths
+  |
+  +-> Tier 2: Cheap local fallback scoring
+  |     hook path: bounded token-overlap windows
+  |     MCP search: bounded cosine fallback for sparse FTS results
   |
   +-> Tier 3: Vector recovery (when configured and lexical confidence is low)
   |     uses CORTEX_EMBEDDING_API_URL or Ollama
@@ -239,7 +243,7 @@ Query
         -> final ranked results
 ```
 
-Search and hook injection now share the same gating and reranking path. Benchmark notes still need to publish whether embeddings were enabled and what corpus was indexed, because the quality story depends on those conditions. On small corpora the vector index mainly improves asymptotic behavior and candidate pruning; the dominant latency cost is often still query embedding itself.
+Search and hook injection now share the same relaxed-lexical rescue, backlog-aware reranking, and vector gating policy even though the cheap middle fallback differs by entrypoint. On the author-local March 9, 2026 benchmark set, those lexical fixes were strong enough that the vector stage usually never ran, so lexical and hybrid timings converged while both modes hit every published query. On small corpora the vector index still matters for asymptotic behavior and candidate pruning, but the dominant semantic cost remains query embedding whenever the gate does open.
 
 ### FTS5 Index
 

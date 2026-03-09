@@ -305,20 +305,40 @@ Cortex is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback la
 \subsection{Hybrid Retrieval: Current State}
 \label{sec:hybrid}
 
-Cortex now shares the same staged hybrid shape across hook injection and \texttt{search\_knowledge}: FTS5 first, token-overlap fallback second, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{cortex-bench}.
+Cortex now shares the same staged hybrid policy across hook injection and \texttt{search\_knowledge}: strict FTS5 first, a relaxed lexical rescue query if the strict pass misses, cheap local fallback scoring, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{cortex-bench}.
+
+\subsection{Retrieval Complexity}
+
+The staged design matters because each retrieval tier has a different cost profile. The practical hot path is sublinear because the linear fallbacks are gated and bounded rather than paid on every request.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{p{3.1cm} p{3.9cm} p{6.2cm}}
+\toprule
+Stage & Cost shape & Notes \\
+\midrule
+Strict / relaxed FTS5 & index-driven, bounded by FTS postings rather than a full corpus scan & Default hot path. The relaxed query only runs after a zero-hit strict pass. \\
+Cheap lexical fallback & $O(W \cdot L)$ on hook injection, or bounded cosine on MCP search & Hook retrieval scores a capped sample/window set; MCP search only runs cosine on sparse FTS cases. \\
+Keyword overlap fallback & $O(N \cdot T)$ & Worst-case full scan over corpus size $N$ and query terms $T$; only used after earlier lexical passes fail. \\
+Vector recovery & $O(E_q + C \cdot d)$ after candidate pruning & $E_q$ is query-embedding latency, $C$ is the candidate set, and $d$ is embedding dimension. Before candidate pruning this was effectively $O(E_q + N \cdot d)$. \\
+Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and $S$ is the bounded snippet-selection budget. \\
+\bottomrule
+\end{tabular}
+\caption{Retrieval stage complexity. The common path stays cheap because expensive fallbacks are only invoked after weaker lexical signals.}
+\end{table}
 
 \subsection{Measured Retrieval Notes}
 
-An author-local run on March 9, 2026 used 10 real queries against a live cortex store with 139 embedded documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
+An author-local legacy run on March 9, 2026 used 10 real queries against a live cortex store with 139 indexed documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
 \begin{itemize}
-  \item the lexical path averaged 19.81\,ms total latency (p50 16.57\,ms, p95 24.62\,ms);
-  \item the gated semantic path averaged 66.97\,ms total latency (p50 18.12\,ms, p95 183.59\,ms);
-  \item average injected payload moved from 212.5 tokens (lexical) to 227.9 tokens (gated semantic);
-  \item the persistent vector index reduced the average cosine-scoring candidate set from 139 eligible documents to 8.7 candidates, but the cosine stage itself remained around 0.1\,ms on this corpus;
-  \item two benchmark queries still missed in both modes, so the current retrieval stack is improved but not exhaustive.
+  \item the lexical path averaged 15.93\,ms total latency (p50 11.91\,ms, p95 16.25\,ms);
+  \item the gated semantic path averaged 12.90\,ms total latency (p50 11.59\,ms, p95 16.52\,ms);
+  \item average injected payload was 341.8 tokens in both modes;
+  \item both modes hit all 10 queries, and the two previously published miss cases were resolved by the lexical fixes;
+  \item the persistent vector index reduced the average cosine-scoring candidate set to 8.7 candidates out of 139 eligible documents (6.3\% of the corpus).
 \end{itemize}
 
-The interpretation is important: the current semantic layer is a recall tool, not a blanket speed claim. Gating and snippet compaction made the token overhead modest, but when vector recovery fires the dominant latency cost is still query embedding, not cosine math over 139 local vectors.
+A widened 16-query run on the same warm store averaged 14.71\,ms lexical latency and 13.60\,ms gated-semantic latency, with both modes again hitting every query and producing no semantic-only recoveries. The interpretation is important: on this corpus the strengthened lexical path is now good enough that the vector gate usually stays closed, so the hybrid path inherits the same speed profile. The vector index still matters for worst-case scaling because it shrinks the cosine stage to 8.6\% of the eligible corpus on the widened run, but when semantic recovery does fire the dominant cost is still query embedding, not cosine math.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -333,7 +353,7 @@ The interpretation is important: the current semantic layer is a recall tool, no
 
 \textbf{Semantic recovery latency.} On small corpora, vector candidate pruning changes asymptotic behavior but does not automatically improve wall-clock latency. Query embedding remains the dominant cost when semantic recovery fires.
 
-\textbf{Residual retrieval misses.} Even with full local embedding coverage, some paraphrase-heavy or weakly-represented queries still miss. Current measurements should be treated as bounded evidence for the published corpus and query set, not as proof of full semantic completeness.
+\textbf{Residual retrieval uncertainty.} The published March 9 benchmark set no longer has misses, but that is still bounded evidence for one corpus and one query set. Broader paraphrase-heavy evaluation is still needed before making stronger semantic-completeness claims.
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided by \texttt{npx @alaarab/cortex init}; advanced policy configuration requires direct CLI commands.
 

@@ -10,6 +10,7 @@ process.env.CORTEX_PATH = tmpCortex;
 
 import { rankResults, searchDocuments } from "../cli-hooks.js";
 import type { DocRow } from "../shared-index.js";
+import { buildRobustFtsQuery } from "../utils.js";
 
 afterEach(() => {
   delete process.env.CORTEX_ACTOR;
@@ -47,6 +48,46 @@ describe("rankResults", () => {
     if (claudeIdx !== -1 && learningsIdx !== -1) {
       expect(learningsIdx).toBeLessThan(claudeIdx);
     }
+  });
+
+  it("keeps a single strong backlog result when it clearly beats non-backlog noise", () => {
+    const longBacklogPrefix = Array.from({ length: 28 }, (_, i) => `filler${i}`).join(" ");
+    const rows: DocRow[] = [
+      makeDocRow(
+        "alphalens",
+        "backlog.md",
+        "backlog",
+        `# backlog\n- ${longBacklogPrefix}\n- Route alerts to an external webhook instead of Discord for monitors`
+      ),
+      makeDocRow(
+        "projectcenter",
+        "FINDINGS.md",
+        "findings",
+        "## 2025-06-01\n- Discord notifications exist for project reports"
+      ),
+      makeDocRow(
+        "livemcp",
+        "restart-ableton.md",
+        "skill",
+        "Restart Ableton when a monitoring session hangs"
+      ),
+    ];
+
+    const ranked = rankResults(
+      rows,
+      "general",
+      null,
+      null,
+      tmpCortex,
+      null as any,
+      undefined,
+      "alerts to external webhook instead of discord"
+    );
+
+    expect(ranked.some((row) => row.type === "backlog")).toBe(true);
+    expect(ranked.findIndex((row) => row.type === "backlog")).toBeLessThan(
+      ranked.findIndex((row) => row.project === "livemcp")
+    );
   });
 });
 
@@ -99,5 +140,36 @@ describe("searchDocuments", () => {
     expect(result?.[0]?.path).toBe("/tmp/proj/FINDINGS.md");
     expect(sqlCalls.some((sql) => sql.includes("ORDER BY RANDOM"))).toBe(false);
     expect(sqlCalls.some((sql) => sql.includes("rowid >= ?"))).toBe(true);
+  });
+
+  it("retries with a relaxed FTS query when the strict lexical query misses", () => {
+    const strictQuery = buildRobustFtsQuery("semantic search setup during init with ollama");
+    const seenQueries: string[] = [];
+    const row = ["cortex", "FINDINGS.md", "findings", "Semantic opt-in during init should finish at the dependency level", "/tmp/cortex/FINDINGS.md"];
+    const mockDb = {
+      exec: (sql: string, params: any[]) => {
+        if (sql.includes("MATCH")) {
+          seenQueries.push(String(params[0]));
+          if (seenQueries.length === 1) return [];
+          return [{ columns: ["project", "filename", "type", "content", "path"], values: [row] }];
+        }
+        if (sql.includes("MIN(rowid)")) {
+          return [{ columns: ["min_rowid", "max_rowid", "count"], values: [[1, 1, 0]] }];
+        }
+        return [];
+      },
+    };
+
+    const result = searchDocuments(
+      mockDb as any,
+      strictQuery,
+      "semantic search setup during init with ollama",
+      "semantic search setup during init ollama",
+      null
+    );
+
+    expect(result?.[0]?.path).toBe("/tmp/cortex/FINDINGS.md");
+    expect(seenQueries).toHaveLength(2);
+    expect(seenQueries[1]).toContain(" OR ");
   });
 });

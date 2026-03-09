@@ -23,6 +23,12 @@ const DEFAULT_QUERIES = [
   "unauthenticated report download by filename",
   "alerts to external webhook instead of discord",
   "timesheet approval status updates service object",
+  "project naming lowercase enforcement",
+  "semantic search warm cold coverage in doctor status",
+  "manual consolidation instead of forced cap",
+  "sync state across status shell and review ui",
+  "background hook push in detached worker",
+  "skill deletion bug in cortex project",
 ];
 
 const DEFAULT_TOKEN_BUDGET = 550;
@@ -123,6 +129,30 @@ async function runMode(
   };
 }
 
+function summarizeModeRuns(
+  runs: Array<{
+    query: string;
+    totalMs: number;
+    searchMs: number;
+    usedTokens: number;
+    resultCount: number;
+    selectedCount: number;
+    topDoc: string | null;
+  }>
+) {
+  const hitRuns = runs.filter((run) => run.resultCount > 0);
+  const missQueries = runs.filter((run) => run.resultCount === 0).map((run) => run.query);
+  return {
+    totalMs: summarize(runs.map((run) => run.totalMs)),
+    searchMs: summarize(runs.map((run) => run.searchMs)),
+    usedTokens: summarize(runs.map((run) => run.usedTokens)),
+    hits: hitRuns.length,
+    misses: missQueries.length,
+    missQueries,
+    topDocs: runs.map(({ query, topDoc }) => ({ query, topDoc })),
+  };
+}
+
 async function runVectorMicrobench(
   cortexPath: string,
   queries: string[],
@@ -219,6 +249,8 @@ async function main() {
 
   const db = await buildIndex(cortexPath, process.env.CORTEX_PROFILE || undefined);
   try {
+    const countRows = db.exec("SELECT COUNT(*) FROM docs");
+    const corpusDocs = Number(countRows?.[0]?.values?.[0]?.[0] ?? 0);
     const runs = [];
     for (const query of queries) {
       runs.push(await runMode("lexical", cortexPath, db, query, project));
@@ -228,6 +260,16 @@ async function main() {
     const lexicalRuns = runs.filter((run) => run.mode === "lexical");
     const hybridRuns = runs.filter((run) => run.mode === "hybrid_gated");
     const vectorIndex = await runVectorMicrobench(cortexPath, queries, project);
+    const semanticOnlyHits = queries.filter((query) => {
+      const lexical = lexicalRuns.find((run) => run.query === query);
+      const hybrid = hybridRuns.find((run) => run.query === query);
+      return (lexical?.resultCount ?? 0) === 0 && (hybrid?.resultCount ?? 0) > 0;
+    });
+    const lexicalOnlyHits = queries.filter((query) => {
+      const lexical = lexicalRuns.find((run) => run.query === query);
+      const hybrid = hybridRuns.find((run) => run.query === query);
+      return (lexical?.resultCount ?? 0) > 0 && (hybrid?.resultCount ?? 0) === 0;
+    });
 
     const output = {
       runDate: new Date().toISOString(),
@@ -238,25 +280,34 @@ async function main() {
         nodeVersion: process.version,
         cortexPath,
         project: project ?? null,
+        corpusDocs,
         queryCount: queries.length,
         tokenBudget: DEFAULT_TOKEN_BUDGET,
         lineBudget: DEFAULT_LINE_BUDGET,
         charBudget: DEFAULT_CHAR_BUDGET,
         vectorMicrobenchIterations: VECTOR_MICROBENCH_ITERATIONS,
       },
-      lexical: {
-        totalMs: summarize(lexicalRuns.map((run) => run.totalMs)),
-        searchMs: summarize(lexicalRuns.map((run) => run.searchMs)),
-        usedTokens: summarize(lexicalRuns.map((run) => run.usedTokens)),
-        topDocs: lexicalRuns.map(({ query, topDoc }) => ({ query, topDoc })),
+      lexical: summarizeModeRuns(lexicalRuns),
+      hybridGated: summarizeModeRuns(hybridRuns),
+      comparison: {
+        semanticOnlyHits,
+        lexicalOnlyHits,
+        hitDelta: semanticOnlyHits.length - lexicalOnlyHits.length,
+        topDocChanges: queries
+          .map((query) => {
+            const lexical = lexicalRuns.find((run) => run.query === query);
+            const hybrid = hybridRuns.find((run) => run.query === query);
+            if (!lexical || !hybrid || lexical.topDoc === hybrid.topDoc) return null;
+            return { query, lexicalTopDoc: lexical.topDoc, hybridTopDoc: hybrid.topDoc };
+          })
+          .filter(Boolean),
       },
-      hybridGated: {
-        totalMs: summarize(hybridRuns.map((run) => run.totalMs)),
-        searchMs: summarize(hybridRuns.map((run) => run.searchMs)),
-        usedTokens: summarize(hybridRuns.map((run) => run.usedTokens)),
-        topDocs: hybridRuns.map(({ query, topDoc }) => ({ query, topDoc })),
+      vectorIndex: {
+        ...vectorIndex,
+        candidateFractionPct: vectorIndex.eligibleDocs > 0
+          ? Number(((vectorIndex.avgCandidates / vectorIndex.eligibleDocs) * 100).toFixed(1))
+          : 0,
       },
-      vectorIndex,
       runs,
     };
 
@@ -270,6 +321,9 @@ async function main() {
     console.log(`hybrid total ms avg/p50/p95: ${output.hybridGated.totalMs.avg}/${output.hybridGated.totalMs.p50}/${output.hybridGated.totalMs.p95}`);
     console.log(`lexical used tokens avg: ${output.lexical.usedTokens.avg}`);
     console.log(`hybrid used tokens avg: ${output.hybridGated.usedTokens.avg}`);
+    console.log(`lexical hits/misses: ${output.lexical.hits}/${output.lexical.misses}`);
+    console.log(`hybrid hits/misses: ${output.hybridGated.hits}/${output.hybridGated.misses}`);
+    console.log(`semantic-only hits: ${output.comparison.semanticOnlyHits.length}`);
     console.log(`vector candidates avg: ${vectorIndex.avgCandidates}/${vectorIndex.eligibleDocs} eligible docs`);
     console.log(`vector full-scan avg ms: ${vectorIndex.fullScanAvgMs}`);
     console.log(`vector indexed avg ms: ${vectorIndex.indexedAvgMs}`);
