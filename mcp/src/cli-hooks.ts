@@ -200,7 +200,7 @@ export async function handleHookPrompt() {
       const marker = sessionMarker(getCortexPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
-          await handleExtractMemories(detectedProject, cwd, true);
+          await handleExtractMemories(detectedProject, cwd, true, sessionId);
           fs.writeFileSync(marker, "");
         } catch (err: unknown) {
           debugLog(`auto-extract failed for ${detectedProject}: ${errorMessage(err)}`);
