@@ -54,13 +54,13 @@ describe("rankResults", () => {
     const longBacklogPrefix = Array.from({ length: 28 }, (_, i) => `filler${i}`).join(" ");
     const rows: DocRow[] = [
       makeDocRow(
-        "alphalens",
+        "sampleatlas",
         "backlog.md",
         "backlog",
         `# backlog\n- ${longBacklogPrefix}\n- Route alerts to an external webhook instead of Discord for monitors`
       ),
       makeDocRow(
-        "projectcenter",
+        "sampleportal",
         "FINDINGS.md",
         "findings",
         "## 2025-06-01\n- Discord notifications exist for project reports"
