@@ -24,6 +24,7 @@ import {
   truncateLine,
   lineViewport,
   shellHelpText,
+  gradient,
 } from "./shell-render.js";
 import {
   SUB_VIEWS,
@@ -58,12 +59,12 @@ export function renderTabBar(state: ShellState): string {
 
   if (state.view === "Health") {
     const label = `${TAB_ICONS.Health} Health`;
-    return `  ${style.boldCyan(label)}\n${separator(cols)}`;
+    return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
   }
 
   if (state.view === "Projects") {
     const label = `${TAB_ICONS.Projects} Projects`;
-    const tabLine = ` ${style.boldCyan(label)} `;
+    const tabLine = ` ${style.boldMagenta(label)} `;
     return `${tabLine}\n${separator(cols)}`;
   }
 
@@ -74,7 +75,7 @@ export function renderTabBar(state: ShellState): string {
     const icon = TAB_ICONS[v] || "";
     const label = `${icon} ${v}`;
     return v === state.view
-      ? ` ${style.boldCyan(label)} `
+      ? ` ${style.boldMagenta(label)} `
       : ` ${style.dim(label)} `;
   });
 
@@ -184,7 +185,7 @@ export function renderProjectsView(ctx: ViewContext, cursor: number, height: num
 
   if (allLines.length > usableHeight) {
     const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
+    lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
   }
 
   return lines;
@@ -331,7 +332,7 @@ export function renderBacklogView(ctx: ViewContext, cursor: number, height: numb
   if (allLines.length > usableHeight) {
     const navigable = active.length + queue.length;
     const pct = navigable <= 1 ? 100 : Math.round((cursor / Math.max(navigable - 1, 1)) * 100);
-    lines.push(style.dim(`  ─── ${cursor + 1}/${navigable}  ${pct}%`));
+    lines.push(style.dim(`  ━━━${cursor + 1}/${navigable}  ${pct}%`));
   }
 
   return { lines, subsectionsCache: newCache };
@@ -390,7 +391,7 @@ export function renderFindingsView(ctx: ViewContext, cursor: number, height: num
 
   if (allLines.length > usableHeight) {
     const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
+    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
   }
 
   return vp.lines;
@@ -469,7 +470,7 @@ export function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: 
 
   if (allLines.length > usableHeight) {
     const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
+    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
   }
 
   return vp.lines;
@@ -545,7 +546,7 @@ export function renderSkillsView(ctx: ViewContext, cursor: number, height: numbe
 
   if (allLines.length > usableHeight) {
     const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
+    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
   }
 
   return vp.lines;
@@ -695,7 +696,7 @@ export function renderHealthView(
   const vp = lineViewport(allLines, clampedCursor, clampedCursor, height - 1, currentScroll);
   setScroll(vp.scrollStart);
   const pct = allLines.length <= 1 ? 100 : Math.round((clampedCursor / (allLines.length - 1)) * 100);
-  vp.lines.push(style.dim(`  ─── ${clampedCursor + 1}/${allLines.length}  ${pct}%`));
+  vp.lines.push(style.dim(`  ━━━${clampedCursor + 1}/${allLines.length}  ${pct}%`));
   return { lines: vp.lines, lineCount };
 }
 
@@ -723,7 +724,7 @@ export async function renderShell(
   const filterLabel = ctx.state.filter
     ? `  ${style.dim("·")}  ${style.yellow("/" + ctx.state.filter)}`
     : "";
-  const header = `  ${style.boldCyan("◆ cortex")}${projectLabel}${filterLabel}`;
+  const header = `  ${gradient("◆ cortex")}${projectLabel}${filterLabel}`;
   const tabBar = renderTabBar(ctx.state);
 
   let contentLines: string[];
