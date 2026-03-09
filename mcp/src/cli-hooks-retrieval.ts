@@ -35,6 +35,8 @@ const SEMANTIC_FALLBACK_WINDOW_COUNT = 4;
 
 /** Minimum overlap score for a doc to be included in semantic fallback results. */
 const SEMANTIC_OVERLAP_MIN_SCORE = 0.25;
+const VECTOR_FALLBACK_SKIP_COUNT = 3;
+const VECTOR_FALLBACK_STRONG_MATCH_SCORE = 0.2;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -134,6 +136,11 @@ function overlapScore(queryTokens: string[], content: string): number {
   }
   const denominator = Math.max(2, Math.min(queryTokens.length, 10));
   return matched / denominator;
+}
+
+function docOverlapScore(queryTokens: string[], doc: DocRow): number {
+  const corpus = `${doc.project} ${doc.filename} ${doc.type} ${doc.path}\n${doc.content.slice(0, 5000)}`;
+  return overlapScore(queryTokens, corpus);
 }
 
 function semanticFallbackSeed(text: string): number {
@@ -254,8 +261,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
 
   const scored = docs
     .map((doc) => {
-      const corpus = `${doc.project} ${doc.filename} ${doc.type} ${doc.path}\n${doc.content.slice(0, 5000)}`;
-      const score = overlapScore(terms, corpus);
+      const score = docOverlapScore(terms, doc);
       return { doc, score };
     })
     .filter((x) => x.score >= SEMANTIC_OVERLAP_MIN_SCORE)
@@ -264,6 +270,25 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
     .map((x) => x.doc);
 
   return scored;
+}
+
+export function shouldRunVectorExpansion(
+  rows: DocRow[] | null,
+  prompt: string,
+  desiredResults = VECTOR_FALLBACK_SKIP_COUNT
+): boolean {
+  if (!rows || rows.length === 0) return true;
+  const targetCount = Math.max(2, Math.min(VECTOR_FALLBACK_SKIP_COUNT, desiredResults));
+  if (rows.length >= targetCount) return false;
+
+  const queryTokens = tokenizeForOverlap(prompt);
+  if (queryTokens.length === 0) return false;
+
+  const bestOverlap = rows
+    .slice(0, 2)
+    .reduce((maxScore, doc) => Math.max(maxScore, docOverlapScore(queryTokens, doc)), 0);
+
+  return bestOverlap < VECTOR_FALLBACK_STRONG_MATCH_SCORE;
 }
 
 function approximateTokens(text: string): number {
@@ -376,7 +401,7 @@ export async function searchDocumentsAsync(
 
   // Tier 3: Real vector search — only if embeddings are available and cortexPath provided
   const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());
-  if (!cortexPath || !hasVectorBackend) {
+  if (!cortexPath || !hasVectorBackend || !shouldRunVectorExpansion(syncResult, `${prompt}\n${keywords}`)) {
     return syncResult;
   }
 
@@ -482,7 +507,8 @@ export function rankResults(
   cortexPathLocal: string,
   db: SqlJsDatabase,
   cwd?: string,
-  query?: string
+  query?: string,
+  opts?: { filterType?: string | null; skipBacklogFilter?: boolean }
 ): DocRow[] {
   let ranked = [...rows];
 
@@ -593,7 +619,7 @@ export function rankResults(
 
   ranked = ranked.slice(0, 8);
 
-  if (intent !== "build") {
+  if (intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog") {
     ranked = ranked.filter((r) => r.type !== "backlog");
   }
 

@@ -1835,16 +1835,16 @@ describe("appendReviewQueue", () => {
 describe("getProjectDirs", () => {
   it("lists directories excluding hidden dirs, profiles, and templates", () => {
     const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "projB"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-b"), { recursive: true });
     fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "templates"), { recursive: true });
 
     const dirs = getProjectDirs(cortex);
     const names = dirs.map(d => path.basename(d));
-    expect(names).toContain("projA");
-    expect(names).toContain("projB");
+    expect(names).toContain("proj-a");
+    expect(names).toContain("proj-b");
     expect(names).not.toContain(".governance");
     expect(names).not.toContain("profiles");
     expect(names).not.toContain("templates");
@@ -1852,45 +1852,45 @@ describe("getProjectDirs", () => {
 
   it("excludes global directory from project listing", () => {
     const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
 
     const dirs = getProjectDirs(cortex);
     const names = dirs.map(d => path.basename(d));
-    expect(names).toContain("projA");
+    expect(names).toContain("proj-a");
     expect(names).not.toContain("global");
   });
 
   it("uses profile to filter projects", () => {
     const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "projB"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-b"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.writeFileSync(
       path.join(cortex, "profiles", "test.yaml"),
-      yaml.dump({ name: "test", projects: ["projA"] })
+      yaml.dump({ name: "test", projects: ["proj-a"] })
     );
 
     const dirs = getProjectDirs(cortex, "test");
     const names = dirs.map(d => path.basename(d));
-    expect(names).toContain("projA");
-    expect(names).not.toContain("projB");
+    expect(names).toContain("proj-a");
+    expect(names).not.toContain("proj-b");
   });
 
   it("includes shared/org dirs alongside profile projects", () => {
     const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "shared"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "org"), { recursive: true });
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.writeFileSync(
       path.join(cortex, "profiles", "myprof.yaml"),
-      yaml.dump({ name: "myprof", projects: ["projA"] })
+      yaml.dump({ name: "myprof", projects: ["proj-a"] })
     );
 
     const dirs = getProjectDirs(cortex, "myprof");
     const names = dirs.map(d => path.basename(d));
-    expect(names).toContain("projA");
+    expect(names).toContain("proj-a");
     expect(names).toContain("shared");
     expect(names).toContain("org");
   });

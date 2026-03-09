@@ -437,7 +437,7 @@ async function handleSearch(opts: SearchOptions) {
     const params: Array<string | number> = [];
 
     if (opts.query) {
-      const safeQuery = buildRobustFtsQuery(opts.query, opts.project);
+      const safeQuery = buildRobustFtsQuery(opts.query, opts.project, getCortexPath());
       if (!safeQuery) {
         console.error("Query empty after sanitization.");
         process.exit(1);

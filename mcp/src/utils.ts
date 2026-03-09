@@ -113,15 +113,12 @@ export function extractKeywords(text: string): string {
 }
 
 // Validate a project name: lowercase letters/numbers with optional hyphen/underscore separators.
-// Validate a project name: no path separators, no dot-dot segments, no null bytes, max 100 chars
+// Must not start with a hyphen (breaks CLI flags) or dot (hidden dirs). Max 100 chars.
+// Internal keys like "native:-home" bypass this — they never go through user-facing validation.
 export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
   if (name.length > 100) return false;
-  if (name === "." || name === "..") return false;
-  if (/^\./.test(name)) return false;  // hidden dirs
-  if (/^-/.test(name)) return false;   // breaks CLI flags
-  if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
-  return true;
+  return /^[a-z0-9][a-z0-9_-]*$/.test(name);
 }
 
 // Resolve a path inside the cortex directory and reject anything that escapes it
@@ -183,14 +180,14 @@ function parseSynonymsYaml(filePath: string): Record<string, string[]> {
   }
 }
 
-function loadUserSynonyms(project?: string | null): Record<string, string[]> {
-  const cortexPath = findCortexPath();
-  if (!cortexPath) return {};
+function loadUserSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+  const resolved = cortexPath ?? findCortexPath();
+  if (!resolved) return {};
 
-  const globalSynonyms = parseSynonymsYaml(path.join(cortexPath, "global", "synonyms.yaml"));
+  const globalSynonyms = parseSynonymsYaml(path.join(resolved, "global", "synonyms.yaml"));
   if (!project || !isValidProjectName(project)) return globalSynonyms;
 
-  const projectSynonyms = parseSynonymsYaml(path.join(cortexPath, project, "synonyms.yaml"));
+  const projectSynonyms = parseSynonymsYaml(path.join(resolved, project, "synonyms.yaml"));
   return {
     ...globalSynonyms,
     ...projectSynonyms,
@@ -202,7 +199,7 @@ function loadUserSynonyms(project?: string | null): Record<string, string[]> {
 // - extracts bigrams and treats them as quoted phrases
 // - expands known synonyms (capped at 10 total terms)
 // - applies AND between core terms, with synonyms as OR alternatives
-export function buildRobustFtsQuery(raw: string, project?: string | null): string {
+export function buildRobustFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
 
@@ -213,7 +210,7 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
   // Step 2: Merge built-in and per-project synonym maps
   const synonymsMap = {
     ...SYNONYMS,
-    ...loadUserSynonyms(project),
+    ...loadUserSynonyms(project, cortexPath),
   };
 
   // Step 3: Tokenize — split sanitized input into individual words (min length 2)

@@ -31,7 +31,7 @@ import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
 import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
 import { embedText as sharedEmbedText, getCloudEmbeddingUrl, getEmbeddingModel } from "./shared-ollama.js";
-import { rankResults } from "./cli-hooks-retrieval.js";
+import { rankResults, shouldRunVectorExpansion } from "./cli-hooks-retrieval.js";
 
 const API_EMBEDDING_CANDIDATE_CAP = 500;
 const API_EMBEDDING_TIMEOUT_MS = 10_000;
@@ -172,7 +172,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (filterProject && !isValidProjectName(filterProject)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
-        const safeQuery = buildRobustFtsQuery(query, filterProject);
+        const safeQuery = buildRobustFtsQuery(query, filterProject, cortexPath);
 
         if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
 
@@ -235,7 +235,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         // Cloud embedding fallback via CORTEX_EMBEDDING_API_URL (shared-ollama path).
         // Activates when CORTEX_EMBEDDING_API_URL is set and results are sparse.
         // This unifies the hook path (shared-ollama embedText) with the MCP search path.
-        if (rows && rows.length < maxResults && getCloudEmbeddingUrl()) {
+        const shouldRunEmbeddingFallback = shouldRunVectorExpansion(rows, query, maxResults);
+
+        if (rows && rows.length < maxResults && shouldRunEmbeddingFallback && getCloudEmbeddingUrl()) {
           try {
             const cloudWork = async () => {
               const queryEmbed = await sharedEmbedText(query);
@@ -276,7 +278,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // API embedding fallback: if results < 3 and CORTEX_EMBEDDING_PROVIDER=api
-        if (rows && rows.length < 3 && process.env.CORTEX_EMBEDDING_PROVIDER === "api") {
+        if (rows && rows.length < 3 && shouldRunEmbeddingFallback && process.env.CORTEX_EMBEDDING_PROVIDER === "api") {
           const apiKey = process.env.OPENAI_API_KEY || "";
           const model = process.env.CORTEX_EMBEDDING_MODEL || "text-embedding-3-small";
           if (apiKey) {
@@ -334,7 +336,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Vector semantic fallback (uses pre-computed Ollama embeddings)
-        if (rows && rows.length < maxResults) {
+        if (rows && rows.length < maxResults && shouldRunVectorExpansion(rows, query, maxResults)) {
           try {
             const { vectorFallback } = await import("./shared-search-fallback.js");
             const alreadyFoundPaths = new Set(rows.map(row => row.path));
@@ -425,7 +427,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           cortexPath,
           db,
           undefined,
-          query
+          query,
+          { skipBacklogFilter: true, filterType: filterType ?? null }
         ).slice(0, maxResults);
 
         const results = rows.map((row) => {
