@@ -12,9 +12,9 @@ import {
   entryScoreKey,
 } from "./shared-governance.js";
 import { detectProject } from "./shared-index.js";
-import { addFindingToFile } from "./shared-content.js";
 import { commandExists } from "./hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage } from "./utils.js";
+import { appendFindingJournal, compactFindingJournals } from "./finding-journal.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -251,7 +251,7 @@ export function scoreFindingCandidate(subject: string, body: string): { score: n
 
 // ── handleExtractMemories ────────────────────────────────────────────────────
 
-export async function handleExtractMemories(projectArg?: string, cwdArg?: string, silent: boolean = false) {
+export async function handleExtractMemories(projectArg?: string, cwdArg?: string, silent: boolean = false, sessionId?: string) {
   const project = inferProject(projectArg);
   if (!project) {
     if (!silent) console.error("Usage: cortex extract-memories <project>");
@@ -280,7 +280,8 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     if (!candidate) continue;
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
     if (candidate.score >= threshold) {
-      addFindingToFile(getCortexPath(), project, line, {
+      appendFindingJournal(getCortexPath(), project, line, {
+        sessionId,
         repo: repoRoot,
         commit: rec.hash,
       });
@@ -298,7 +299,8 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
       recordFeedback(getCortexPath(), key, "regression");
     }
     if (c.score >= threshold) {
-      addFindingToFile(getCortexPath(), project, line, {
+      appendFindingJournal(getCortexPath(), project, line, {
+        sessionId,
         repo: repoRoot,
         commit: c.commit,
         file: c.file,
@@ -308,6 +310,11 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
       const qr2 = appendReviewQueue(getCortexPath(), project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
       if (qr2.ok) queued += qr2.data;
     }
+  }
+
+  if (!silent) {
+    const compacted = compactFindingJournals(getCortexPath(), project);
+    debugLog(`extract-memories compacted journals for ${project}: added=${compacted.added} skipped=${compacted.skipped} failed=${compacted.failed}`);
   }
 
   flushEntryScores(getCortexPath());

@@ -21,7 +21,6 @@ import {
   detectProject,
 } from "./shared-index.js";
 import {
-  addFindingToFile,
   autoMergeConflicts,
 } from "./shared-content.js";
 import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
@@ -34,6 +33,7 @@ import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
 import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
+import { appendFindingJournal } from "./finding-journal.js";
 import {
   buildIndex,
   queryRows,
@@ -608,7 +608,9 @@ export async function handleHookStop() {
         if (activeProject) {
           const insights = extractConversationInsights(captureInput);
           for (const insight of insights) {
-            addFindingToFile(getCortexPath(), activeProject, `[pattern] ${insight}`);
+            appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
+              sessionId: `hook-stop-${Date.now()}`,
+            });
             debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
           }
         }

@@ -24,6 +24,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
+import { compactFindingJournals } from "./finding-journal.js";
 
 const profile = process.env.CORTEX_PROFILE || "";
 
@@ -562,6 +563,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
   const markers = qualityMarkers(getCortexPath());
   const startedAt = new Date().toISOString();
   try {
+    const compacted = compactFindingJournals(getCortexPath(), projectArg);
     const governance = await handleGovernMemories(projectArg, true);
     const pruneResult = pruneDeadMemories(getCortexPath(), projectArg);
     const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
@@ -581,13 +583,13 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       lastGovernance: {
         at: startedAt,
         status: "ok",
-        detail: `projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}; ${pruneMsg}`,
+        detail: `journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed}; projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}; ${pruneMsg}`,
       },
     });
     appendAuditLog(
       getCortexPath(),
       "background_maintenance",
-      `status=ok projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
+      `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
     );
   } catch (err: unknown) {
     const errMsg = errorMessage(err);
