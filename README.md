@@ -59,7 +59,7 @@ After init, you'll see something like:
 
 **Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
 
-**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for better paraphrase recall in some paths. That's useful when vocabulary mismatch matters, but it adds runtime dependencies and more moving pieces. The default story is still local markdown + git + FTS5.
+**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. That helps paraphrase recall, but it is not a blanket speed win and it adds runtime dependencies plus more moving pieces. The default story is still local markdown + git + FTS5.
 
 ### Sync across machines
 
@@ -313,7 +313,7 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 | Tool | What it does |
 |------|-------------|
-| `search_knowledge` | Hybrid search (FTS5 + token-overlap + vector) with synonym expansion and recency boost. |
+| `search_knowledge` | Lexical-first retrieval (FTS5 + token-overlap) with optional gated vector recovery, synonym expansion, and recency boost. |
 | `get_memory_detail` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |

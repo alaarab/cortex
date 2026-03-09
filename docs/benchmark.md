@@ -104,18 +104,19 @@ The bundled runners now emit a `conditions` block in their JSON output. If you p
 
 ## March 9, 2026 Author-Local Retrieval Run
 
-One live-store run against the author's `~/.cortex` corpus (130 embedded docs, 10 real queries, Node `v24.13.0`) produced:
+The final post-fix live-store run against the author's `~/.cortex` corpus (139 embedded docs, 10 real queries, Node `v24.13.0`) produced:
 
-- lexical path: `15.85ms` average total latency, `11.9ms` p50, `19.66ms` p95
-- gated semantic path: `49.01ms` average total latency, `16.38ms` p50, `123.07ms` p95
-- lexical injected tokens: `222.6` average
-- gated semantic injected tokens: `231.1` average
-- persistent vector candidate pruning: `7.7` average candidates out of `130` eligible docs
+- lexical path: `19.81ms` average total latency, `16.57ms` p50, `24.62ms` p95
+- gated semantic path: `66.97ms` average total latency, `18.12ms` p50, `183.59ms` p95
+- lexical injected tokens: `212.5` average
+- gated semantic injected tokens: `227.9` average
+- persistent vector candidate pruning: `8.7` average candidates out of `139` eligible docs
+- benchmark misses that remained in both modes: `semantic search setup during init with ollama`, `alerts to external webhook instead of discord`
 
 Interpretation:
-- local semantic recovery improved recall on some paraphrase-heavy misses, but it was not a raw latency win on this corpus
-- after gating and snippet compaction, token inflation was modest (`+8.5` tokens average instead of the earlier much larger semantic tail)
-- the persistent vector index changed the scoring workload shape substantially, but on a 130-doc corpus the cosine stage was already below `0.1ms`, so query embedding latency still dominated
+- local semantic recovery is still a recall tool, not a raw latency win on this corpus
+- after gating and snippet compaction, token inflation stayed modest (`+15.4` tokens average)
+- the persistent vector index changed the scoring workload shape substantially, but on a 139-doc corpus the cosine stage was still around `0.1ms`, so query embedding latency remained the dominant semantic cost
 
 ## Results Table
 
