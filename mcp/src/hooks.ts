@@ -28,7 +28,7 @@ export function detectInstalledTools(): Set<string> {
   if (commandExists("github-copilot-cli") || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))) {
     tools.add("copilot");
   }
-  if (commandExists("cursor") || fs.existsSync(homePath(".cursor"))) {
+  if (commandExists("cursor")) {
     tools.add("cursor");
   }
   if (commandExists("codex") || fs.existsSync(homePath(".codex"))) {
