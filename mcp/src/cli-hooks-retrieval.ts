@@ -37,6 +37,14 @@ const SEMANTIC_FALLBACK_WINDOW_COUNT = 4;
 const SEMANTIC_OVERLAP_MIN_SCORE = 0.25;
 const VECTOR_FALLBACK_SKIP_COUNT = 3;
 const VECTOR_FALLBACK_STRONG_MATCH_SCORE = 0.2;
+const LOCAL_QUERY_OVERLAP_WEIGHT = 3.5;
+const CROSS_PROJECT_QUERY_OVERLAP_WEIGHT = 1.35;
+const WEAK_CROSS_PROJECT_OVERLAP_MAX = 0.18;
+const WEAK_CROSS_PROJECT_OVERLAP_PENALTY = 0.75;
+const LOW_FOCUS_SNIPPET_SCORE = 0.3;
+const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
+const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
+const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -511,6 +519,7 @@ export function rankResults(
   opts?: { filterType?: string | null; skipBacklogFilter?: boolean }
 ): DocRow[] {
   let ranked = [...rows];
+  const queryTokens = query ? tokenizeForOverlap(query) : [];
 
   if (detectedProject) {
     const localByType = new Set(
@@ -562,7 +571,16 @@ export function rankResults(
   // Precompute per-doc ranking metadata once — avoids recomputing inside sort comparator.
   const changedFiles = gitCtx?.changedFiles || new Set<string>();
   const FILE_MATCH_BOOST = 1.5;
-  type ScoredDoc = { doc: DocRow; score: number; fileMatch: boolean; globBoost: number; qualityMult: number; entity: number; date: string };
+  type ScoredDoc = {
+    doc: DocRow;
+    score: number;
+    fileMatch: boolean;
+    globBoost: number;
+    qualityMult: number;
+    entity: number;
+    date: string;
+    queryOverlap: number;
+  };
   const scored: ScoredDoc[] = ranked.map((doc) => {
     const globBoost = getProjectGlobBoost(cortexPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
@@ -571,6 +589,16 @@ export function rankResults(
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
     const qualityMult = getQualityMultiplier(cortexPathLocal, key);
+    const queryOverlap = queryTokens.length > 0 ? docOverlapScore(queryTokens, doc) : 0;
+    const queryOverlapWeight = detectedProject && doc.project === detectedProject
+      ? LOCAL_QUERY_OVERLAP_WEIGHT
+      : CROSS_PROJECT_QUERY_OVERLAP_WEIGHT;
+    const weakCrossProjectPenalty = detectedProject
+      && doc.project !== detectedProject
+      && queryTokens.length > 0
+      && queryOverlap < WEAK_CROSS_PROJECT_OVERLAP_MAX
+      ? WEAK_CROSS_PROJECT_OVERLAP_PENALTY
+      : 0;
     const score = Math.round((
       intentBoost(intent, doc.type) +
       fileRel +
@@ -578,11 +606,13 @@ export function rankResults(
       globBoost +
       qualityMult +
       entity +
+      queryOverlap * queryOverlapWeight +
       recencyBoost(doc.type, date) -
+      weakCrossProjectPenalty -
       lowValuePenalty(doc.content, doc.type)
     ) * crossProjectAgeMultiplier(doc, detectedProject, date) * 10000) / 10000;
     const fileMatch = fileRel > 0 || branchMat > 0;
-    return { doc, score, fileMatch, globBoost, qualityMult, entity, date };
+    return { doc, score, fileMatch, globBoost, qualityMult, entity, date, queryOverlap };
   });
 
   // Single composite sort on cached values.
@@ -604,6 +634,9 @@ export function rankResults(
 
     const scoreDelta = b.score - a.score;
     if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
+
+    const overlapDelta = b.queryOverlap - a.queryOverlap;
+    if (Math.abs(overlapDelta) > 0.01) return overlapDelta;
 
     const globDelta = b.globBoost - a.globBoost;
     if (Math.abs(globDelta) > 0.01) return globDelta;
@@ -689,6 +722,7 @@ export function selectSnippets(
 ): { selected: SelectedSnippet[]; usedTokens: number } {
   const selected: SelectedSnippet[] = [];
   let usedTokens = 36;
+  const queryTokens = tokenizeForOverlap(keywords);
   for (const doc of rows) {
     let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
     if (!snippet.trim()) continue;
@@ -696,7 +730,23 @@ export function selectSnippets(
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
       snippet = markStaleCitations(snippet);
     }
+    let focusScore = queryTokens.length > 0
+      ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
+      : 1;
+    if (focusScore < LOW_FOCUS_SNIPPET_SCORE) {
+      snippet = compactSnippet(
+        snippet,
+        Math.min(lineBudget, LOW_FOCUS_SNIPPET_LINE_CAP),
+        Math.max(120, Math.floor(charBudget * LOW_FOCUS_SNIPPET_CHAR_FRACTION))
+      );
+      focusScore = queryTokens.length > 0
+        ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
+        : focusScore;
+    }
     let est = approximateTokens(snippet) + 14;
+    if (selected.length > 0 && focusScore < VERY_LOW_FOCUS_SNIPPET_SCORE && usedTokens + est > Math.floor(tokenBudget * 0.8)) {
+      continue;
+    }
     if (selected.length > 0 && usedTokens + est > tokenBudget) break;
     if (selected.length === 0 && usedTokens + est > tokenBudget) {
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));

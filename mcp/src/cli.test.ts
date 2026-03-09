@@ -175,12 +175,13 @@ describe("CLI integration: status", () => {
   it("prints sync state from runtime health", () => {
     const { stdout, exitCode } = runCli(
       ["status"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test", CORTEX_OLLAMA_URL: "off" }
     );
     const plain = stdout.replace(/\x1b\[[0-9;]*m/g, "");
     expect(exitCode).toBe(0);
     expect(plain).toContain("cortex status");
     expect(plain).toContain("Sync:");
+    expect(plain).toContain("Semantic:");
     expect(plain).toContain("last pull ok");
     expect(plain).toContain("unsynced commits: 2");
   });

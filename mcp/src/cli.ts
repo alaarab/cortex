@@ -597,7 +597,8 @@ async function handleDoctor(args: string[]) {
   // Semantic search / Ollama status
   try {
     const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
-    const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+    const { listIndexedDocumentPaths } = await import("./shared-index.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
       console.log("- ok  semantic-search: disabled (set CORTEX_OLLAMA_URL=http://localhost:11434 to enable)");
@@ -614,7 +615,9 @@ async function handleDoctor(args: string[]) {
           const cortexPath = getCortexPath();
           const cache = getEmbeddingCache(cortexPath);
           await cache.load().catch(() => {});
-          console.log(`- ok  semantic-search: ${model} ready, ${cache.size()} docs embedded`);
+          const allPaths = listIndexedDocumentPaths(cortexPath, process.env.CORTEX_PROFILE || undefined);
+          const coverage = cache.coverage(allPaths);
+          console.log(`- ok  semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
         }
       }
     }
@@ -625,14 +628,42 @@ async function handleDoctor(args: string[]) {
   process.exit(result.ok ? 0 : 1);
 }
 
-function handleStatus() {
-  const runtime = readRuntimeHealth(getCortexPath());
+async function handleStatus() {
+  const cortexPath = getCortexPath();
+  const runtime = readRuntimeHealth(cortexPath);
   console.log("cortex status");
   console.log(`last auto-save: ${runtime.lastAutoSave?.status || "n/a"}${runtime.lastAutoSave?.at ? ` @ ${runtime.lastAutoSave.at}` : ""}`);
   console.log(`last pull: ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
   console.log(`last push: ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
   console.log(`unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   if (runtime.lastSync?.lastPushDetail) console.log(`push detail: ${runtime.lastSync.lastPushDetail}`);
+  try {
+    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+    const { listIndexedDocumentPaths } = await import("./shared-index.js");
+    const ollamaUrl = getOllamaUrl();
+    if (!ollamaUrl) {
+      console.log("semantic-search: disabled");
+      return;
+    }
+    const available = await checkOllamaAvailable();
+    if (!available) {
+      console.log(`semantic-search: offline (${ollamaUrl})`);
+      return;
+    }
+    const model = getEmbeddingModel();
+    const modelReady = await checkModelAvailable();
+    if (!modelReady) {
+      console.log(`semantic-search: model missing (${model})`);
+      return;
+    }
+    const cache = getEmbeddingCache(cortexPath);
+    await cache.load().catch(() => {});
+    const coverage = cache.coverage(listIndexedDocumentPaths(cortexPath, process.env.CORTEX_PROFILE || undefined));
+    console.log(`semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] handleStatus semanticSearch: ${errorMessage(err)}\n`);
+  }
 }
 
 async function handleQualityFeedback(args: string[]) {

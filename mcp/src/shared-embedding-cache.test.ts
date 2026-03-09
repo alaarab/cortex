@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as shared from "./shared.js";
-import { EmbeddingCache } from "./shared-embedding-cache.js";
+import { EmbeddingCache, formatEmbeddingCoverage } from "./shared-embedding-cache.js";
 import { makeTempDir } from "./test-helpers.js";
 
 describe("EmbeddingCache.load", () => {
@@ -89,5 +89,22 @@ describe("EmbeddingCache.load", () => {
 
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
     expect(Object.keys(persisted).sort()).toEqual(["/local.md", "/remote.md", "/seed.md"]);
+  });
+
+  it("reports warm and cold coverage explicitly", () => {
+    const cache = new EmbeddingCache(tmp.path);
+    cache.set("/a.md", "m", [0.1]);
+    cache.set("/b.md", "m", [0.2]);
+
+    const coverage = cache.coverage(["/a.md", "/b.md", "/c.md", "/d.md"]);
+    expect(coverage).toMatchObject({
+      total: 4,
+      embedded: 2,
+      missing: 2,
+      pct: 50,
+      missingPct: 50,
+      state: "warming",
+    });
+    expect(formatEmbeddingCoverage(coverage)).toBe("2/4 docs embedded (50% warm, 50% cold)");
   });
 });

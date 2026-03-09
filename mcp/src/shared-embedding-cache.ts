@@ -12,6 +12,15 @@ interface EmbeddingEntry {
 
 type EmbeddingMap = Record<string, EmbeddingEntry>;
 
+export interface EmbeddingCoverage {
+  total: number;
+  embedded: number;
+  missing: number;
+  pct: number;
+  missingPct: number;
+  state: "empty" | "cold" | "warming" | "warm";
+}
+
 function isEmbeddingEntry(value: unknown): value is EmbeddingEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<EmbeddingEntry>;
@@ -119,12 +128,26 @@ export class EmbeddingCache {
     return this.cache.size;
   }
 
-  coverage(allPaths: string[]): { total: number; embedded: number; pct: number } {
+  coverage(allPaths: string[]): EmbeddingCoverage {
     const total = allPaths.length;
     const embedded = allPaths.filter(p => this.cache.has(p)).length;
+    const missing = Math.max(0, total - embedded);
     const pct = total === 0 ? 0 : Math.round((embedded / total) * 100);
-    return { total, embedded, pct };
+    const missingPct = total === 0 ? 0 : Math.max(0, 100 - pct);
+    const state = total === 0
+      ? "empty"
+      : embedded === 0
+        ? "cold"
+        : embedded === total
+          ? "warm"
+          : "warming";
+    return { total, embedded, missing, pct, missingPct, state };
   }
+}
+
+export function formatEmbeddingCoverage(coverage: EmbeddingCoverage): string {
+  if (coverage.total === 0) return "0 indexed docs";
+  return `${coverage.embedded}/${coverage.total} docs embedded (${coverage.pct}% warm, ${coverage.missingPct}% cold)`;
 }
 
 // Module-level singleton per cortexPath

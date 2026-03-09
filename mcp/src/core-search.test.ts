@@ -110,6 +110,36 @@ describe("rankResults", () => {
     expect(result[0].path).toBe("/test/alpha.md");
     expect(result[1].path).toBe("/test/beta.md");
   });
+
+  it("keeps an exact local query match ahead of a weaker cross-project semantic match", () => {
+    const exactLocal = makeDoc({
+      path: "/test/local-auth.md",
+      project: "myapp",
+      type: "summary",
+      filename: "AUTH.md",
+      content: "authentication retry token refresh flow and login recovery details",
+    });
+    const weakerRemote = makeDoc({
+      path: "/test/remote-canonical.md",
+      project: "other",
+      type: "canonical",
+      filename: "CANONICAL_MEMORIES.md",
+      content: "general platform guidance about account behavior and some login notes",
+    });
+
+    const result = rankResults(
+      [weakerRemote, exactLocal],
+      "general",
+      null,
+      "myapp",
+      tmpDir,
+      mockDb(),
+      undefined,
+      "authentication retry token refresh",
+    );
+
+    expect(result[0].path).toBe("/test/local-auth.md");
+  });
 });
 
 // ── queryRows ──────────────────────────────────────────────────────────────────
@@ -181,6 +211,38 @@ describe("selectSnippets", () => {
     const { selected } = selectSnippets(docs, "authentication", 500, 10, 2000);
     expect(selected.length).toBe(1);
     expect(selected[0].snippet).toContain("authentication");
+  });
+
+  it("compacts low-focus snippets so weak semantic tails use fewer lines", () => {
+    const docs: DocRow[] = [
+      makeDoc({
+        path: "/focus.md",
+        filename: "AUTH.md",
+        content: [
+          "authentication retry token refresh flow",
+          "the auth session is renewed here",
+          "token rotation details",
+          "login fallback notes",
+        ].join("\n"),
+        type: "summary",
+      }),
+      makeDoc({
+        path: "/weak.md",
+        filename: "GENERAL.md",
+        content: [
+          "miscellaneous platform notes",
+          "background observations about unrelated setup",
+          "another generic line",
+          "one more generic line",
+          "last generic line",
+        ].join("\n"),
+        type: "summary",
+      }),
+    ];
+
+    const { selected } = selectSnippets(docs, "authentication token retry", 500, 6, 260);
+    expect(selected).toHaveLength(2);
+    expect(selected[1].snippet.split("\n").length).toBeLessThanOrEqual(3);
   });
 });
 

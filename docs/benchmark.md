@@ -69,6 +69,9 @@ cd ~/cortex && npm run build
 # Run the benchmark
 npx tsx mcp/src/__tests__/benchmark/harness.ts
 
+# Run the live retrieval latency/token benchmark
+npm run bench:retrieval -- --cortex-path ~/.cortex
+
 # Or via vitest
 npm test -- --testPathPattern benchmark
 ```
@@ -78,6 +81,12 @@ The harness outputs a markdown results table showing:
 - Top-3 result summaries
 - Score per query
 - Total score and percentage
+
+The retrieval runner writes JSON with:
+- lexical path latency and token stats
+- gated semantic path latency and token stats
+- persistent vector-index candidate counts
+- per-query top-document summaries
 
 ## Published Conditions Template
 
@@ -92,6 +101,21 @@ Every benchmark run should publish:
 - Whether a remote sync step was included in the timing
 
 The bundled runners now emit a `conditions` block in their JSON output. If you publish numbers in docs or release notes, copy that block with the results.
+
+## March 9, 2026 Author-Local Retrieval Run
+
+One live-store run against the author's `~/.cortex` corpus (130 embedded docs, 10 real queries, Node `v24.13.0`) produced:
+
+- lexical path: `15.85ms` average total latency, `11.9ms` p50, `19.66ms` p95
+- gated semantic path: `49.01ms` average total latency, `16.38ms` p50, `123.07ms` p95
+- lexical injected tokens: `222.6` average
+- gated semantic injected tokens: `231.1` average
+- persistent vector candidate pruning: `7.7` average candidates out of `130` eligible docs
+
+Interpretation:
+- local semantic recovery improved recall on some paraphrase-heavy misses, but it was not a raw latency win on this corpus
+- after gating and snippet compaction, token inflation was modest (`+8.5` tokens average instead of the earlier much larger semantic tail)
+- the persistent vector index changed the scoring workload shape substantially, but on a 130-doc corpus the cosine stage was already below `0.1ms`, so query embedding latency still dominated
 
 ## Results Table
 

@@ -146,6 +146,8 @@ export interface InitOptions {
   _walkthroughGithub?: { username?: string; repo: string };
   /** Set by walkthrough when user enables auto-capture; triggers writing ~/.cortex/.env */
   _walkthroughAutoCapture?: boolean;
+  /** Set by walkthrough when user opts into local semantic search */
+  _walkthroughSemanticSearch?: boolean;
   /** Set by walkthrough when user enables LLM semantic dedup */
   _walkthroughSemanticDedup?: boolean;
   /** Set by walkthrough when user enables LLM conflict detection */
@@ -287,6 +289,50 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   return { machine, profile, mcp, hooks, ollamaEnabled, autoCaptureEnabled, semanticDedupEnabled, semanticConflictEnabled, githubUsername, githubRepo };
 }
 
+export async function warmSemanticSearch(cortexPath: string, profile?: string): Promise<string> {
+  const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
+  const ollamaUrl = getOllamaUrl();
+  if (!ollamaUrl) return "Semantic search: disabled.";
+
+  const model = getEmbeddingModel();
+  if (!await checkOllamaAvailable()) {
+    return `Semantic search not warmed: Ollama offline at ${ollamaUrl}.`;
+  }
+  if (!await checkModelAvailable()) {
+    return `Semantic search not warmed: model ${model} is not pulled yet.`;
+  }
+
+  const { buildIndex, listIndexedDocumentPaths } = await import("./shared-index.js");
+  const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+  const { backgroundEmbedMissingDocs } = await import("./startup-embedding.js");
+  const { getPersistentVectorIndex } = await import("./shared-vector-index.js");
+
+  const db = await buildIndex(cortexPath, profile);
+  try {
+    const cache = getEmbeddingCache(cortexPath);
+    await cache.load().catch(() => {});
+    const allPaths = listIndexedDocumentPaths(cortexPath, profile);
+    const before = cache.coverage(allPaths);
+    if (before.missing > 0) {
+      await backgroundEmbedMissingDocs(db, cache);
+    }
+    await cache.load().catch(() => {});
+    const after = cache.coverage(allPaths);
+    if (cache.size() > 0) {
+      getPersistentVectorIndex(cortexPath).ensure(cache.getAllEntries());
+    }
+    if (after.total === 0) {
+      return `Semantic search ready (${model}), but there are no indexed docs yet.`;
+    }
+    const embeddedNow = Math.max(0, after.embedded - before.embedded);
+    const prefix = after.state === "warm" ? "Semantic search warmed" : "Semantic search warming";
+    const delta = embeddedNow > 0 ? `; embedded ${embeddedNow} new docs during init` : "";
+    return `${prefix}: ${model}, ${formatEmbeddingCoverage(after)}${delta}.`;
+  } finally {
+    try { db.close(); } catch { /* ignore close errors in init */ }
+  }
+}
+
 export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
   const dryRun = Boolean(opts.dryRun);
@@ -313,6 +359,8 @@ export async function runInit(opts: InitOptions = {}) {
     if (!answers.ollamaEnabled) {
       // User explicitly declined Ollama — note it but don't set env (they can set it themselves)
       process.env._CORTEX_WALKTHROUGH_OLLAMA_SKIP = "1";
+    } else {
+      opts._walkthroughSemanticSearch = true;
     }
     if (answers.autoCaptureEnabled) {
       // Write env var to ~/.cortex/.env so the Stop hook picks it up at runtime
@@ -714,6 +762,15 @@ export async function runInit(opts: InitOptions = {}) {
     }
     for (const { label } of envFlags) {
       log(`  ${label}: enabled (${envFile})`);
+    }
+  }
+
+  if (opts._walkthroughSemanticSearch) {
+    log(`\nWarming semantic search...`);
+    try {
+      log(`  ${await warmSemanticSearch(cortexPath, opts.profile)}`);
+    } catch (err: unknown) {
+      log(`  Semantic search warmup failed: ${errorMessage(err)}`);
     }
   }
 

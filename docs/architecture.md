@@ -44,7 +44,8 @@ This is the core runtime loop from one prompt to the next:
 [2] Retrieval Path
     hook-context + hook-prompt
     -> keyword extraction + synonym expansion
-    -> 3-tier RRF search (FTS5 + token-overlap + vector embeddings)
+    -> lexical-first retrieval (FTS5 + token-overlap)
+    -> gated vector recovery only when lexical confidence is sparse
     -> recency boost applied to ranking
     -> top snippets injected into model context
         |
@@ -99,11 +100,13 @@ Runs on every user prompt. Budget: ~250ms.
 ```
 UserPromptSubmit (stdin: JSON with prompt text)
   |
-  +-> extract keywords (stop-word filter + bigrams)
+ +-> extract keywords (stop-word filter + bigrams)
   |
-  +-> 3-tier RRF search (FTS5 + token-overlap + vector)
+  +-> lexical-first retrieval
   |     query capped at 20 terms
-  |     all tiers run in parallel, merged by reciprocal rank
+  |     Tier 1: FTS5
+  |     Tier 2: token-overlap fallback
+  |     Tier 3: vector recovery only when lexical hits are sparse or weak
   |     recency boost: <=7d +0.3, <=30d +0.15
   |
   +-> trust filter
@@ -208,9 +211,9 @@ All state lives in `~/.cortex/` as plain files, committed to git.
 
 ## Search and Retrieval
 
-### Three-Tier Hybrid Search with RRF
+### Staged Hybrid Search
 
-Search uses three tiers that run in parallel, with results merged by Reciprocal Rank Fusion (RRF):
+Search is intentionally staged so cheap lexical paths win first and vector work only runs when it is likely to recover something new:
 
 ```
 Query
@@ -219,22 +222,24 @@ Query
   |     sanitize input -> expand synonyms (cap at 20 terms)
   |     -> FTS5 MATCH with quoted OR terms
   |
-  +-> Tier 2: Token-overlap semantic
+  +-> Tier 2: Token-overlap fallback
   |     TF-IDF cosine similarity over indexed documents
   |     cache invalidated on incremental index updates
   |
-  +-> Tier 3: Vector embeddings (when configured)
+  +-> Tier 3: Vector recovery (when configured and lexical confidence is low)
   |     uses CORTEX_EMBEDDING_API_URL or Ollama
   |     embedding cache loaded on first call (including hook subprocesses)
-  |     cached to .runtime/embed-cache.jsonl by SHA-256 hash
+  |     persistent embedding cache lives in .runtime/embeddings.json
+  |     candidate pruning uses persistent .runtime/embedding-index.json
   |
-  +-> RRF merge
-        merge ranked lists from all tiers by reciprocal rank
+  +-> shared rerank + snippet selection
+        local exact matches get stronger overlap weight
+        weaker semantic tails are compacted to protect token budget
         apply recency boost: <=7 days +0.3, <=30 days +0.15
         -> final ranked results
 ```
 
-Search and hook injection now share the same core ranking path. Benchmark notes still need to publish whether embeddings were enabled and what corpus was indexed, because the quality story depends on those conditions.
+Search and hook injection now share the same gating and reranking path. Benchmark notes still need to publish whether embeddings were enabled and what corpus was indexed, because the quality story depends on those conditions. On small corpora the vector index mainly improves asymptotic behavior and candidate pruning; the dominant latency cost is often still query embedding itself.
 
 ### FTS5 Index
 
