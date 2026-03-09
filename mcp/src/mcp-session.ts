@@ -176,9 +176,8 @@ function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId
     const file = sessionFileForId(cortexPath, effectiveId);
     const state = readSessionStateFile(file);
     if (!state) return null;
-    // When an explicit sessionId is provided, only return active (not yet ended) sessions.
-    // This prevents session_end from being called twice on the same session.
-    if (sessionId && state.endedAt) return null;
+    // Always reject ended sessions — prevents double session_end and stale session_context.
+    if (state.endedAt) return null;
     return { file, state };
   }
   return findMostRecentSession(cortexPath);
@@ -387,6 +386,18 @@ export function register(server: McpServer, ctx: McpContext): void {
     });
 
     if (!endedState) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
+
+    // Clear in-process session state so subsequent calls don't resolve the ended session.
+    if (state.sessionId === _currentProcessSessionId) {
+      _currentProcessSessionId = undefined;
+    }
+    if (connectionId) {
+      _sessionMap.delete(connectionId);
+    }
+    // Also remove from _sessionMap by value (in case connectionId wasn't provided but was used at start)
+    for (const [key, val] of _sessionMap) {
+      if (val === state.sessionId) _sessionMap.delete(key);
+    }
 
     // Write fast-path summary file for next session_start — also persist project so
     // session_start can restore project context even after a normal session_end.

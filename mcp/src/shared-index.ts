@@ -45,6 +45,8 @@ function scheduleEmbedding(cortexPath: string, docPath: string, content: string)
   _embQueue.set(docPath, { cortexPath, content });
   if (_embTimer) clearTimeout(_embTimer);
   _embTimer = setTimeout(() => { _embTimer = null; void _drainEmbQueue(); }, 500);
+  // Unref so the timer doesn't keep short-lived CLI processes alive
+  _embTimer.unref();
 }
 
 async function _drainEmbQueue(): Promise<void> {
@@ -388,6 +390,18 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
     }
   }
 
+  // Index global skills so search_knowledge can find them
+  const globalSkillsDir = path.join(cortexPath, "global", "skills");
+  if (fs.existsSync(globalSkillsDir)) {
+    const skillFiles = globSync("**/*.md", { cwd: globalSkillsDir, nodir: true });
+    for (const relFile of skillFiles) {
+      const fullPath = path.join(globalSkillsDir, relFile);
+      const filename = path.basename(relFile);
+      entries.push({ fullPath, project: "global", filename, type: "skill", relFile: `skills/${relFile}` });
+      allAbsolutePaths.push(fullPath);
+    }
+  }
+
   for (const mem of collectNativeMemoryFiles()) {
     entries.push({ fullPath: mem.fullPath, project: mem.project, filename: mem.file, type: "findings" });
     allAbsolutePaths.push(mem.fullPath);
@@ -564,7 +578,7 @@ function isSentinelFresh(cortexPath: string, sentinel: { computedAt: number }): 
  * previously persisted JSON snapshot. Returns true if the graph was loaded, false if the
  * caller must run full extraction instead.
  */
-function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: FileEntry[]): boolean {
+function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: FileEntry[], cortexPath: string): boolean {
   if (!fs.existsSync(graphPath)) return false;
   try {
     const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
@@ -576,16 +590,23 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
       }
     });
     if (!anyNewer && graph.entities && graph.links) {
+      // Build set of valid source doc keys from current file set
+      const validDocKeys = new Set(allFiles.map(f => getEntrySourceDocKey(f, cortexPath)));
+
       for (const [id, name, type] of graph.entities) {
         db.run("INSERT OR IGNORE INTO entities (id, name, type, first_seen_at) VALUES (?, ?, ?, ?)", [id, name, type, new Date().toISOString().slice(0, 10)]);
       }
       for (const [sourceId, targetId, relType, sourceDoc] of graph.links) {
+        // Skip links for docs that no longer exist in the current file set
+        if (sourceDoc && !validDocKeys.has(sourceDoc)) continue;
         db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
       }
       // Q19: also restore global_entities from cached graph so cross_project_entities
       // is not empty after a cached-graph rebuild path.
       if (Array.isArray(graph.globalEntities)) {
         for (const [entity, project, docKey] of graph.globalEntities) {
+          // Skip global entities whose source doc no longer exists
+          if (docKey && !validDocKeys.has(docKey)) continue;
           try {
             db.run(
               "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
@@ -887,7 +908,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
   // Try loading cached entity graph
   const graphPath = runtimeFile(cortexPath, 'entity-graph.json');
-  const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles);
+  const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, cortexPath);
 
   for (const entry of allFiles) {
     try {
