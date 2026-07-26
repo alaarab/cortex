@@ -48,7 +48,7 @@ struct MainTabView: View {
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
             ReviewView()
                 .tabItem { Label("Review", systemImage: "checkmark.seal") }
-                .badge(model.snapshot.reviewQueue.count)
+                .badge(model.totalReviewCount)
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
             SearchView()

@@ -7,7 +7,7 @@ struct TasksView: View {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                TaskListView(projectFilter: nil)
+                TaskListView(scope: .all)
             }
             .navigationTitle("Tasks")
         }
@@ -15,14 +15,22 @@ struct TasksView: View {
 }
 
 struct TaskListRow: Identifiable {
+    let storeId: String
+    let storeName: String
     let project: String
     let task: PhrenTask
-    var id: String { "\(project)/\(task.stableId ?? task.id)" }
+    var id: String { "\(storeId)/\(project)/\(task.stableId ?? task.id)" }
 }
 
-/// Cross-project task list, also reused project-scoped inside project detail.
+/// Task list: cross-store + cross-project in the Tasks tab, or scoped to one
+/// store's project inside project detail.
 struct TaskListView: View {
-    let projectFilter: String?
+    enum Scope {
+        case all
+        case project(storeId: String, project: String)
+    }
+
+    let scope: Scope
 
     @Environment(AppModel.self) private var model
     @State private var section: PhrenTask.Section = .active
@@ -30,16 +38,22 @@ struct TaskListView: View {
     @State private var showAdd = false
     @State private var editing: TaskListRow?
 
-    private var effectiveProject: String? {
-        projectFilter ?? selectedProject
+    private var isProjectScoped: Bool {
+        if case .project = scope { return true }
+        return false
     }
 
     private var rows: [TaskListRow] {
         var result: [TaskListRow] = []
-        for (project, doc) in model.snapshot.tasks.sorted(by: { $0.key < $1.key }) {
-            if let effectiveProject, project != effectiveProject { continue }
+        for (storeId, storeName, doc) in model.mergedTaskDocs {
+            if case .project(let scopeStore, let scopeProject) = scope {
+                guard storeId == scopeStore, doc.project == scopeProject else { continue }
+            } else if let selectedProject, doc.project != selectedProject {
+                continue
+            }
             for task in doc.items(in: section) {
-                result.append(TaskListRow(project: project, task: task))
+                result.append(TaskListRow(storeId: storeId, storeName: storeName,
+                                          project: doc.project, task: task))
             }
         }
         // Pinned first, then rank (tasks.ts display order).
@@ -50,10 +64,18 @@ struct TaskListView: View {
     }
 
     private var projectNames: [String] {
-        model.snapshot.tasks.keys.sorted()
+        Array(Set(model.mergedTaskDocs.map(\.doc.project))).sorted()
+    }
+
+    /// Add targets: every writable (store, project) pair that has a tasks doc.
+    private var addTargets: [(storeId: String, storeName: String, project: String)] {
+        model.mergedTaskDocs
+            .filter { model.canPush(storeId: $0.storeId) }
+            .map { ($0.storeId, $0.storeName, $0.doc.project) }
     }
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 0) {
             Picker("Section", selection: $section) {
                 ForEach(PhrenTask.Section.allCases, id: \.self) { Text($0.rawValue) }
@@ -64,12 +86,16 @@ struct TaskListView: View {
 
             List {
                 ForEach(rows) { row in
-                    TaskRow(project: row.project, task: row.task, showProject: projectFilter == nil) {
+                    TaskRow(
+                        row: row,
+                        showProject: !isProjectScoped,
+                        showStore: !isProjectScoped && model.hasMultipleStores
+                    ) {
                         Task {
                             await model.perform(.completeTask(
                                 project: row.project,
                                 match: row.task.stableId ?? row.task.line
-                            ))
+                            ), in: row.storeId)
                         }
                     }
                     .swipeActions(edge: .trailing) {
@@ -78,7 +104,7 @@ struct TaskListView: View {
                                 await model.perform(.removeTask(
                                     project: row.project,
                                     match: row.task.stableId ?? row.task.line
-                                ))
+                                ), in: row.storeId)
                             }
                         } label: {
                             Label("Delete", systemImage: "trash")
@@ -104,13 +130,21 @@ struct TaskListView: View {
             .refreshable { await model.pullToRefresh() }
         }
         .toolbar {
-            if projectFilter == nil {
+            if !isProjectScoped {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         Picker("Project", selection: $selectedProject) {
                             Text("All projects").tag(String?.none)
                             ForEach(projectNames, id: \.self) { name in
                                 Text(name).tag(String?.some(name))
+                            }
+                        }
+                        if model.hasMultipleStores {
+                            Picker("Store", selection: $model.storeFilter) {
+                                Text("All stores").tag(String?.none)
+                                ForEach(model.storeDescriptors) { store in
+                                    Text(store.displayName).tag(String?.some(store.id))
+                                }
                             }
                         }
                     } label: {
@@ -120,58 +154,135 @@ struct TaskListView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
-                    .disabled(effectiveProject == nil && projectNames.count != 1)
+                    .disabled(!isProjectScoped && addTargets.isEmpty)
             }
         }
         .sheet(isPresented: $showAdd) {
-            TextEntrySheet(title: "Add task", confirmLabel: "Add") { text, _ in
-                let target = effectiveProject ?? projectNames.first
-                if let target {
-                    await model.perform(.addTask(project: target, text: text))
+            AddTaskSheet(scope: scope, targets: addTargets)
+        }
+        .sheet(item: $editing) { row in
+            TaskEditSheet(row: row)
+        }
+    }
+}
+
+/// Task composer with an explicit destination picker when the target is
+/// ambiguous (multiple stores/projects).
+struct AddTaskSheet: View {
+    struct Target: Identifiable, Hashable {
+        let storeId: String
+        let storeName: String
+        let project: String
+        var id: String { "\(storeId)|\(project)" }
+    }
+
+    let scope: TaskListView.Scope
+    let targets: [Target]
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var selectedTarget: Target?
+
+    init(scope: TaskListView.Scope, targets: [(storeId: String, storeName: String, project: String)]) {
+        self.scope = scope
+        self.targets = targets.map { Target(storeId: $0.storeId, storeName: $0.storeName, project: $0.project) }
+    }
+
+    private var fixedTarget: (storeId: String, project: String)? {
+        if case .project(let storeId, let project) = scope { return (storeId, project) }
+        if targets.count == 1 { return (targets[0].storeId, targets[0].project) }
+        return nil
+    }
+
+    private func targetLabel(_ target: Target) -> String {
+        model.hasMultipleStores ? "\(target.project) · \(target.storeName)" : target.project
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Task", text: $text, axis: .vertical)
+                    .lineLimit(2...6)
+                if fixedTarget == nil {
+                    Picker("Project", selection: $selectedTarget) {
+                        Text("Choose…").tag(Target?.none)
+                        ForEach(targets) { target in
+                            Text(targetLabel(target)).tag(Target?.some(target))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add task")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        submit()
+                        dismiss()
+                    }
+                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || resolvedTarget() == nil)
                 }
             }
         }
-        .sheet(item: $editing) { row in
-            TaskEditSheet(project: row.project, task: row.task)
+    }
+
+    private func resolvedTarget() -> (storeId: String, project: String)? {
+        if let fixedTarget { return fixedTarget }
+        guard let selectedTarget else { return nil }
+        return (selectedTarget.storeId, selectedTarget.project)
+    }
+
+    private func submit() {
+        guard let target = resolvedTarget() else { return }
+        let value = text
+        Task {
+            await model.perform(.addTask(project: target.project, text: value), in: target.storeId)
         }
     }
 }
 
 struct TaskRow: View {
-    let project: String
-    let task: PhrenTask
+    let row: TaskListRow
     let showProject: Bool
+    let showStore: Bool
     let onToggle: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: onToggle) {
-                Image(systemName: task.checked ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(task.checked ? .green : .secondary)
+                Image(systemName: row.task.checked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(row.task.checked ? .green : .secondary)
                     .font(.title3)
             }
             .buttonStyle(.plain)
-            .disabled(task.checked)
+            .disabled(row.task.checked)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayLine)
                     .font(.callout)
-                    .strikethrough(task.checked)
+                    .strikethrough(row.task.checked)
                 HStack(spacing: 6) {
                     if showProject {
-                        TagChip(text: project, color: .blue)
+                        TagChip(text: row.project, color: .blue)
                     }
-                    if let priority = task.priority {
+                    if showStore {
+                        TagChip(text: row.storeName, color: .indigo)
+                    }
+                    if let priority = row.task.priority {
                         TagChip(text: priority.rawValue, color: priorityColor(priority))
                     }
-                    if task.pinned == true {
+                    if row.task.pinned == true {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
                     }
-                    if let issue = task.githubIssue {
+                    if let issue = row.task.githubIssue {
                         Text("#\(issue)").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                if let context = task.context {
+                if let context = row.task.context {
                     Text(context)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -183,7 +294,7 @@ struct TaskRow: View {
     }
 
     private var displayLine: String {
-        TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(task.line))
+        TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))
     }
 
     private func priorityColor(_ priority: PhrenTask.Priority) -> Color {
@@ -196,8 +307,7 @@ struct TaskRow: View {
 }
 
 struct TaskEditSheet: View {
-    let project: String
-    let task: PhrenTask
+    let row: TaskListRow
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -205,12 +315,11 @@ struct TaskEditSheet: View {
     @State private var priority: PhrenTask.Priority?
     @State private var section: PhrenTask.Section
 
-    init(project: String, task: PhrenTask) {
-        self.project = project
-        self.task = task
-        _text = State(initialValue: TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(task.line)))
-        _priority = State(initialValue: task.priority)
-        _section = State(initialValue: task.section)
+    init(row: TaskListRow) {
+        self.row = row
+        _text = State(initialValue: TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line)))
+        _priority = State(initialValue: row.task.priority)
+        _section = State(initialValue: row.task.section)
     }
 
     var body: some View {
@@ -240,15 +349,15 @@ struct TaskEditSheet: View {
                     Button("Save") {
                         let newText = text
                         let newPriority = priority
-                        let newSection = section != task.section ? section : nil
+                        let newSection = section != row.task.section ? section : nil
                         Task {
                             await model.perform(.updateTask(
-                                project: project,
-                                match: task.stableId ?? task.line,
+                                project: row.project,
+                                match: row.task.stableId ?? row.task.line,
                                 text: newText,
                                 priority: newPriority?.rawValue,
                                 section: newSection?.rawValue
-                            ))
+                            ), in: row.storeId)
                         }
                         dismiss()
                     }

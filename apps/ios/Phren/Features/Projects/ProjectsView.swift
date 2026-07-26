@@ -5,26 +5,32 @@ struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var filter = ""
 
-    private var projects: [Project] {
-        guard !filter.isEmpty else { return model.snapshot.projects }
-        return model.snapshot.projects.filter { $0.name.localizedCaseInsensitiveContains(filter) }
+    private var projects: [StoreProject] {
+        guard !filter.isEmpty else { return model.mergedProjects }
+        return model.mergedProjects.filter { $0.project.name.localizedCaseInsensitiveContains(filter) }
     }
 
     var body: some View {
+        @Bindable var model = model
         NavigationStack {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                List(projects) { project in
-                    NavigationLink(value: project.name) {
+                List(projects) { item in
+                    NavigationLink(value: item) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(project.name).font(.headline)
+                            HStack(spacing: 6) {
+                                Text(item.project.name).font(.headline)
+                                if model.hasMultipleStores {
+                                    TagChip(text: item.storeName, color: .indigo)
+                                }
+                            }
                             HStack(spacing: 10) {
-                                Label("\(project.findingCount)", systemImage: "lightbulb")
-                                Label("\(project.taskCount)", systemImage: "checklist")
-                                Label("\(project.noteCount)", systemImage: "note.text")
-                                if project.reviewCount > 0 {
-                                    Label("\(project.reviewCount)", systemImage: "checkmark.seal")
+                                Label("\(item.project.findingCount)", systemImage: "lightbulb")
+                                Label("\(item.project.taskCount)", systemImage: "checklist")
+                                Label("\(item.project.noteCount)", systemImage: "note.text")
+                                if item.project.reviewCount > 0 {
+                                    Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
                                         .foregroundStyle(.orange)
                                 }
                             }
@@ -35,7 +41,7 @@ struct ProjectsView: View {
                     }
                 }
                 .overlay {
-                    if model.snapshot.projects.isEmpty {
+                    if model.mergedProjects.isEmpty {
                         ContentUnavailableView(
                             "No projects yet",
                             systemImage: "square.grid.2x2",
@@ -47,14 +53,33 @@ struct ProjectsView: View {
                 .refreshable { await model.pullToRefresh() }
             }
             .navigationTitle("Projects")
-            .navigationDestination(for: String.self) { project in
-                ProjectDetailView(project: project)
+            .toolbar {
+                if model.hasMultipleStores {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Picker("Store", selection: $model.storeFilter) {
+                                Text("All stores").tag(String?.none)
+                                ForEach(model.storeDescriptors) { store in
+                                    Text(store.displayName).tag(String?.some(store.id))
+                                }
+                            }
+                        } label: {
+                            Image(systemName: model.storeFilter == nil
+                                  ? "line.3.horizontal.decrease.circle"
+                                  : "line.3.horizontal.decrease.circle.fill")
+                        }
+                    }
+                }
+            }
+            .navigationDestination(for: StoreProject.self) { item in
+                ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
         }
     }
 }
 
 struct ProjectDetailView: View {
+    let storeId: String
     let project: String
 
     @Environment(AppModel.self) private var model
@@ -79,13 +104,13 @@ struct ProjectDetailView: View {
             .padding(.bottom, 4)
 
             switch tab {
-            case .findings: FindingsTab(project: project)
-            case .notes: NotesTab(project: project)
-            case .tasks: ProjectTasksTab(project: project)
-            case .summary: SummaryTab(project: project)
+            case .findings: FindingsTab(storeId: storeId, project: project)
+            case .notes: NotesTab(storeId: storeId, project: project)
+            case .tasks: TaskListView(scope: .project(storeId: storeId, project: project))
+            case .summary: SummaryTab(storeId: storeId, project: project)
             }
         }
-        .navigationTitle(project)
+        .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -93,6 +118,7 @@ struct ProjectDetailView: View {
 // MARK: - Findings
 
 struct FindingsTab: View {
+    let storeId: String
     let project: String
 
     @Environment(AppModel.self) private var model
@@ -100,7 +126,7 @@ struct FindingsTab: View {
     @State private var editing: Finding?
 
     private var findings: [Finding] {
-        model.snapshot.findings[project] ?? []
+        model.findings(storeId: storeId, project: project)
     }
 
     private var groupedByDate: [(date: String, items: [Finding])] {
@@ -148,7 +174,7 @@ struct FindingsTab: View {
         }
         .sheet(isPresented: $showAdd) {
             TextEntrySheet(title: "Add finding", showsTypePicker: true, confirmLabel: "Add") { text, type in
-                await model.perform(.addFinding(project: project, text: text, type: type?.rawValue))
+                await model.perform(.addFinding(project: project, text: text, type: type?.rawValue), in: storeId)
             }
         }
         .sheet(item: $editing) { finding in
@@ -161,7 +187,7 @@ struct FindingsTab: View {
                     project: project,
                     match: finding.stableId.map { "fid:\($0)" } ?? finding.text,
                     newText: text
-                ))
+                ), in: storeId)
             }
         }
     }
@@ -170,13 +196,14 @@ struct FindingsTab: View {
         await model.perform(.removeFinding(
             project: project,
             match: finding.stableId.map { "fid:\($0)" } ?? finding.text
-        ))
+        ), in: storeId)
     }
 }
 
 // MARK: - Notes
 
 struct NotesTab: View {
+    let storeId: String
     let project: String
 
     @Environment(AppModel.self) private var model
@@ -185,7 +212,7 @@ struct NotesTab: View {
     @State private var promoting: Note?
 
     private var notes: [Note] {
-        model.snapshot.notes[project] ?? []
+        model.notes(storeId: storeId, project: project)
     }
 
     private var groupedByDay: [(date: String, items: [Note])] {
@@ -216,7 +243,7 @@ struct NotesTab: View {
                                 Task {
                                     await model.perform(.removeNote(
                                         project: project, date: note.date, stableId: note.stableId
-                                    ))
+                                    ), in: storeId)
                                 }
                             } label: {
                                 Label("Delete", systemImage: "trash")
@@ -256,14 +283,14 @@ struct NotesTab: View {
         .sheet(isPresented: $showAdd) {
             TextEntrySheet(title: "Add note", confirmLabel: "Add") { text, _ in
                 let now = model.nowNoteTimestamp()
-                await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text))
+                await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text), in: storeId)
             }
         }
         .sheet(item: $editing) { note in
             TextEntrySheet(title: "Edit note", initialText: note.text) { text, _ in
                 await model.perform(.editNote(
                     project: project, date: note.date, stableId: note.stableId, text: text
-                ))
+                ), in: storeId)
             }
         }
         .sheet(item: $promoting) { note in
@@ -278,30 +305,23 @@ struct NotesTab: View {
                 await model.perform(.promoteNote(
                     project: project, date: note.date,
                     stableId: note.stableId, findingType: type?.rawValue
-                ))
+                ), in: storeId)
             }
         }
     }
 }
 
-// MARK: - Project tasks + summary
-
-struct ProjectTasksTab: View {
-    let project: String
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        TaskListView(projectFilter: project)
-    }
-}
+// MARK: - Summary
 
 struct SummaryTab: View {
+    let storeId: String
     let project: String
+
     @Environment(AppModel.self) private var model
 
     var body: some View {
         ScrollView {
-            if let summary = model.snapshot.summaries[project] {
+            if let summary = model.summary(storeId: storeId, project: project) {
                 Text(summary)
                     .font(.callout.monospaced())
                     .frame(maxWidth: .infinity, alignment: .leading)

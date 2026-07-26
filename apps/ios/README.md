@@ -104,6 +104,31 @@ Until then, the **personal access token** sign-in path works out of the box:
 create a fine-grained PAT with **Contents: Read and write** + **Metadata:
 Read** on the store repo.
 
+## Multiple stores
+
+Settings → Stores → **Add store** attaches any additional repo (personal +
+team stores). Each store gets its own local cache, sync engine, and pending-op
+queue; the tabs show a **merged view** with store badges and a store filter,
+and every mutation routes to the store its item came from.
+
+Semantics, and where they intentionally diverge from the CLI:
+
+- The CLI's cross-store merge is name-keyed and primary-wins — a project that
+  exists in two stores silently shows only the first copy. The app keys by
+  *(store, project)* and shows both, disambiguated by store badge. No data is
+  hidden.
+- The app does not read `stores.yaml` (the CLI's registry stores local
+  filesystem paths and unnormalized — often SSH — remotes, which aren't
+  actionable on a phone). Stores are added explicitly via the repo picker.
+- Writes work the same in every store; repos where your token lacks push
+  permission are marked **read-only**. Note the CLI routes finding-adds for
+  `role: team`-claimed projects through append-only `journal/` files — the app
+  writes `FINDINGS.md` directly everywhere for now (journal writes are the
+  planned v2 for heavily shared repos).
+- Removing a store in Settings deletes only this device's local copy.
+
+Legacy single-store installs migrate automatically on first launch.
+
 ## Your store must be on GitHub
 
 The app reads the repo that holds your `~/.phren` store. If yours is still
@@ -131,7 +156,8 @@ exactly which transcription needs updating.
 ## Not in the MVP
 
 - The 3D graph tab (the web UI's Graph view)
-- Team/multi-store support — v2 should write shared-store findings through
-  the append-only journal (`packages/cli/src/finding/journal.ts`) instead of
-  direct `FINDINGS.md` edits
+- Journal-based writes for team stores — heavily shared repos should
+  eventually write findings through the append-only journal
+  (`packages/cli/src/finding/journal.ts`) instead of direct `FINDINGS.md` edits
+- `stores.yaml` auto-discovery as an add-store suggestion source
 - Skills/Hooks/Settings management tabs from the web UI

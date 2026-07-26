@@ -1,41 +1,42 @@
 import SwiftUI
 import PhrenKit
 
-/// Cross-project review queue: approve / reject / edit pending findings.
-/// Mirrors the web UI's Review tab (batch select, risky tint) with the exact
-/// approve/reject/edit semantics of access.ts:700-749.
+/// Cross-store, cross-project review queue: approve / reject / edit pending
+/// findings with the exact semantics of access.ts:700-749, routed to the
+/// store each item came from.
 struct ReviewView: View {
     @Environment(AppModel.self) private var model
     @State private var projectFilter: String?
     @State private var flaggedOnly = false
     @State private var selection = Set<String>()
     @State private var editMode: EditMode = .inactive
-    @State private var editing: ProjectQueueItem?
+    @State private var editing: StoreQueueEntry?
 
-    private var items: [ProjectQueueItem] {
-        model.snapshot.reviewQueue.filter { item in
-            if let projectFilter, item.project != projectFilter { return false }
-            if flaggedOnly, !item.item.risky { return false }
+    private var items: [StoreQueueEntry] {
+        model.mergedReviewQueue.filter { item in
+            if let projectFilter, item.entry.project != projectFilter { return false }
+            if flaggedOnly, !item.entry.item.risky { return false }
             return true
         }
     }
 
     private var projectNames: [String] {
-        Array(Set(model.snapshot.reviewQueue.map(\.project))).sorted()
+        Array(Set(model.mergedReviewQueue.map(\.entry.project))).sorted()
     }
 
     var body: some View {
+        @Bindable var model = model
         NavigationStack {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
                 List(selection: $selection) {
                     ForEach(QueueItem.Section.allCases, id: \.self) { section in
-                        let sectionItems = items.filter { $0.item.section == section }
+                        let sectionItems = items.filter { $0.entry.item.section == section }
                         if !sectionItems.isEmpty {
                             Section(section.rawValue) {
                                 ForEach(sectionItems) { entry in
-                                    ReviewRow(entry: entry)
+                                    ReviewRow(entry: entry, showStore: model.hasMultipleStores)
                                         .tag(entry.id)
                                         .swipeActions(edge: .leading) {
                                             Button {
@@ -87,6 +88,14 @@ struct ReviewView: View {
                                 Text(name).tag(String?.some(name))
                             }
                         }
+                        if model.hasMultipleStores {
+                            Picker("Store", selection: $model.storeFilter) {
+                                Text("All stores").tag(String?.none)
+                                ForEach(model.storeDescriptors) { store in
+                                    Text(store.displayName).tag(String?.some(store.id))
+                                }
+                            }
+                        }
                         Toggle("Flagged only", isOn: $flaggedOnly)
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
@@ -104,10 +113,13 @@ struct ReviewView: View {
             .sheet(item: $editing) { entry in
                 TextEntrySheet(
                     title: "Edit before approving",
-                    initialText: entry.item.text,
+                    initialText: entry.entry.item.text,
                     confirmLabel: "Save"
                 ) { text, _ in
-                    await model.perform(.editQueue(project: entry.project, line: entry.item.line, newText: text))
+                    await model.perform(
+                        .editQueue(project: entry.entry.project, line: entry.entry.item.line, newText: text),
+                        in: entry.storeId
+                    )
                 }
             }
         }
@@ -131,53 +143,63 @@ struct ReviewView: View {
         .background(.bar)
     }
 
-    private func selectedEntries() -> [ProjectQueueItem] {
+    private func selectedEntries() -> [StoreQueueEntry] {
         items.filter { selection.contains($0.id) }
     }
 
-    private func approve(_ entries: [ProjectQueueItem]) async {
+    private func approve(_ entries: [StoreQueueEntry]) async {
         for entry in entries {
-            await model.perform(.approveQueue(project: entry.project, line: entry.item.line))
+            await model.perform(
+                .approveQueue(project: entry.entry.project, line: entry.entry.item.line),
+                in: entry.storeId
+            )
         }
         selection.removeAll()
     }
 
-    private func reject(_ entries: [ProjectQueueItem]) async {
+    private func reject(_ entries: [StoreQueueEntry]) async {
         for entry in entries {
-            await model.perform(.rejectQueue(project: entry.project, line: entry.item.line))
+            await model.perform(
+                .rejectQueue(project: entry.entry.project, line: entry.entry.item.line),
+                in: entry.storeId
+            )
         }
         selection.removeAll()
     }
 }
 
 struct ReviewRow: View {
-    let entry: ProjectQueueItem
+    let entry: StoreQueueEntry
+    let showStore: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.item.text)
+            Text(entry.entry.item.text)
                 .font(.callout)
             HStack(spacing: 6) {
-                TagChip(text: entry.project, color: .blue)
-                if let confidence = entry.item.confidence {
+                TagChip(text: entry.entry.project, color: .blue)
+                if showStore {
+                    TagChip(text: entry.storeName, color: .indigo)
+                }
+                if let confidence = entry.entry.item.confidence {
                     TagChip(
                         text: String(format: "%.0f%%", confidence * 100),
                         color: confidence < 0.7 ? .orange : .green
                     )
                 }
-                if let machine = entry.item.machine {
+                if let machine = entry.entry.item.machine {
                     Text(machine).font(.caption2).foregroundStyle(.secondary)
                 }
-                if let model = entry.item.model {
+                if let model = entry.entry.item.model {
                     Text(model).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(entry.item.date)
+                Text(entry.entry.item.date)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 2)
-        .listRowBackground(entry.item.risky ? Color.orange.opacity(0.08) : nil)
+        .listRowBackground(entry.entry.item.risky ? Color.orange.opacity(0.08) : nil)
     }
 }

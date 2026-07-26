@@ -182,13 +182,49 @@ struct PATSignInSheet: View {
 
 // MARK: - Repo picker
 
+/// First-run store selection: picking a repo adds it as the first store.
 struct RepoPickerView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        RepoPickerList(
+            existingStoreIds: [],
+            footer: "Pick the GitHub repository that holds your phren store (it contains phren.root.yaml). Set one up on your computer with `phren team init` or `phren store add`."
+        ) { repo in
+            Task { await model.addStore(repo: repo) }
+        }
+        .navigationTitle("Choose your store")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Sign out") {
+                    Task { await model.signOut() }
+                }
+            }
+        }
+    }
+}
+
+/// Reusable repo list with phren-store detection: used by first-run onboarding
+/// and by Settings → Stores → Add store.
+struct RepoPickerList: View {
+    let existingStoreIds: Set<String>
+    let footer: String
+    let onSelect: (GitHubRepo) -> Void
+
     @Environment(AppModel.self) private var model
     @State private var repos: [GitHubRepo] = []
     @State private var phrenStoreNames: Set<String> = []
     @State private var loading = true
     @State private var error: String?
     @State private var manualEntry = ""
+
+    init(existingStoreIds: Set<String>,
+         footer: String = "Add any repository that holds a phren store (it contains phren.root.yaml).",
+         onSelect: @escaping (GitHubRepo) -> Void) {
+        self.existingStoreIds = existingStoreIds
+        self.footer = footer
+        self.onSelect = onSelect
+    }
 
     private var likelyStores: [GitHubRepo] {
         repos.filter { phrenStoreNames.contains($0.fullName) }
@@ -229,15 +265,7 @@ struct RepoPickerView: View {
                 if let error {
                     Text(error).foregroundStyle(.red)
                 } else {
-                    Text("Pick the GitHub repository that holds your phren store (it contains phren.root.yaml). Set one up on your computer with `phren team init` or `phren store add`.")
-                }
-            }
-        }
-        .navigationTitle("Choose your store")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Sign out") {
-                    Task { await model.signOut() }
+                    Text(footer)
                 }
             }
         }
@@ -245,8 +273,9 @@ struct RepoPickerView: View {
     }
 
     private func repoRow(_ repo: GitHubRepo, isStore: Bool) -> some View {
-        Button {
-            Task { await model.selectRepo(owner: repo.owner.login, name: repo.name, branch: repo.defaultBranch) }
+        let alreadyAdded = existingStoreIds.contains(repo.fullName)
+        return Button {
+            onSelect(repo)
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -263,13 +292,17 @@ struct RepoPickerView: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isStore {
+                if alreadyAdded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else if isStore {
                     Image(systemName: "brain.head.profile")
                         .foregroundStyle(.tint)
                 }
             }
         }
         .tint(.primary)
+        .disabled(alreadyAdded)
     }
 
     private func load() async {
@@ -294,7 +327,7 @@ struct RepoPickerView: View {
         guard parts.count == 2 else { return }
         do {
             let repo = try await model.client.repo(owner: String(parts[0]), name: String(parts[1]))
-            await model.selectRepo(owner: repo.owner.login, name: repo.name, branch: repo.defaultBranch)
+            onSelect(repo)
         } catch {
             self.error = "Couldn't open \(manualEntry): \(error.localizedDescription)"
         }
@@ -309,8 +342,8 @@ struct InitialSyncView: View {
             ProgressView()
             Text("Syncing your store…")
                 .font(.headline)
-            if let repo = model.selectedRepo {
-                Text("\(repo.owner)/\(repo.name)")
+            if let store = model.storeDescriptors.last {
+                Text(store.id)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -203,18 +203,7 @@ public actor LocalStore {
             notes[project]?.sort { "\($0.date)T\($0.time)" > "\($1.date)T\($1.time)" }
         }
 
-        // access.ts:797 — section order, then date desc, then project, then id
-        let sectionOrder: [QueueItem.Section: Int] = [.review: 0, .stale: 1, .conflicts: 2]
-        queue.sort { a, b in
-            let aDate = a.item.date == "unknown" ? "" : a.item.date
-            let bDate = b.item.date == "unknown" ? "" : b.item.date
-            if a.item.section != b.item.section {
-                return sectionOrder[a.item.section]! < sectionOrder[b.item.section]!
-            }
-            if aDate != bDate { return aDate > bDate }
-            if a.project != b.project { return a.project < b.project }
-            return a.item.id < b.item.id
-        }
+        queue.sort(by: Self.reviewQueueOrder)
 
         let projects = projectNames.sorted().map { name in
             Project(
@@ -230,5 +219,20 @@ public actor LocalStore {
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries
         )
+    }
+
+    /// access.ts:797 — section order, then date desc, then project, then id.
+    /// Shared with the app's cross-store merge so a multi-store queue sorts
+    /// identically to a single-store one.
+    public static func reviewQueueOrder(_ a: ProjectQueueItem, _ b: ProjectQueueItem) -> Bool {
+        let sectionOrder: [QueueItem.Section: Int] = [.review: 0, .stale: 1, .conflicts: 2]
+        let aDate = a.item.date == "unknown" ? "" : a.item.date
+        let bDate = b.item.date == "unknown" ? "" : b.item.date
+        if a.item.section != b.item.section {
+            return sectionOrder[a.item.section]! < sectionOrder[b.item.section]!
+        }
+        if aDate != bDate { return aDate > bDate }
+        if a.project != b.project { return a.project < b.project }
+        return a.item.id < b.item.id
     }
 }

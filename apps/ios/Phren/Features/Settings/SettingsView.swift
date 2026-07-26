@@ -3,8 +3,10 @@ import PhrenKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var failedOps: [QueuedOp] = []
+    @State private var failedOps: [(storeId: String, storeName: String, op: QueuedOp)] = []
     @State private var confirmSignOut = false
+    @State private var showAddStore = false
+    @State private var removingStore: StoreDescriptor?
 
     var body: some View {
         NavigationStack {
@@ -21,14 +23,26 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Store") {
-                    if let repo = model.selectedRepo {
-                        LabeledContent("Repository", value: "\(repo.owner)/\(repo.name)")
-                        LabeledContent("Branch", value: repo.branch)
+                Section {
+                    ForEach(model.storeContexts) { context in
+                        StoreRow(context: context)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    removingStore = context.descriptor
+                                } label: {
+                                    Label("Remove", systemImage: "trash")
+                                }
+                            }
                     }
-                    Button("Sync now") {
-                        Task { await model.pullToRefresh() }
+                    Button {
+                        showAddStore = true
+                    } label: {
+                        Label("Add store", systemImage: "plus")
                     }
+                } header: {
+                    Text("Stores")
+                } footer: {
+                    Text("Each store is a GitHub repository holding a phren store. Removing one only deletes this device's local copy.")
                 }
 
                 Section("Sync") {
@@ -42,21 +56,32 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+                    Button("Sync now") {
+                        Task {
+                            await model.pullToRefresh()
+                            failedOps = await model.failedOps()
+                        }
+                    }
                 }
 
                 if !failedOps.isEmpty {
                     Section {
-                        ForEach(failedOps) { op in
+                        ForEach(failedOps, id: \.op.id) { failed in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(op.op.label).font(.callout)
-                                if let error = op.lastError {
-                                    Text(error).font(.caption).foregroundStyle(.red)
+                                Text(failed.op.op.label).font(.callout)
+                                HStack(spacing: 6) {
+                                    if model.hasMultipleStores {
+                                        TagChip(text: failed.storeName, color: .indigo)
+                                    }
+                                    if let error = failed.op.lastError {
+                                        Text(error).font(.caption).foregroundStyle(.red)
+                                    }
                                 }
                             }
                             .swipeActions {
                                 Button(role: .destructive) {
                                     Task {
-                                        await model.discardFailedOp(id: op.id)
+                                        await model.discardFailedOp(storeId: failed.storeId, id: failed.op.id)
                                         failedOps = await model.failedOps()
                                     }
                                 } label: {
@@ -88,8 +113,40 @@ struct SettingsView: View {
                 await model.pullToRefresh()
                 failedOps = await model.failedOps()
             }
+            .sheet(isPresented: $showAddStore) {
+                NavigationStack {
+                    RepoPickerList(
+                        existingStoreIds: Set(model.storeDescriptors.map(\.id))
+                    ) { repo in
+                        showAddStore = false
+                        Task { await model.addStore(repo: repo) }
+                    }
+                    .navigationTitle("Add store")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showAddStore = false }
+                        }
+                    }
+                }
+            }
             .confirmationDialog(
-                "Sign out and remove the local copy of your store from this device?",
+                "Remove \(removingStore?.id ?? "this store") from this device? The GitHub repository is not affected.",
+                isPresented: Binding(
+                    get: { removingStore != nil },
+                    set: { if !$0 { removingStore = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove store", role: .destructive) {
+                    if let store = removingStore {
+                        Task { await model.removeStore(id: store.id) }
+                    }
+                    removingStore = nil
+                }
+            }
+            .confirmationDialog(
+                "Sign out and remove the local copies of all stores from this device?",
                 isPresented: $confirmSignOut,
                 titleVisibility: .visible
             ) {
@@ -97,6 +154,40 @@ struct SettingsView: View {
                     Task { await model.signOut() }
                 }
             }
+        }
+    }
+}
+
+struct StoreRow: View {
+    let context: StoreContext
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(context.descriptor.id)
+                    .font(.callout)
+                if !context.descriptor.canPush {
+                    TagChip(text: "read-only", color: .orange)
+                }
+            }
+            HStack(spacing: 8) {
+                if let last = context.status.lastSyncedAt {
+                    Text("synced \(last.formatted(date: .omitted, time: .shortened))")
+                } else {
+                    Text("not synced yet")
+                }
+                if context.status.pendingCount > 0 {
+                    Text("\(context.status.pendingCount) pending")
+                        .foregroundStyle(.orange)
+                }
+                if let error = context.status.lastError {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 }

@@ -11,6 +11,8 @@ public struct SearchIndex: Sendable {
 
     public struct Result: Identifiable, Equatable, Sendable {
         public let id: String
+        /// Store the item came from ("" in single-store contexts).
+        public let store: String
         public let project: String
         public let kind: DocKind
         public let text: String
@@ -22,6 +24,7 @@ public struct SearchIndex: Sendable {
 
     private struct Doc {
         let id: String
+        let store: String
         let project: String
         let kind: DocKind
         let text: String
@@ -35,51 +38,57 @@ public struct SearchIndex: Sendable {
     public init() {}
 
     public init(snapshot: LocalStore.Snapshot) {
+        self.init(snapshots: [(store: "", snapshot: snapshot)])
+    }
+
+    public init(snapshots: [(store: String, snapshot: LocalStore.Snapshot)]) {
         var docs: [Doc] = []
-        for (project, findings) in snapshot.findings {
-            for finding in findings where !finding.archived {
-                docs.append(Self.doc(
-                    id: "f:\(project):\(finding.stableId ?? finding.id)",
-                    project: project, kind: .finding, text: finding.text,
-                    date: finding.date, typeTag: finding.typeTag
-                ))
+        for (store, snapshot) in snapshots {
+            for (project, findings) in snapshot.findings {
+                for finding in findings where !finding.archived {
+                    docs.append(Self.doc(
+                        id: "f:\(store):\(project):\(finding.stableId ?? finding.id)",
+                        store: store, project: project, kind: .finding, text: finding.text,
+                        date: finding.date, typeTag: finding.typeTag
+                    ))
+                }
             }
-        }
-        for (project, notes) in snapshot.notes {
-            for note in notes {
-                docs.append(Self.doc(
-                    id: "n:\(project):\(note.stableId)",
-                    project: project, kind: .note, text: note.text,
-                    date: note.date, typeTag: nil
-                ))
+            for (project, notes) in snapshot.notes {
+                for note in notes {
+                    docs.append(Self.doc(
+                        id: "n:\(store):\(project):\(note.stableId)",
+                        store: store, project: project, kind: .note, text: note.text,
+                        date: note.date, typeTag: nil
+                    ))
+                }
             }
-        }
-        for (project, taskDoc) in snapshot.tasks {
-            for task in taskDoc.allItems {
-                docs.append(Self.doc(
-                    id: "t:\(project):\(task.stableId ?? task.id)",
-                    project: project, kind: .task, text: task.line,
-                    date: task.createdAt.map { String($0.prefix(10)) }, typeTag: nil
-                ))
+            for (project, taskDoc) in snapshot.tasks {
+                for task in taskDoc.allItems {
+                    docs.append(Self.doc(
+                        id: "t:\(store):\(project):\(task.stableId ?? task.id)",
+                        store: store, project: project, kind: .task, text: task.line,
+                        date: task.createdAt.map { String($0.prefix(10)) }, typeTag: nil
+                    ))
+                }
             }
-        }
-        for (project, summary) in snapshot.summaries {
-            for (i, paragraph) in summary.components(separatedBy: "\n\n").enumerated() {
-                let trimmed = paragraph.jsTrimmed
-                guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
-                docs.append(Self.doc(
-                    id: "s:\(project):\(i)",
-                    project: project, kind: .summary, text: trimmed,
-                    date: nil, typeTag: nil
-                ))
+            for (project, summary) in snapshot.summaries {
+                for (i, paragraph) in summary.components(separatedBy: "\n\n").enumerated() {
+                    let trimmed = paragraph.jsTrimmed
+                    guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+                    docs.append(Self.doc(
+                        id: "s:\(store):\(project):\(i)",
+                        store: store, project: project, kind: .summary, text: trimmed,
+                        date: nil, typeTag: nil
+                    ))
+                }
             }
         }
         self.docs = docs
     }
 
-    private static func doc(id: String, project: String, kind: DocKind,
+    private static func doc(id: String, store: String, project: String, kind: DocKind,
                             text: String, date: String?, typeTag: String?) -> Doc {
-        Doc(id: id, project: project, kind: kind, text: text, date: date,
+        Doc(id: id, store: store, project: project, kind: kind, text: text, date: date,
             typeTag: typeTag, tokens: tokenFrequencies(text))
     }
 
@@ -99,7 +108,7 @@ public struct SearchIndex: Sendable {
 
     /// Term-frequency scoring with prefix matching on the final query token
     /// (so search feels instant while typing) and a recency boost by date.
-    public func search(_ query: String, project: String? = nil,
+    public func search(_ query: String, store: String? = nil, project: String? = nil,
                        kind: DocKind? = nil, typeTag: String? = nil,
                        limit: Int = 50) -> [Result] {
         let queryTokens = Self.tokenize(query)
@@ -107,6 +116,7 @@ public struct SearchIndex: Sendable {
 
         var results: [Result] = []
         for doc in docs {
+            if let store, doc.store != store { continue }
             if let project, doc.project != project { continue }
             if let kind, doc.kind != kind { continue }
             if let typeTag, doc.typeTag != typeTag { continue }
@@ -131,7 +141,7 @@ public struct SearchIndex: Sendable {
                 score += Self.recencyBoost(date)
             }
             results.append(Result(
-                id: doc.id, project: doc.project, kind: doc.kind,
+                id: doc.id, store: doc.store, project: doc.project, kind: doc.kind,
                 text: doc.text, date: doc.date, typeTag: doc.typeTag, score: score
             ))
         }

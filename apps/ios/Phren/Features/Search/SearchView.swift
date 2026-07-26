@@ -4,11 +4,12 @@ import PhrenKit
 struct SearchView: View {
     @Environment(AppModel.self) private var model
     @State private var query = ""
+    @State private var storeNameFilter: String?
     @State private var projectFilter: String?
     @State private var kindFilter: SearchIndex.DocKind?
 
     private var results: [SearchIndex.Result] {
-        model.searchIndex.search(query, project: projectFilter, kind: kindFilter)
+        model.searchIndex.search(query, store: storeNameFilter, project: projectFilter, kind: kindFilter)
     }
 
     var body: some View {
@@ -24,6 +25,9 @@ struct SearchView: View {
                                     .lineLimit(4)
                                 HStack(spacing: 6) {
                                     TagChip(text: result.project, color: .blue)
+                                    if model.hasMultipleStores, !result.store.isEmpty {
+                                        TagChip(text: result.store, color: .indigo)
+                                    }
                                     TagChip(text: result.kind.rawValue, color: kindColor(result.kind))
                                     if let tag = result.typeTag {
                                         TagChip(text: tag, color: .purple)
@@ -57,8 +61,17 @@ struct SearchView: View {
                     Menu {
                         Picker("Project", selection: $projectFilter) {
                             Text("All projects").tag(String?.none)
-                            ForEach(model.snapshot.projects.map(\.name), id: \.self) { name in
+                            ForEach(Array(Set(model.mergedProjects.map(\.project.name))).sorted(), id: \.self) { name in
                                 Text(name).tag(String?.some(name))
+                            }
+                        }
+                        if model.hasMultipleStores {
+                            // SearchIndex attributes docs by store display name.
+                            Picker("Store", selection: $storeNameFilter) {
+                                Text("All stores").tag(String?.none)
+                                ForEach(model.storeDescriptors) { store in
+                                    Text(store.displayName).tag(String?.some(store.displayName))
+                                }
                             }
                         }
                         Picker("Type", selection: $kindFilter) {
