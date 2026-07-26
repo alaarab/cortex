@@ -14,24 +14,26 @@ struct LiveStatusBar: View {
             Circle()
                 .fill(indicatorColor)
                 .frame(width: 8, height: 8)
+                .shadow(color: indicatorColor.opacity(0.7), radius: model.syncStatus.isLive ? 3 : 0)
             Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.caption.monospaced())
+                .foregroundStyle(PhrenTheme.textMuted)
             Spacer()
             if model.syncStatus.pendingCount > 0 {
                 Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(PhrenTheme.amber)
             }
         }
         .padding(.horizontal)
         .padding(.vertical, 4)
+        .background(PhrenTheme.bg)
         .onReceive(ticker) { now = $0 }
     }
 
     private var indicatorColor: Color {
-        if model.syncStatus.lastError != nil { return .red }
-        return model.syncStatus.isLive ? .green : .gray
+        if model.syncStatus.lastError != nil { return PhrenTheme.red }
+        return model.syncStatus.isLive ? PhrenTheme.cyan : PhrenTheme.textDim
     }
 
     private var statusText: String {
@@ -78,13 +80,13 @@ struct FindingRow: View {
                 .font(.callout)
             HStack(spacing: 6) {
                 if let tag = finding.typeTag {
-                    TagChip(text: tag, color: .blue)
+                    TagChip(text: tag, role: .type)
                 }
                 if finding.status != .active {
-                    TagChip(text: finding.status.rawValue, color: .orange)
+                    TagChip(text: finding.status.rawValue, role: .status)
                 }
                 if let scope = finding.scope {
-                    TagChip(text: scope, color: .purple)
+                    TagChip(text: scope, role: .scope)
                 }
                 if let actor = finding.actor {
                     Text("@\(actor)")
@@ -114,12 +116,24 @@ struct TagChip: View {
     let text: String
     let color: Color
 
+    init(text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
+
+    init(text: String, role: PhrenTheme.ChipRole) {
+        self.init(text: text, color: PhrenTheme.chipColor(role))
+    }
+
     var body: some View {
+        // The site's chips are monospace, squared-off, and bordered rather
+        // than pill-shaped (docs/index.html .mini-tag / card styling).
         Text(text)
-            .font(.caption2.weight(.medium))
+            .font(.caption2.monospaced().weight(.semibold))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
+            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(color.opacity(0.45), lineWidth: 1))
             .foregroundStyle(color)
     }
 }

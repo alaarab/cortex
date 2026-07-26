@@ -138,6 +138,7 @@ struct TaskListView: View {
                 }
             }
             .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
         }
         .toolbar {
             if !isProjectScoped {
@@ -277,10 +278,10 @@ struct TaskRow: View {
                     .strikethrough(row.task.checked)
                 HStack(spacing: 6) {
                     if showProject {
-                        TagChip(text: row.project, color: .blue)
+                        TagChip(text: row.project, role: .project)
                     }
                     if showStore {
-                        TagChip(text: row.storeName, color: .indigo)
+                        TagChip(text: row.storeName, role: .store)
                     }
                     if let priority = row.task.priority {
                         TagChip(text: priority.rawValue, color: priorityColor(priority))
@@ -309,9 +310,9 @@ struct TaskRow: View {
 
     private func priorityColor(_ priority: PhrenTask.Priority) -> Color {
         switch priority {
-        case .high: return .red
-        case .medium: return .orange
-        case .low: return .gray
+        case .high: return PhrenTheme.red
+        case .medium: return PhrenTheme.amber
+        case .low: return PhrenTheme.textDim
         }
     }
 }

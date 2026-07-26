@@ -73,6 +73,7 @@ struct ReviewView: View {
                     }
                 }
                 .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
 
                 if editMode == .active && !selection.isEmpty {
                     batchBar
@@ -177,14 +178,14 @@ struct ReviewRow: View {
             Text(entry.entry.item.text)
                 .font(.callout)
             HStack(spacing: 6) {
-                TagChip(text: entry.entry.project, color: .blue)
+                TagChip(text: entry.entry.project, role: .project)
                 if showStore {
-                    TagChip(text: entry.storeName, color: .indigo)
+                    TagChip(text: entry.storeName, role: .store)
                 }
                 if let confidence = entry.entry.item.confidence {
                     TagChip(
                         text: String(format: "%.0f%%", confidence * 100),
-                        color: confidence < 0.7 ? .orange : .green
+                        color: confidence < 0.7 ? PhrenTheme.amber : PhrenTheme.green
                     )
                 }
                 if let machine = entry.entry.item.machine {
@@ -200,6 +201,6 @@ struct ReviewRow: View {
             }
         }
         .padding(.vertical, 2)
-        .listRowBackground(entry.entry.item.risky ? Color.orange.opacity(0.08) : nil)
+        .listRowBackground(entry.entry.item.risky ? PhrenTheme.amber.opacity(0.08) : nil)
     }
 }

@@ -25,13 +25,13 @@ struct SearchView: View {
                                     .font(.callout)
                                     .lineLimit(4)
                                 HStack(spacing: 6) {
-                                    TagChip(text: result.project, color: .blue)
+                                    TagChip(text: result.project, role: .project)
                                     if model.hasMultipleStores, !result.store.isEmpty {
-                                        TagChip(text: model.storeName(for: result.store), color: .indigo)
+                                        TagChip(text: model.storeName(for: result.store), role: .store)
                                     }
                                     TagChip(text: result.kind.rawValue, color: kindColor(result.kind))
                                     if let tag = result.typeTag {
-                                        TagChip(text: tag, color: .purple)
+                                        TagChip(text: tag, role: .type)
                                     }
                                     Spacer()
                                     if let date = result.date {
@@ -55,6 +55,7 @@ struct SearchView: View {
                     }
                 }
             }
+            .phrenScreen()
             .searchable(text: $query, prompt: "Search findings, notes, tasks…")
             .navigationTitle("Search")
             .toolbar {
@@ -90,10 +91,10 @@ struct SearchView: View {
 
     private func kindColor(_ kind: SearchIndex.DocKind) -> Color {
         switch kind {
-        case .finding: return .yellow
-        case .note: return .teal
-        case .task: return .green
-        case .summary: return .gray
+        case .finding: return PhrenTheme.amber
+        case .note: return PhrenTheme.cyan
+        case .task: return PhrenTheme.green
+        case .summary: return PhrenTheme.textMuted
         }
     }
 }

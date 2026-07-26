@@ -32,14 +32,23 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "brain.head.profile")
-                .font(.system(size: 64))
-                .foregroundStyle(.tint)
+            // The pixel-art mascot from the site (docs/phren-transparent.png).
+            Image("PhrenMascot")
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 140, height: 140)
+                .shadow(color: PhrenTheme.cyan.opacity(0.25), radius: 24)
             Text("phren")
-                .font(.largeTitle.bold())
-            Text("Your agent's memory, in your pocket.\nSign in with GitHub to open your phren store.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.system(.largeTitle, design: .monospaced).bold())
+                .foregroundStyle(PhrenTheme.text)
+            Text("memory that travels with your agents")
+                .font(.callout.monospaced())
+                .foregroundStyle(PhrenTheme.lavender)
+                .multilineTextAlignment(.center)
+            Text("Sign in with GitHub to open your phren store.")
+                .font(.footnote)
+                .foregroundStyle(PhrenTheme.textMuted)
                 .multilineTextAlignment(.center)
             Spacer()
 
@@ -68,6 +77,8 @@ struct WelcomeView: View {
             .padding(.bottom)
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PhrenTheme.bg)
         .sheet(isPresented: $showPATSheet) {
             PATSignInSheet()
         }
@@ -110,22 +121,24 @@ struct DeviceCodeView: View {
     var body: some View {
         VStack(spacing: 8) {
             Text("Enter this code on GitHub:")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.footnote.monospaced())
+                .foregroundStyle(PhrenTheme.textMuted)
             Text(code.userCode)
                 .font(.system(.title, design: .monospaced).bold())
+                .foregroundStyle(PhrenTheme.cyan)
                 .textSelection(.enabled)
             if polling {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("Waiting for approval…")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(PhrenTheme.textMuted)
                 }
             }
         }
         .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        .background(PhrenTheme.bg2, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(PhrenTheme.border, lineWidth: 1))
     }
 }
 
@@ -269,6 +282,7 @@ struct RepoPickerList: View {
                 }
             }
         }
+        .phrenScreen()
         .task { await load() }
     }
 
@@ -339,14 +353,23 @@ struct InitialSyncView: View {
 
     var body: some View {
         VStack(spacing: 16) {
+            Image("PhrenMascot")
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 90, height: 90)
             ProgressView()
+                .tint(PhrenTheme.cyan)
             Text("Syncing your store…")
-                .font(.headline)
+                .font(.headline.monospaced())
+                .foregroundStyle(PhrenTheme.text)
             if let store = model.storeDescriptors.last {
                 Text(store.id)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(PhrenTheme.lavender)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PhrenTheme.bg)
     }
 }

@@ -71,7 +71,7 @@ struct SettingsView: View {
                                 Text(failed.op.op.label).font(.callout)
                                 HStack(spacing: 6) {
                                     if model.hasMultipleStores {
-                                        TagChip(text: failed.storeName, color: .indigo)
+                                        TagChip(text: failed.storeName, role: .store)
                                     }
                                     if let error = failed.op.lastError {
                                         Text(error).font(.caption).foregroundStyle(.red)
@@ -107,6 +107,7 @@ struct SettingsView: View {
                     Link("phren on GitHub", destination: URL(string: "https://github.com/alaarab/phren")!)
                 }
             }
+            .phrenScreen()
             .navigationTitle("Settings")
             .task { failedOps = await model.failedOps() }
             .refreshable {
@@ -167,7 +168,7 @@ struct StoreRow: View {
                 Text(context.descriptor.id)
                     .font(.callout)
                 if !context.descriptor.canPush {
-                    TagChip(text: "read-only", color: .orange)
+                    TagChip(text: "read-only", role: .warn)
                 }
             }
             HStack(spacing: 8) {

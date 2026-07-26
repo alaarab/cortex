@@ -22,7 +22,7 @@ struct ProjectsView: View {
                             HStack(spacing: 6) {
                                 Text(item.project.name).font(.headline)
                                 if model.hasMultipleStores {
-                                    TagChip(text: item.storeName, color: .indigo)
+                                    TagChip(text: item.storeName, role: .store)
                                 }
                             }
                             HStack(spacing: 10) {
@@ -51,6 +51,7 @@ struct ProjectsView: View {
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
                 .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
             }
             .navigationTitle("Projects")
             .toolbar {
@@ -167,6 +168,7 @@ struct FindingsTab: View {
             }
         }
         .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
@@ -234,7 +236,7 @@ struct NotesTab: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                                 if note.promoted {
-                                    TagChip(text: "promoted", color: .green)
+                                    TagChip(text: "promoted", role: .good)
                                 }
                             }
                         }
@@ -275,6 +277,7 @@ struct NotesTab: View {
             }
         }
         .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
@@ -337,5 +340,6 @@ struct SummaryTab: View {
             }
         }
         .refreshable { await model.pullToRefresh() }
+        .phrenScreen()
     }
 }

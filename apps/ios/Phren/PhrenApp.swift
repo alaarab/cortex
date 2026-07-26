@@ -6,10 +6,17 @@ struct PhrenApp: App {
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        Self.applyPhrenChrome()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
+                .tint(PhrenTheme.cyan)
+                // The phren identity is dark-only (docs/style.css).
+                .preferredColorScheme(.dark)
                 .task { await model.bootstrap() }
                 .onChange(of: scenePhase) { _, phase in
                     // Live sync runs only while the app is visible; returning
@@ -22,6 +29,27 @@ struct PhrenApp: App {
                 }
         }
     }
+
+    /// Navy navigation + tab chrome matching the site's --bg/--bg-1 surfaces.
+    private static func applyPhrenChrome() {
+        let navy = UIColor(PhrenTheme.bg)
+        let text = UIColor(PhrenTheme.text)
+
+        let nav = UINavigationBarAppearance()
+        nav.configureWithOpaqueBackground()
+        nav.backgroundColor = navy
+        nav.titleTextAttributes = [.foregroundColor: text]
+        nav.largeTitleTextAttributes = [.foregroundColor: text]
+        UINavigationBar.appearance().standardAppearance = nav
+        UINavigationBar.appearance().scrollEdgeAppearance = nav
+        UINavigationBar.appearance().compactAppearance = nav
+
+        let tab = UITabBarAppearance()
+        tab.configureWithOpaqueBackground()
+        tab.backgroundColor = navy
+        UITabBar.appearance().standardAppearance = tab
+        UITabBar.appearance().scrollEdgeAppearance = tab
+    }
 }
 
 struct RootView: View {
@@ -31,6 +59,8 @@ struct RootView: View {
         switch model.phase {
         case .loading:
             ProgressView("Loading…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(PhrenTheme.bg)
         case .signedOut, .pickingRepo, .initialSync:
             OnboardingFlow()
         case .ready:
