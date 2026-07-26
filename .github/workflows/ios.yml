@@ -15,7 +15,7 @@ on:
 jobs:
   phrenkit-tests:
     name: PhrenKit tests (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       # Use the runner image's default Xcode — pinning an older version
@@ -26,7 +26,7 @@ jobs:
 
   app-build:
     name: App smoke build (iOS Simulator)
-    runs-on: macos-14
+    runs-on: macos-15
     needs: phrenkit-tests
     steps:
       - uses: actions/checkout@v4
