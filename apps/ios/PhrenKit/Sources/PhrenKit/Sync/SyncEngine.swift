@@ -17,6 +17,8 @@ public actor SyncEngine {
         public var pendingCount: Int = 0
         public var failedCount: Int = 0
         public var lastError: String?
+
+        public init() {}
     }
 
     /// Identity stamped into `<!-- source: -->` comments on findings written
@@ -42,6 +44,8 @@ public actor SyncEngine {
     private var writeContext = WriteContext()
     private var liveTask: Task<Void, Never>?
     private var flushTask: Task<Void, Never>?
+    private var pullTask: Task<Void, Never>?
+    private var pullGeneration = 0
 
     /// Fires after any content change (remote pull or local apply) and on
     /// status transitions — the app re-reads the snapshot and re-renders.
@@ -79,9 +83,26 @@ public actor SyncEngine {
 
     // MARK: - Pull
 
-    /// One sync pass. `force` skips the ETag shortcut (used for pull-to-refresh).
+    /// One sync pass. `force` skips the ETag shortcut (used for pull-to-refresh
+    /// and sha-conflict recovery). Concurrent callers serialize: a caller that
+    /// finds a pull in flight awaits it, and a forced caller then runs its own
+    /// pass — the conflict-recovery path must never no-op on a stale sha.
     public func pull(force: Bool = false) async {
-        guard !status.isSyncing else { return }
+        if let inFlight = pullTask {
+            await inFlight.value
+            if !force { return }
+        }
+        pullGeneration += 1
+        let generation = pullGeneration
+        let task = Task { await self.performPull(force: force) }
+        pullTask = task
+        await task.value
+        if pullGeneration == generation {
+            pullTask = nil
+        }
+    }
+
+    private func performPull(force: Bool) async {
         setStatus { $0.isSyncing = true; $0.lastError = nil }
         defer { setStatus { $0.isSyncing = false } }
 
@@ -124,6 +145,11 @@ public actor SyncEngine {
             }
             for path in await store.allPaths() {
                 guard remote[path] == nil, LocalStore.isSyncedPath(path) else { continue }
+                // A nil blob sha means the file was created locally and never
+                // synced (e.g. a new day's notes file from a queued op) —
+                // deleting it here would drop the user's change before the
+                // flush pushes it.
+                guard await store.blobSha(for: path) != nil else { continue }
                 try await store.delete(path)
                 changed = true
             }

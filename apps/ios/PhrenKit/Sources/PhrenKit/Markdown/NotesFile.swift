@@ -81,7 +81,8 @@ public struct NotesFile: Sendable {
     static func normalizeNoteText(_ text: String) throws -> String {
         let normalized = JSRegex(#"\r\n?"#).replaceAll(text, with: "\n").jsTrimmed
         guard !normalized.isEmpty else { throw PhrenKitError.emptyInput("Note text cannot be empty.") }
-        guard normalized.count <= maxNoteLength else {
+        // UTF-16 count to match JS `.length` (notes.ts:63).
+        guard normalized.utf16.count <= maxNoteLength else {
             throw PhrenKitError.validation("Note text exceeds \(maxNoteLength) characters.")
         }
         if let secret = SecretScanner.scan(normalized) {

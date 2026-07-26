@@ -32,10 +32,14 @@ public struct ReviewFile: Sendable {
     }
 
     /// policy.ts:723 `normalizeQueueEntryText` with `{truncate: true}`.
+    /// Lengths are measured in UTF-16 units to match JS `.length`/`.slice` —
+    /// otherwise emoji shift the truncation boundary and break byte-identity.
     static func normalizeQueueEntryText(_ raw: String) -> String {
         let cleaned = cleanQueueEntryText(raw)
-        if cleaned.count <= maxQueueEntryLength { return cleaned }
-        return trimEnd(String(cleaned.prefix(maxQueueEntryLength - 1))) + "…"
+        if cleaned.utf16.count <= maxQueueEntryLength { return cleaned }
+        let units = Array(cleaned.utf16.prefix(maxQueueEntryLength - 1))
+        let sliced = String(utf16CodeUnits: units, count: units.count)
+        return trimEnd(sliced) + "…"
     }
 
     // MARK: - Parse (access.ts:609 parseQueueLine, 631 readReviewQueue)

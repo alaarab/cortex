@@ -143,7 +143,7 @@ public struct TasksFile: Sendable {
     }
 
     /// tasks.ts:65 `stripPriorityTag` — strips ALL trailing priority tags.
-    static func stripPriorityTag(_ text: String) -> String {
+    public static func stripPriorityTag(_ text: String) -> String {
         var text = text
         var prev: String
         repeat {
@@ -160,7 +160,7 @@ public struct TasksFile: Sendable {
     }
 
     /// tasks.ts:82 `stripPinnedTag`
-    static func stripPinnedTag(_ text: String) -> String {
+    public static func stripPinnedTag(_ text: String) -> String {
         JSRegex(#"\s*\[pinned\]"#, caseInsensitive: true).replaceAll(text, with: "").jsTrimmed
     }
 
@@ -214,16 +214,18 @@ public struct TasksFile: Sendable {
         return result
     }
 
-    /// tasks.ts:197 `assignMissingRanks`
+    /// tasks.ts:197 `assignMissingRanks`. JS Array.sort is stable and the CLI
+    /// relies on it (equal-priority items keep file order); Swift's sort is
+    /// not guaranteed stable, so tie-break on the original index.
     static func assignMissingRanks(_ items: inout [PhrenTask]) {
         let unrankedIndices = items.indices.filter { items[$0].rank == nil }
         guard !unrankedIndices.isEmpty else { return }
         let maxExisting = items.compactMap(\.rank).max() ?? 0
         let priorityOrder: [PhrenTask.Priority: Int] = [.high: 0, .medium: 1, .low: 2]
-        let sorted = unrankedIndices.sorted {
-            (items[$0].priority.flatMap { priorityOrder[$0] } ?? 3)
-                < (items[$1].priority.flatMap { priorityOrder[$0] } ?? 3)
+        func order(_ idx: Int) -> Int {
+            items[idx].priority.flatMap { priorityOrder[$0] } ?? 3
         }
+        let sorted = unrankedIndices.sorted { (order($0), $0) < (order($1), $1) }
         var next = maxExisting + 1
         for idx in sorted {
             items[idx].rank = next

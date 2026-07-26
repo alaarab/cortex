@@ -10,7 +10,9 @@ import FoundationNetworking
 /// Kept deliberately narrow so a future switch to the Git Data API
 /// (batched multi-file commits) stays local to this type.
 public actor GitHubClient {
-    public static let apiBase = URL(string: "https://api.github.com")!
+    /// Trailing slash matters: relative paths resolve against it directly,
+    /// avoiding `//`-doubling from appendingPathComponent normalization.
+    public static let apiBase = URL(string: "https://api.github.com/")!
 
     private let session: URLSession
     private var token: String?
@@ -37,7 +39,7 @@ public actor GitHubClient {
         guard let token else { throw GitHubError.notAuthenticated }
         // Not appendingPathComponent — several paths carry query strings
         // ("?recursive=1"), which it would percent-encode.
-        guard let url = URL(string: path, relativeTo: Self.apiBase.appendingPathComponent("/")) else {
+        guard let url = URL(string: path, relativeTo: Self.apiBase) else {
             throw GitHubError.invalidResponse
         }
         var req = URLRequest(url: url)

@@ -77,13 +77,15 @@ func parseScopeComment(_ line: String) -> String? {
     return unquoted.isEmpty ? nil : unquoted
 }
 
-private let provenanceSources: Set<String> = ["human", "agent", "hook", "import", "consolidation", "unknown"]
+// citation.ts:20 FINDING_PROVENANCE_SOURCES
+private let provenanceSources: Set<String> = ["human", "agent", "hook", "extract", "consolidation", "unknown"]
 
 /// citation.ts:146 `parseSourceComment`
 func parseSourceComment(_ line: String) -> FindingProvenance? {
     guard let payload = MetadataRegex.source.group(line) else { return nil }
 
-    let firstToken = payload.jsTrimmed.split(separator: " ").first.map(String.init) ?? ""
+    // TS splits on /\s+/, not just spaces (citation.ts:151).
+    let firstToken = payload.jsTrimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
     func token(_ key: String) -> String? {
         readSourceToken(JSRegex("(?:^|\\s)\(key):(\".*?\"|\\S+)").group(payload))
     }
@@ -119,11 +121,14 @@ func parseCitationComment(_ line: String) -> FindingCitation? {
     guard jsonStr.hasPrefix("{"), let data = jsonStr.data(using: .utf8) else { return nil }
     guard let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
     guard let createdAt = parsed["created_at"] as? String, !createdAt.isEmpty else { return nil }
+    // JSONSerialization surfaces booleans as NSNumber too; TS's
+    // `typeof === "number"` rejects them, so filter Bool explicitly.
+    let line: Int? = (parsed["line"] is Bool) ? nil : (parsed["line"] as? NSNumber)?.intValue
     return FindingCitation(
         createdAt: createdAt,
         repo: parsed["repo"] as? String,
         file: parsed["file"] as? String,
-        line: (parsed["line"] as? NSNumber)?.intValue,
+        line: line,
         commit: parsed["commit"] as? String,
         supersedes: parsed["supersedes"] as? String,
         taskItem: parsed["task_item"] as? String
