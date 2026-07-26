@@ -45,11 +45,7 @@ struct SearchView: View {
                 }
                 .overlay {
                     if query.isEmpty {
-                        ContentUnavailableView(
-                            "Search your memory",
-                            systemImage: "magnifyingglass",
-                            description: Text("Findings, notes, tasks, and summaries — all searched on-device.")
-                        )
+                        PhrenEmptyState(title: "Search your memory", message: "Findings, notes, tasks, and summaries — all searched on-device.")
                     } else if results.isEmpty {
                         ContentUnavailableView.search(text: query)
                     }

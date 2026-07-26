@@ -42,11 +42,7 @@ struct ProjectsView: View {
                 }
                 .overlay {
                     if model.mergedProjects.isEmpty {
-                        ContentUnavailableView(
-                            "No projects yet",
-                            systemImage: "square.grid.2x2",
-                            description: Text("Projects appear here once your phren store has content.")
-                        )
+                        PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
                     }
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
@@ -160,11 +156,7 @@ struct FindingsTab: View {
         }
         .overlay {
             if findings.isEmpty {
-                ContentUnavailableView(
-                    "No findings",
-                    systemImage: "lightbulb",
-                    description: Text("Capture your first finding with the + button.")
-                )
+                PhrenEmptyState(title: "No findings", message: "Capture your first finding with the + button.")
             }
         }
         .refreshable { await model.pullToRefresh() }
@@ -269,11 +261,7 @@ struct NotesTab: View {
         }
         .overlay {
             if notes.isEmpty {
-                ContentUnavailableView(
-                    "No notes",
-                    systemImage: "note.text",
-                    description: Text("Jot down a note with the + button. Promote the good ones to findings.")
-                )
+                PhrenEmptyState(title: "No notes", message: "Jot down a note with the + button. Promote the good ones to findings.")
             }
         }
         .refreshable { await model.pullToRefresh() }
@@ -331,11 +319,7 @@ struct SummaryTab: View {
                     .padding()
                     .textSelection(.enabled)
             } else {
-                ContentUnavailableView(
-                    "No summary",
-                    systemImage: "doc.text",
-                    description: Text("This project has no summary.md yet.")
-                )
+                PhrenEmptyState(title: "No summary", message: "This project has no summary.md yet.")
                 .padding(.top, 60)
             }
         }

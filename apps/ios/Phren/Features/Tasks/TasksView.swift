@@ -130,11 +130,7 @@ struct TaskListView: View {
             }
             .overlay {
                 if rows.isEmpty {
-                    ContentUnavailableView(
-                        "Nothing in \(section.rawValue)",
-                        systemImage: "checklist",
-                        description: Text("Add a task with the + button.")
-                    )
+                    PhrenEmptyState(title: "Nothing in \(section.rawValue)", message: "Add a task with the + button.")
                 }
             }
             .refreshable { await model.pullToRefresh() }

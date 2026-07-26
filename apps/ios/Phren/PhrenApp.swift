@@ -14,7 +14,7 @@ struct PhrenApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .tint(PhrenTheme.cyan)
+                .tint(PhrenTheme.accent)
                 // The phren identity is dark-only (docs/style.css).
                 .preferredColorScheme(.dark)
                 .task { await model.bootstrap() }

@@ -32,13 +32,8 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            // The pixel-art mascot from the site (docs/phren-transparent.png).
-            Image("PhrenMascot")
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 140, height: 140)
-                .shadow(color: PhrenTheme.cyan.opacity(0.25), radius: 24)
+            // The bobbing pixel-art mascot + the site's typewriter finding card.
+            PhrenMascotView(size: 130)
             Text("phren")
                 .font(.system(.largeTitle, design: .monospaced).bold())
                 .foregroundStyle(PhrenTheme.text)
@@ -46,6 +41,8 @@ struct WelcomeView: View {
                 .font(.callout.monospaced())
                 .foregroundStyle(PhrenTheme.lavender)
                 .multilineTextAlignment(.center)
+            TypewriterFindingCard()
+                .padding(.top, 4)
             Text("Sign in with GitHub to open your phren store.")
                 .font(.footnote)
                 .foregroundStyle(PhrenTheme.textMuted)
@@ -137,7 +134,7 @@ struct DeviceCodeView: View {
             }
         }
         .padding()
-        .background(PhrenTheme.bg2, in: RoundedRectangle(cornerRadius: 8))
+        .background(PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(PhrenTheme.border, lineWidth: 1))
     }
 }
@@ -353,11 +350,7 @@ struct InitialSyncView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Image("PhrenMascot")
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 90, height: 90)
+            PhrenMascotView(size: 90)
             ProgressView()
                 .tint(PhrenTheme.cyan)
             Text("Syncing your store…")
