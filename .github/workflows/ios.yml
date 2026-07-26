@@ -2,7 +2,7 @@ name: iOS
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
@@ -10,6 +10,7 @@ on:
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
+  workflow_dispatch:
 
 jobs:
   phrenkit-tests:
