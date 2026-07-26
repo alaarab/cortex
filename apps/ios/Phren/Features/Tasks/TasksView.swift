@@ -45,15 +45,22 @@ struct TaskListView: View {
 
     private var rows: [TaskListRow] {
         var result: [TaskListRow] = []
-        for (storeId, storeName, doc) in model.mergedTaskDocs {
-            if case .project(let scopeStore, let scopeProject) = scope {
-                guard storeId == scopeStore, doc.project == scopeProject else { continue }
-            } else if let selectedProject, doc.project != selectedProject {
-                continue
+        if case .project(let scopeStore, let scopeProject) = scope {
+            // Project scope reads the store's snapshot directly — the global
+            // store filter must not blank out a project-detail tab.
+            if let doc = model.snapshot(for: scopeStore).tasks[scopeProject] {
+                for task in doc.items(in: section) {
+                    result.append(TaskListRow(storeId: scopeStore, storeName: model.storeName(for: scopeStore),
+                                              project: scopeProject, task: task))
+                }
             }
-            for task in doc.items(in: section) {
-                result.append(TaskListRow(storeId: storeId, storeName: storeName,
-                                          project: doc.project, task: task))
+        } else {
+            for (storeId, storeName, doc) in model.mergedTaskDocs {
+                if let selectedProject, doc.project != selectedProject { continue }
+                for task in doc.items(in: section) {
+                    result.append(TaskListRow(storeId: storeId, storeName: storeName,
+                                              project: doc.project, task: task))
+                }
             }
         }
         // Pinned first, then rank (tasks.ts display order).
@@ -64,14 +71,17 @@ struct TaskListView: View {
     }
 
     private var projectNames: [String] {
-        Array(Set(model.mergedTaskDocs.map(\.doc.project))).sorted()
+        // Key paths can't traverse tuple elements — use a closure.
+        Array(Set(model.mergedTaskDocs.map { $0.doc.project })).sorted()
     }
 
-    /// Add targets: every writable (store, project) pair that has a tasks doc.
+    /// Add targets: every writable (store, project) pair. Derived from the
+    /// project list (not just existing task docs) so a project can receive
+    /// its first task — the write path creates tasks.md if missing.
     private var addTargets: [(storeId: String, storeName: String, project: String)] {
-        model.mergedTaskDocs
+        model.mergedProjects
             .filter { model.canPush(storeId: $0.storeId) }
-            .map { ($0.storeId, $0.storeName, $0.doc.project) }
+            .map { ($0.storeId, $0.storeName, $0.project.name) }
     }
 
     var body: some View {

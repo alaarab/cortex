@@ -4,12 +4,13 @@ import PhrenKit
 struct SearchView: View {
     @Environment(AppModel.self) private var model
     @State private var query = ""
-    @State private var storeNameFilter: String?
+    /// Store id (owner/name) — the SearchIndex attribution key.
+    @State private var storeIdFilter: String?
     @State private var projectFilter: String?
     @State private var kindFilter: SearchIndex.DocKind?
 
     private var results: [SearchIndex.Result] {
-        model.searchIndex.search(query, store: storeNameFilter, project: projectFilter, kind: kindFilter)
+        model.searchIndex.search(query, store: storeIdFilter, project: projectFilter, kind: kindFilter)
     }
 
     var body: some View {
@@ -26,7 +27,7 @@ struct SearchView: View {
                                 HStack(spacing: 6) {
                                     TagChip(text: result.project, color: .blue)
                                     if model.hasMultipleStores, !result.store.isEmpty {
-                                        TagChip(text: result.store, color: .indigo)
+                                        TagChip(text: model.storeName(for: result.store), color: .indigo)
                                     }
                                     TagChip(text: result.kind.rawValue, color: kindColor(result.kind))
                                     if let tag = result.typeTag {
@@ -66,11 +67,10 @@ struct SearchView: View {
                             }
                         }
                         if model.hasMultipleStores {
-                            // SearchIndex attributes docs by store display name.
-                            Picker("Store", selection: $storeNameFilter) {
+                            Picker("Store", selection: $storeIdFilter) {
                                 Text("All stores").tag(String?.none)
                                 ForEach(model.storeDescriptors) { store in
-                                    Text(store.displayName).tag(String?.some(store.displayName))
+                                    Text(store.displayName).tag(String?.some(store.id))
                                 }
                             }
                         }

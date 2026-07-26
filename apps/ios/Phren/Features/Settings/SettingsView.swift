@@ -3,7 +3,7 @@ import PhrenKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var failedOps: [(storeId: String, storeName: String, op: QueuedOp)] = []
+    @State private var failedOps: [FailedOpEntry] = []
     @State private var confirmSignOut = false
     @State private var showAddStore = false
     @State private var removingStore: StoreDescriptor?
@@ -66,7 +66,7 @@ struct SettingsView: View {
 
                 if !failedOps.isEmpty {
                     Section {
-                        ForEach(failedOps, id: \.op.id) { failed in
+                        ForEach(failedOps) { failed in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(failed.op.op.label).font(.callout)
                                 HStack(spacing: 6) {

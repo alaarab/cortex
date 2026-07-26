@@ -12,7 +12,9 @@ final class StoreContext: Identifiable {
     var snapshot: LocalStore.Snapshot = .empty
     var status = SyncEngine.Status()
 
-    var id: String { descriptor.id }
+    // nonisolated: witnesses the nonisolated Identifiable requirement without
+    // a MainActor hop (descriptor is an immutable Sendable let).
+    nonisolated var id: String { descriptor.id }
 
     init(descriptor: StoreDescriptor, store: LocalStore, engine: SyncEngine) {
         self.descriptor = descriptor
@@ -41,6 +43,14 @@ struct StoreQueueEntry: Identifiable {
     let entry: ProjectQueueItem
 
     var id: String { "\(storeId)/\(entry.id)" }
+}
+
+struct FailedOpEntry: Identifiable {
+    let storeId: String
+    let storeName: String
+    let op: QueuedOp
+
+    var id: UUID { op.id }
 }
 
 /// Root observable state: auth, the store list, merged snapshots, and sync.
@@ -279,7 +289,11 @@ final class AppModel {
             await refresh()
             await context.engine.startLive()
         }
-        if firstStore { phase = .ready }
+        if firstStore {
+            // openContext can fail (LocalStore init) — never strand the user
+            // in the tab view with zero stores.
+            phase = storeContexts.isEmpty ? .pickingRepo : .ready
+        }
     }
 
     /// Removes the store's local copy and registry entry. Never touches GitHub.
@@ -332,8 +346,10 @@ final class AppModel {
             context.snapshot = await context.store.snapshot()
             context.status = await context.engine.currentStatus()
         }
+        // Key by store id (owner/name) — display names alone collide when two
+        // owners have same-named repos. The UI translates via storeName(for:).
         searchIndex = SearchIndex(snapshots: storeContexts.map {
-            (store: $0.descriptor.displayName, snapshot: $0.snapshot)
+            (store: $0.id, snapshot: $0.snapshot)
         })
         syncStatus = aggregateStatus()
     }
@@ -391,11 +407,11 @@ final class AppModel {
         await refresh()
     }
 
-    func failedOps() async -> [(storeId: String, storeName: String, op: QueuedOp)] {
-        var result: [(String, String, QueuedOp)] = []
+    func failedOps() async -> [FailedOpEntry] {
+        var result: [FailedOpEntry] = []
         for context in storeContexts {
             for op in await context.engine.failedOps() {
-                result.append((context.id, context.descriptor.displayName, op))
+                result.append(FailedOpEntry(storeId: context.id, storeName: context.descriptor.displayName, op: op))
             }
         }
         return result
