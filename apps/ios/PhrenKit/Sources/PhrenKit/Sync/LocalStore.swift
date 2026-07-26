@@ -126,15 +126,21 @@ public actor LocalStore {
     }
 
     public func allPaths() -> [String] {
-        let filesRoot = root.appendingPathComponent("files")
+        // Resolve symlinks on both sides before prefix-stripping: enumerated
+        // URLs come back resolved (/private/var/…) while the stored root may
+        // be the unresolved alias (/var/…), and a naive substring replace
+        // mangles the relative path.
+        let filesRoot = root.appendingPathComponent("files").resolvingSymlinksInPath()
+        let rootPrefix = filesRoot.path.hasSuffix("/") ? filesRoot.path : filesRoot.path + "/"
         guard let enumerator = FileManager.default.enumerator(at: filesRoot, includingPropertiesForKeys: [.isRegularFileKey]) else {
             return []
         }
         var paths: [String] = []
         for case let url as URL in enumerator {
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-            let path = url.path.replacingOccurrences(of: filesRoot.path + "/", with: "")
-            paths.append(path)
+            let filePath = url.resolvingSymlinksInPath().path
+            guard filePath.hasPrefix(rootPrefix) else { continue }
+            paths.append(String(filePath.dropFirst(rootPrefix.count)))
         }
         return paths.sorted()
     }

@@ -25,7 +25,7 @@ func parseFindingLifecycle(_ line: String) -> FindingLifecycleMetadata {
     let created = parseCreatedDate(line).map(cleanCommentValue)
     let normalizedStatus = parseStatus(line).flatMap(FindingLifecycleStatus.init(rawValue:))
 
-    var normalized = FindingLifecycleMetadata(
+    let normalized = FindingLifecycleMetadata(
         status: normalizedStatus ?? .active,
         statusUpdated: parseStatusField(line, "status_updated") ?? created,
         statusReason: parseStatusField(line, "status_reason"),
