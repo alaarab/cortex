@@ -1,0 +1,46 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  phrenkit-tests:
+    name: PhrenKit tests (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: swift test
+        working-directory: apps/ios/PhrenKit
+        run: swift test
+
+  app-build:
+    name: App smoke build (iOS Simulator)
+    runs-on: macos-14
+    needs: phrenkit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: apps/ios
+        run: xcodegen generate
+      - name: Build
+        working-directory: apps/ios
+        run: |
+          xcodebuild build \
+            -project Phren.xcodeproj \
+            -scheme Phren \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
