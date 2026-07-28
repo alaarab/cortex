@@ -36,7 +36,7 @@ public actor SyncEngine {
     public static let livePollInterval: TimeInterval = 7
     private static let maxWriteAttempts = 3
 
-    private let client: GitHubClient
+    private let client: any GitHubAPI
     private let store: LocalStore
     private let queueURL: URL
     private var queue: PendingOpsQueue
@@ -51,7 +51,7 @@ public actor SyncEngine {
     /// status transitions — the app re-reads the snapshot and re-renders.
     private var onUpdate: (@Sendable () -> Void)?
 
-    public init(client: GitHubClient, store: LocalStore, stateDirectory: URL) {
+    public init(client: any GitHubAPI, store: LocalStore, stateDirectory: URL) {
         self.client = client
         self.store = store
         self.queueURL = stateDirectory.appendingPathComponent("pending-ops.json")
@@ -218,6 +218,17 @@ public actor SyncEngine {
     }
 
     public func failedOps() -> [QueuedOp] { queue.failed }
+
+    /// Test seam: awaits any flush already scheduled on a detached task, then
+    /// runs one to completion. Tests need a deterministic point at which the
+    /// queue can be observed; production callers only ever schedule.
+    func flushForTesting() async {
+        if let task = flushTask { await task.value }
+        await flush()
+    }
+
+    /// Test seam: the live pending queue, for asserting drain and ordering.
+    func pendingOps() -> [QueuedOp] { queue.pending }
 
     private func scheduleFlush() {
         guard flushTask == nil else { return }

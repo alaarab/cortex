@@ -1,0 +1,98 @@
+{
+  "pending": [
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3301",
+      "op": { "addFinding": { "project": "myproj", "text": "Legacy queued finding", "type": "pattern" } },
+      "queuedAt": 775000000,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3302",
+      "op": { "editFinding": { "project": "myproj", "match": "6957f9f8", "newText": "Legacy edit" } },
+      "queuedAt": 775000001,
+      "attempts": 1,
+      "lastError": "GitHub rate limit reached — try again shortly."
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3303",
+      "op": { "removeFinding": { "project": "myproj", "match": "38209d83" } },
+      "queuedAt": 775000002,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3304",
+      "op": { "approveQueue": { "project": "myproj", "line": "- [2026-07-26] Legacy queue line" } },
+      "queuedAt": 775000003,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3305",
+      "op": { "rejectQueue": { "project": "myproj", "line": "- [2026-07-26] Legacy queue line" } },
+      "queuedAt": 775000004,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3306",
+      "op": { "editQueue": { "project": "myproj", "line": "- [2026-07-26] Legacy queue line", "newText": "Legacy queue edit" } },
+      "queuedAt": 775000005,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3307",
+      "op": { "addNote": { "project": "myproj", "date": "2026-07-25", "time": "09:15:00", "text": "Legacy note" } },
+      "queuedAt": 775000006,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3308",
+      "op": { "editNote": { "project": "myproj", "date": "2026-07-25", "stableId": "5588c05d", "text": "Legacy note edit" } },
+      "queuedAt": 775000007,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C3309",
+      "op": { "removeNote": { "project": "myproj", "date": "2026-07-25", "stableId": "5588c05d" } },
+      "queuedAt": 775000008,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C330A",
+      "op": { "promoteNote": { "project": "myproj", "date": "2026-07-25", "stableId": "5588c05d", "findingType": "pitfall" } },
+      "queuedAt": 775000009,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C330B",
+      "op": { "addTask": { "project": "myproj", "text": "Legacy task" } },
+      "queuedAt": 775000010,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C330C",
+      "op": { "completeTask": { "project": "myproj", "match": "013d708f" } },
+      "queuedAt": 775000011,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C330D",
+      "op": { "removeTask": { "project": "myproj", "match": "aa853063" } },
+      "queuedAt": 775000012,
+      "attempts": 0
+    },
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C330E",
+      "op": { "updateTask": { "project": "myproj", "match": "013d708f", "text": "Legacy task update", "priority": "high", "section": "active" } },
+      "queuedAt": 775000013,
+      "attempts": 0
+    }
+  ],
+  "failed": [
+    {
+      "id": "3F2504E0-4F89-41D3-9A0C-0305E82C33FF",
+      "op": { "addFinding": { "project": "myproj", "text": "Legacy parked finding" } },
+      "queuedAt": 775000014,
+      "attempts": 3,
+      "lastError": "Skipped duplicate finding for \"myproj\": already exists with similar wording."
+    }
+  ]
+}
