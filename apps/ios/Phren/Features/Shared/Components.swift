@@ -123,6 +123,18 @@ struct FindingRow: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts: [String] = ["Finding"]
+        if let tag = finding.typeTag { parts.append(tag) }
+        if finding.status != .active { parts.append(finding.status.rawValue) }
+        if finding.archived { parts.append("archived") }
+        parts.append(displayText)
+        parts.append(finding.date)
+        return parts.joined(separator: ", ")
     }
 
     private var displayText: String { Self.displayText(finding) }
@@ -135,6 +147,33 @@ struct FindingRow: View {
         return finding.text.lowercased().hasPrefix(prefix.lowercased())
             ? String(finding.text.dropFirst(prefix.count))
             : finding.text
+    }
+}
+
+struct NoteRow: View {
+    let note: Note
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(note.text).font(.callout)
+            HStack {
+                Text(note.time)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if note.promoted {
+                    TagChip(text: "promoted", role: .good)
+                }
+            }
+        }
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = note.text
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Note at \(note.time)\(note.promoted ? ", promoted" : ""): \(note.text)")
     }
 }
 

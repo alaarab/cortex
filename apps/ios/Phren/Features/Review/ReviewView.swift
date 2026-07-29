@@ -60,6 +60,13 @@ struct ReviewView: View {
                                             }
                                             .tint(.blue)
                                         }
+                                        .accessibilityAction(named: "Approve") {
+                                            Task { await approve([entry]) }
+                                        }
+                                        .accessibilityAction(named: "Reject") {
+                                            Task { await reject([entry]) }
+                                        }
+                                        .accessibilityAction(named: "Edit") { editing = entry }
                                 }
                             }
                         }
@@ -72,7 +79,7 @@ struct ReviewView: View {
                     }
                 }
                 .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+                .phrenScreen()
 
                 if editMode == .active && !selection.isEmpty {
                     batchBar
@@ -202,6 +209,20 @@ struct ReviewRow: View {
             }
         }
         .padding(.vertical, 2)
-        .listRowBackground(entry.entry.item.risky ? PhrenTheme.amber.opacity(0.08) : nil)
+        .listRowBackground(entry.entry.item.risky
+            ? PhrenTheme.amber.opacity(0.08) : PhrenTheme.surface)
+        .listRowSeparatorTint(PhrenTheme.border)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts = ["Review item", entry.entry.project]
+        if entry.entry.item.risky { parts.append("risky") }
+        if let confidence = entry.entry.item.confidence {
+            parts.append("confidence \(Int(confidence * 100)) percent")
+        }
+        parts.append(entry.entry.item.text)
+        return parts.joined(separator: ", ")
     }
 }

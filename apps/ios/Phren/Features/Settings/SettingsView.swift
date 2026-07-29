@@ -179,7 +179,7 @@ struct StoreRow: View {
                 }
                 if context.status.pendingCount > 0 {
                     Text("\(context.status.pendingCount) pending")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(PhrenTheme.orange)
                 }
                 if let error = context.status.lastError {
                     Text(error)

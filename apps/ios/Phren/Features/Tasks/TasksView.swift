@@ -117,6 +117,16 @@ struct TaskListView: View {
                         }
                     }
                     }
+                    .phrenRow()
+                    .accessibilityAction(named: "Edit") { editing = row }
+                    .accessibilityAction(named: "Delete") {
+                        Task {
+                            await model.perform(.removeTask(
+                                project: row.project,
+                                match: row.task.stableId ?? row.task.line
+                            ), in: row.storeId)
+                        }
+                    }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             Task {
@@ -143,7 +153,7 @@ struct TaskListView: View {
                 }
             }
             .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+            .phrenScreen()
         }
         .toolbar {
             if !isProjectScoped {
@@ -278,6 +288,7 @@ struct TaskRow: View {
             }
             .buttonStyle(.plain)
             .disabled(row.task.checked)
+            .accessibilityLabel(row.task.checked ? "Done" : "Mark done")
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayLine)
@@ -294,7 +305,7 @@ struct TaskRow: View {
                         TagChip(text: priority.rawValue, color: priorityColor(priority))
                     }
                     if row.task.pinned == true {
-                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
+                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(PhrenTheme.orange)
                     }
                     if let issue = row.task.githubIssue {
                         Text("#\(issue)").font(.caption2).foregroundStyle(.secondary)

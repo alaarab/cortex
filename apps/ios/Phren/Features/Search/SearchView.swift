@@ -67,6 +67,7 @@ struct SearchView: View {
                     if !query.isEmpty {
                         ForEach(results) { result in
                             resultRow(result)
+                                .phrenRow()
                         }
                     }
                 }

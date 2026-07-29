@@ -40,6 +40,26 @@ enum PhrenTheme {
     static let amber = warning
     static let red = danger
     static let violet = Color(hex: 0x7C3AED)
+    /// The design kit's deckOrange (sprite skateboard, poster accents). Was
+    /// missing from the theme, so views reached for system `.orange`.
+    static let orange = Color(hex: 0xD97757)
+
+    /// Spacing scale. The views used 18 distinct raw values; new code picks
+    /// from these five.
+    enum Space {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+    }
+
+    /// Corner radii, by role — chips are square-ish, cards soft, panels round.
+    enum Radius {
+        static let chip: CGFloat = 4
+        static let card: CGFloat = 6
+        static let panel: CGFloat = 10
+    }
 
     /// Chip color roles, mapped to the deep-void conventions.
     static func chipColor(_ role: ChipRole) -> Color {
@@ -91,10 +111,14 @@ extension View {
     }
 }
 
-/// List row background matching the web UI's raised surface.
+/// List row treatment matching the web UI: solid navy surface with a
+/// lavender-tinted separator. This is where the deep-void identity reaches
+/// rows — without it, every List renders on the system grouped gray.
 struct PhrenRowBackground: ViewModifier {
     func body(content: Content) -> some View {
-        content.listRowBackground(PhrenTheme.surface)
+        content
+            .listRowBackground(PhrenTheme.surface)
+            .listRowSeparatorTint(PhrenTheme.border)
     }
 }
 

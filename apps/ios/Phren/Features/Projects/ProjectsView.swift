@@ -34,7 +34,7 @@ struct ProjectsView: View {
                                 Label("\(item.project.noteCount)", systemImage: "note.text")
                                 if item.project.reviewCount > 0 {
                                     Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(PhrenTheme.orange)
                                 }
                             }
                             .font(.caption)
@@ -42,15 +42,24 @@ struct ProjectsView: View {
                         }
                         .padding(.vertical, 2)
                     }
+                    .phrenRow()
                 }
                 .overlay {
                     if model.mergedProjects.isEmpty {
-                        PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
+                        if model.syncStatus.lastError != nil {
+                            // Empty AND failing to sync is a problem, not a
+                            // blank slate — say so.
+                            PhrenEmptyState(title: "Can't reach your store",
+                                            message: "Sync is failing — check the status bar above. Your projects will appear once a sync succeeds.",
+                                            pose: .concerned)
+                        } else {
+                            PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
+                        }
                     }
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
                 .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+                .phrenScreen()
             }
             .navigationTitle("Projects")
             .toolbar {
@@ -178,8 +187,9 @@ struct FindingsTab: View {
                             .id(finding.stableId ?? finding.id)
                             .listRowBackground(
                                 (finding.stableId ?? finding.id) == highlighted
-                                    ? PhrenTheme.accent.opacity(0.18) : nil
+                                    ? PhrenTheme.accent.opacity(0.18) : PhrenTheme.surface
                             )
+                            .listRowSeparatorTint(PhrenTheme.border)
                             .swipeActions(edge: .trailing) {
                                 // The kit throws archivedReadOnly on archived
                                 // mutations; don't offer what can't succeed.
@@ -196,6 +206,14 @@ struct FindingsTab: View {
                                     }
                                     .tint(.blue)
                                 }
+                            }
+                            // Swipes are invisible to VoiceOver; expose the
+                            // same verbs on the rotor.
+                            .accessibilityAction(named: "Edit") {
+                                if !finding.archived { editing = finding }
+                            }
+                            .accessibilityAction(named: "Delete") {
+                                if !finding.archived { Task { await remove(finding) } }
                             }
                     }
                 }
@@ -295,21 +313,12 @@ struct NotesTab: View {
             ForEach(groupedByDay, id: \.date) { group in
                 Section(group.date) {
                     ForEach(group.items) { note in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(note.text).font(.callout)
-                            HStack {
-                                Text(note.time)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                if note.promoted {
-                                    TagChip(text: "promoted", role: .good)
-                                }
-                            }
-                        }
+                        NoteRow(note: note)
                         .id(note.stableId)
                         .listRowBackground(
-                            note.stableId == highlighted ? PhrenTheme.accent.opacity(0.18) : nil
+                            note.stableId == highlighted ? PhrenTheme.accent.opacity(0.18) : PhrenTheme.surface
                         )
+                        .listRowSeparatorTint(PhrenTheme.border)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 Task {
@@ -332,6 +341,17 @@ struct NotesTab: View {
                                 }
                                 .tint(.green)
                             }
+                        }
+                        .accessibilityAction(named: "Edit") { editing = note }
+                        .accessibilityAction(named: "Delete") {
+                            Task {
+                                await model.perform(.removeNote(
+                                    project: project, date: note.date, stableId: note.stableId
+                                ), in: storeId)
+                            }
+                        }
+                        .accessibilityAction(named: "Promote to finding") {
+                            if !note.promoted { promoting = note }
                         }
                     }
                 }
