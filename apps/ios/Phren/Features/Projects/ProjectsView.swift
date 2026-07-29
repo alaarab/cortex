@@ -116,7 +116,7 @@ struct ProjectDetailView: View {
             case .findings: FindingsTab(storeId: storeId, project: project, scrollTo: scrollTo)
             case .notes: NotesTab(storeId: storeId, project: project, scrollTo: scrollTo)
             case .tasks: TaskListView(scope: .project(storeId: storeId, project: project))
-            case .docs: SummaryTab(storeId: storeId, project: project)
+            case .docs: DocsTab(storeId: storeId, project: project)
             }
         }
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
@@ -135,12 +135,15 @@ struct FindingsTab: View {
     @State private var showAdd = false
     @State private var editing: Finding?
     @State private var highlighted: String?
+    @State private var showArchived = false
 
     private var findings: [Finding] {
-        // The snapshot now carries archived findings too (flagged); this tab
-        // shows the live set. The archived toggle arrives with the detail-view
-        // phase.
-        model.findings(storeId: storeId, project: project).filter { !$0.archived }
+        let all = model.findings(storeId: storeId, project: project)
+        return showArchived ? all : all.filter { !$0.archived }
+    }
+
+    private var hasArchived: Bool {
+        model.findings(storeId: storeId, project: project).contains(where: \.archived)
     }
 
     /// Deep-link landing: scroll to the target row and flash a highlight.
@@ -170,6 +173,7 @@ struct FindingsTab: View {
                             ref: finding.stableId ?? finding.id
                         )) {
                             FindingRow(finding: finding)
+                                .opacity(finding.archived ? 0.55 : 1)
                         }
                             .id(finding.stableId ?? finding.id)
                             .listRowBackground(
@@ -177,17 +181,21 @@ struct FindingsTab: View {
                                     ? PhrenTheme.accent.opacity(0.18) : nil
                             )
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await remove(finding) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                // The kit throws archivedReadOnly on archived
+                                // mutations; don't offer what can't succeed.
+                                if !finding.archived {
+                                    Button(role: .destructive) {
+                                        Task { await remove(finding) }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    Button {
+                                        editing = finding
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    .tint(.blue)
                                 }
-                                Button {
-                                    editing = finding
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(.blue)
                             }
                     }
                 }
@@ -203,6 +211,16 @@ struct FindingsTab: View {
         .onAppear { jumpToTarget(proxy) }
         }
         .toolbar {
+            if hasArchived {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation { showArchived.toggle() }
+                    } label: {
+                        Image(systemName: showArchived ? "archivebox.fill" : "archivebox")
+                    }
+                    .accessibilityLabel(showArchived ? "Hide archived findings" : "Show archived findings")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("Add finding")
@@ -367,26 +385,72 @@ struct NotesTab: View {
 
 // MARK: - Summary
 
-struct SummaryTab: View {
+/// The project's prose: summary.md, truths.md, and CLAUDE.md behind one
+/// segment — six top-level segments don't fit an iPhone, and all three are
+/// read-only renders of the same shape.
+struct DocsTab: View {
+    enum Doc: String, CaseIterable {
+        case summary = "Summary"
+        case truths = "Truths"
+        case claude = "CLAUDE.md"
+    }
+
     let storeId: String
     let project: String
 
     @Environment(AppModel.self) private var model
+    @State private var doc: Doc = .summary
+
+    private func content(of doc: Doc) -> String? {
+        switch doc {
+        case .summary: return model.summary(storeId: storeId, project: project)
+        case .truths: return model.truths(storeId: storeId, project: project)
+        case .claude: return model.claudeDoc(storeId: storeId, project: project)
+        }
+    }
+
+    /// Only docs that exist get a menu entry; an empty menu means no docs.
+    private var available: [Doc] {
+        Doc.allCases.filter { content(of: $0) != nil }
+    }
 
     var body: some View {
         ScrollView {
-            if let summary = model.summary(storeId: storeId, project: project) {
-                Text(summary)
+            if let text = content(of: doc) {
+                Text(text)
                     .font(.callout.monospaced())
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                     .textSelection(.enabled)
             } else {
-                PhrenEmptyState(title: "No summary", message: "This project has no summary.md yet.", pose: .resting)
+                PhrenEmptyState(title: "No docs yet",
+                                message: "summary.md, truths.md, and CLAUDE.md appear here once the store has them.",
+                                pose: .resting)
                 .padding(.top, 60)
             }
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
+        .toolbar {
+            if available.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Document", selection: $doc) {
+                            ForEach(available, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(doc.rawValue).font(.caption)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                        }
+                    }
+                    .accessibilityLabel("Choose document")
+                }
+            }
+        }
+        .onAppear {
+            // Land on the first doc that exists rather than an empty Summary.
+            if content(of: doc) == nil, let first = available.first { doc = first }
+        }
     }
 }

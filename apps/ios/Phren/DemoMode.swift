@@ -53,6 +53,24 @@ enum DemoMode {
 
                 """,
 
+                "m4l-builder/truths.md": """
+                # Truths
+
+                - `svf~` is unusable in Live 12 — `biquad~` with computed coefficients is the standing replacement
+                - gen~ cores are the portability boundary: anything inside one exports to RNBO
+                - Device UI reads Ableton's theme at runtime via the `live.colors` bus
+
+                """,
+
+                "m4l-builder/CLAUDE.md": """
+                # m4l-builder
+
+                Fleet of Max for Live devices. Build with `make device NAME=…`;
+                validate against Live 12 before committing. UI is dark-only and
+                reads the host theme at runtime.
+
+                """,
+
                 "m4l-builder/tasks.md": """
                 # Tasks
 

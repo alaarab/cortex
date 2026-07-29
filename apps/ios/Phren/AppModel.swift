@@ -144,6 +144,14 @@ final class AppModel {
         snapshot(for: storeId).notes[project] ?? []
     }
 
+    func truths(storeId: String, project: String) -> String? {
+        snapshot(for: storeId).truths[project]
+    }
+
+    func claudeDoc(storeId: String, project: String) -> String? {
+        snapshot(for: storeId).claudeDocs[project]
+    }
+
     func summary(storeId: String, project: String) -> String? {
         snapshot(for: storeId).summaries[project]
     }
