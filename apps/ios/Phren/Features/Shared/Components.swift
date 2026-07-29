@@ -29,6 +29,28 @@ struct LiveStatusBar: View {
         .padding(.vertical, 4)
         .background(PhrenTheme.bg)
         .onReceive(ticker) { now = $0 }
+        // Live/paused/error is carried by the dot's hue alone, which VoiceOver
+        // cannot convey; combine the row and state it.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    /// Spoken form of what the coloured dot means, plus the freshness text and
+    /// any pending count — all of which are otherwise visual-only.
+    private var accessibilityDescription: String {
+        var parts: [String] = []
+        if model.syncStatus.lastError != nil {
+            parts.append("Sync error")
+        } else if model.syncStatus.isLive {
+            parts.append("Live")
+        } else {
+            parts.append("Paused")
+        }
+        parts.append(statusText)
+        if model.syncStatus.pendingCount > 0 {
+            parts.append("\(model.syncStatus.pendingCount) change\(model.syncStatus.pendingCount == 1 ? "" : "s") waiting to upload")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var indicatorColor: Color {
@@ -62,6 +84,7 @@ struct ActionErrorBanner: View {
                     model.lastActionError = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .accessibilityLabel("Dismiss error")
                 }
             }
             .padding(10)

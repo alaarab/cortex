@@ -71,20 +71,40 @@ struct RootView: View {
 
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
+    @State private var selection = MainTabView.initialTab
+
+    /// `-phren-tab <projects|review|tasks|search|settings>` opens straight to a
+    /// tab. Used alongside `-phren-demo` for automated UI screenshots.
+    static var initialTab: Int {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-phren-tab"), i + 1 < args.count else { return 0 }
+        switch args[i + 1].lowercased() {
+        case "review": return 1
+        case "tasks": return 2
+        case "search": return 3
+        case "settings": return 4
+        default: return 0
+        }
+    }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selection) {
             ProjectsView()
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
+                .tag(0)
             ReviewView()
                 .tabItem { Label("Review", systemImage: "checkmark.seal") }
                 .badge(model.totalReviewCount)
+                .tag(1)
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
+                .tag(2)
             SearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(3)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(4)
         }
     }
 }

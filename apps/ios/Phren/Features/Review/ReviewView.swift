@@ -96,6 +96,7 @@ struct ReviewView: View {
                         Toggle("Flagged only", isOn: $flaggedOnly)
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
+                            .accessibilityLabel("Filter review queue")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {

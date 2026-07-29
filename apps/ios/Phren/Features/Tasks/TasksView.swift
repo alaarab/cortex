@@ -156,11 +156,13 @@ struct TaskListView: View {
                         }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
+                            .accessibilityLabel("Filter tasks")
                     }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add task")
                     .disabled(!isProjectScoped && addTargets.isEmpty)
             }
         }

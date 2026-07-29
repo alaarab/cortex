@@ -71,6 +71,12 @@ struct WelcomeView: View {
                 showPATSheet = true
             }
             .font(.footnote)
+
+            Button("Explore the demo") {
+                Task { await model.enterDemoMode() }
+            }
+            .font(.footnote)
+            .foregroundStyle(PhrenTheme.textMuted)
             .padding(.bottom)
         }
         .padding()

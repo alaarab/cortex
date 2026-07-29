@@ -150,6 +150,12 @@ final class AppModel {
 
     func bootstrap() async {
         guard phase == .loading else { return }
+        // `-phren-demo` launches straight into seeded demo data. Used for UI
+        // screenshots and for exploring the app without a GitHub token.
+        if ProcessInfo.processInfo.arguments.contains("-phren-demo") {
+            await enterDemoMode()
+            return
+        }
         guard let stored = KeychainStore.load() else {
             phase = .signedOut
             return
@@ -158,9 +164,19 @@ final class AppModel {
         do {
             user = try await client.currentUser()
         } catch {
-            KeychainStore.delete()
-            phase = .signedOut
-            return
+            // Only a rejected token means signed out. Deleting the keychain
+            // entry on *any* failure — no signal, DNS, a 500, a rate limit —
+            // signed the user out of a cache-first app and put all their local
+            // data behind the welcome screen. Anything else: carry on with the
+            // cached identity and let the sync status surface the problem.
+            if case GitHubError.http(let status, _) = error, status == 401 {
+                KeychainStore.delete()
+                phase = .signedOut
+                return
+            }
+            // The account name stays blank until a later call succeeds; the
+            // store contents below are what the user actually came for.
+            lastActionError = "Couldn't reach GitHub — showing your last synced copy."
         }
 
         let descriptors = loadDescriptors()
@@ -200,8 +216,49 @@ final class AppModel {
         }
     }
 
+    // MARK: - Demo mode
+
+    /// True while running on seeded local fixtures instead of a real store.
+    /// Suppresses live polling and sync, which would otherwise 401 with no token.
+    private(set) var isDemo = false
+
+    /// Seeds two local stores from `DemoMode` fixtures and jumps straight to
+    /// `.ready`. No network, no auth, no writes to a real store's cache.
+    func enterDemoMode() async {
+        isDemo = true
+        // GitHubUser's memberwise init isn't public — decode the same shape the
+        // API would return rather than widening PhrenKit's surface for a demo.
+        user = try? JSONDecoder().decode(
+            GitHubUser.self,
+            from: Data(#"{"login":"demo","name":"Demo Mode"}"#.utf8)
+        )
+
+        for seed in DemoMode.seeds {
+            do {
+                let directory = DemoMode.directory(for: seed.descriptor)
+                let store = try LocalStore(rootDirectory: directory,
+                                           owner: seed.descriptor.owner,
+                                           repo: seed.descriptor.name,
+                                           branch: seed.descriptor.branch)
+                // Re-seed every launch so edits made while exploring reset cleanly.
+                try? await store.wipe()
+                for (path, content) in seed.files {
+                    try await store.write(path, content: content, blobSha: nil)
+                }
+                let engine = SyncEngine(client: client, store: store, stateDirectory: directory)
+                storeContexts.append(StoreContext(descriptor: seed.descriptor,
+                                                  store: store, engine: engine))
+            } catch {
+                lastActionError = error.localizedDescription
+            }
+        }
+
+        await refresh()
+        phase = .ready
+    }
+
     func enterForeground() async {
-        guard phase == .ready else { return }
+        guard phase == .ready, !isDemo else { return }
         await startLiveAll()
     }
 
@@ -370,6 +427,11 @@ final class AppModel {
     }
 
     func pullToRefresh() async {
+        // Demo mode has no remote to pull from — just re-parse the seeded files.
+        guard !isDemo else {
+            await refresh()
+            return
+        }
         await pullAll()
         await refresh()
     }
@@ -388,6 +450,11 @@ final class AppModel {
         do {
             try await context.engine.enqueue(op)
             lastActionError = nil
+            // Demo mode runs a real engine against an unauthenticated client, so
+            // letting a flush start would park the op and leave a permanent
+            // "Not signed in to GitHub" error on screen. Apply locally, drop the
+            // queue: the demo is meant to be explored, including its edits.
+            if isDemo { await context.engine.discardPending() }
         } catch {
             lastActionError = error.localizedDescription
         }

@@ -164,6 +164,7 @@ struct FindingsTab: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add finding")
             }
         }
         .sheet(isPresented: $showAdd) {
@@ -269,6 +270,7 @@ struct NotesTab: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add note")
             }
         }
         .sheet(isPresented: $showAdd) {

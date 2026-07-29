@@ -242,6 +242,14 @@ public actor SyncEngine {
         scheduleFlush()
     }
 
+    /// Drops queued ops without pushing them, keeping their local effect.
+    /// Used by demo mode, which has no credentials to flush with.
+    public func discardPending() {
+        queue.pending.removeAll()
+        queue.save(to: queueURL)
+        setStatus { $0.lastError = nil }
+    }
+
     public func discardFailed(id: UUID) {
         queue.failed.removeAll { $0.id == id }
         queue.save(to: queueURL)
