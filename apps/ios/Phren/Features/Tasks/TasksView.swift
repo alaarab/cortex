@@ -2,14 +2,18 @@ import SwiftUI
 import PhrenKit
 
 struct TasksView: View {
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
-        NavigationStack {
+        @Bindable var router = router
+        NavigationStack(path: $router.tasksPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
                 TaskListView(scope: .all)
             }
             .navigationTitle("Tasks")
+            .phrenRoutes()
         }
     }
 }
@@ -96,6 +100,10 @@ struct TaskListView: View {
 
             List {
                 ForEach(rows) { row in
+                    NavigationLink(value: Route.task(
+                        storeId: row.storeId, project: row.project,
+                        ref: row.task.stableId ?? row.task.id
+                    )) {
                     TaskRow(
                         row: row,
                         showProject: !isProjectScoped,
@@ -107,6 +115,7 @@ struct TaskListView: View {
                                 match: row.task.stableId ?? row.task.line
                             ), in: row.storeId)
                         }
+                    }
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {

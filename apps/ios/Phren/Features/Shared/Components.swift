@@ -125,8 +125,11 @@ struct FindingRow: View {
         .padding(.vertical, 2)
     }
 
-    private var displayText: String {
-        // Show the text without the leading [tag] — the chip carries it.
+    private var displayText: String { Self.displayText(finding) }
+
+    /// Text without the leading `[tag]` — the chip carries it. Shared with the
+    /// detail view so list and detail render the same string.
+    static func displayText(_ finding: Finding) -> String {
         guard let tag = finding.typeTag else { return finding.text }
         let prefix = "[\(tag)] "
         return finding.text.lowercased().hasPrefix(prefix.lowercased())

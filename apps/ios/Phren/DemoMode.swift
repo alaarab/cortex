@@ -33,10 +33,23 @@ enum DemoMode {
                 "m4l-builder/FINDINGS.md": """
                 # Findings
 
-                - [pitfall] `svf~` and `hip~` produce NO audio in Ableton Live 12. An `svf~` in a series signal path silently kills the chain — use `biquad~` with computed coefficients instead. <!-- fid:a1b2c3d4 -->
+                ## 2026-07-25
+
+                - [pitfall] `svf~` and `hip~` produce NO audio in Ableton Live 12. An `svf~` in a series signal path silently kills the chain — use `biquad~` with computed coefficients instead. <!-- fid:a1b2c3d4 --> <!-- created: 2026-07-25 --> <!-- source:agent machine:studio-mac actor:squidbot tool:claude-code model:claude-opus-5 --> <!-- phren:supersedes "[pitfall] svf~ misbehaves in Live 12, cause unknown" --> <!-- phren:status "active" --> <!-- phren:status_updated "2026-07-25" --> [confidence 0.92]
+                  <!-- phren:cite {"created_at":"2026-07-25T14:22:10.000Z","repo":"/Users/squidbot/Projects/m4l-builder","file":"dsp/filters.js","line":214,"commit":"b2b8a355c9d1e7f2","task_item":"bid:11aa22bb"} -->
+
                 - [pattern] gen~ cores export cleanly to RNBO; vanilla MSP with `tapin~`/`tapout~` also ports. `pfft~` is the one hard blocker — it has no RNBO equivalent. <!-- fid:b2c3d4e5 -->
                 - [decision] Device UI is dark-only. The `live.colors` theme bus reads Ableton's theme at runtime rather than hardcoding swatches. <!-- fid:c3d4e5f6 -->
                 - [pitfall] A `loadbang → message 1 → live.text` default is stomped by the live.* value-restore that runs AFTER loadbang on device load, leaving the toggle OFF. Make it a real parameter instead. <!-- fid:d4e5f607 -->
+
+                <details>
+                <summary>Archived 2026-06-01</summary>
+
+                ## 2026-06-01
+
+                - [pitfall] svf~ misbehaves in Live 12, cause unknown <!-- fid:99887766 --> <!-- created: 2026-06-01 --> <!-- phren:status "superseded" --> <!-- phren:superseded_by "[pitfall] `svf~` and `hip~` produce NO audio in Ableton Live 12" -->
+
+                </details>
 
                 """,
 
@@ -45,7 +58,8 @@ enum DemoMode {
 
                 ## Active
 
-                - [ ] Port Pressure + Heat gen~ cores to RNBO and verify offline render [high] <!-- bid:11aa22bb -->
+                - [ ] Port Pressure + Heat gen~ cores to RNBO and verify offline render [high] <!-- bid:11aa22bb rank:1 lastActivity:2026-07-26T18:00:00.000Z created:2026-07-20T10:00:00.000Z session:s-4471 findings:fid:a1b2c3d4 -->
+                  GitHub: https://github.com/alaarab/m4l-builder/issues/42
                 - [ ] Para EQ pass 2 — merge band column into a single bottom row <!-- bid:22bb33cc -->
 
                 ## Queue

@@ -111,14 +111,10 @@ struct RouteDestinationView: View {
         case .project(let storeId, let project, let section, let scrollTo):
             ProjectDetailView(storeId: storeId, project: project,
                               initialSection: section, scrollTo: scrollTo)
-        // Interim until the detail views land: item routes open the project
-        // at the right section, scrolled to the item.
         case .finding(let storeId, let project, let ref):
-            ProjectDetailView(storeId: storeId, project: project,
-                              initialSection: .findings, scrollTo: ref)
+            FindingDetailView(storeId: storeId, project: project, ref: ref)
         case .task(let storeId, let project, let ref):
-            ProjectDetailView(storeId: storeId, project: project,
-                              initialSection: .tasks, scrollTo: ref)
+            TaskDetailView(storeId: storeId, project: project, ref: ref)
         }
     }
 }

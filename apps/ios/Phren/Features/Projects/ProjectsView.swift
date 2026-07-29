@@ -165,7 +165,12 @@ struct FindingsTab: View {
             ForEach(groupedByDate, id: \.date) { group in
                 Section(group.date) {
                     ForEach(group.items) { finding in
-                        FindingRow(finding: finding)
+                        NavigationLink(value: Route.finding(
+                            storeId: storeId, project: project,
+                            ref: finding.stableId ?? finding.id
+                        )) {
+                            FindingRow(finding: finding)
+                        }
                             .id(finding.stableId ?? finding.id)
                             .listRowBackground(
                                 (finding.stableId ?? finding.id) == highlighted

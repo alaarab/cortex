@@ -24,9 +24,12 @@ struct ReviewView: View {
         Array(Set(model.mergedReviewQueue.map(\.entry.project))).sorted()
     }
 
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        @Bindable var router = router
+        NavigationStack(path: $router.reviewPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
@@ -76,6 +79,7 @@ struct ReviewView: View {
                 }
             }
             .navigationTitle("Review")
+            .phrenRoutes()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
