@@ -65,7 +65,7 @@ struct ReviewView: View {
                 .environment(\.editMode, $editMode)
                 .overlay {
                     if items.isEmpty {
-                        PhrenEmptyState(title: "Review queue is clear", message: "Auto-captured findings land here for approval.")
+                        PhrenEmptyState(title: "Review queue is clear", message: "Auto-captured findings land here for approval.", pose: .celebrate)
                     }
                 }
                 .refreshable { await model.pullToRefresh() }

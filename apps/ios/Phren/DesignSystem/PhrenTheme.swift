@@ -111,23 +111,63 @@ struct PhrenMascotView: View {
     var size: CGFloat = 140
     var bobbing = true
     var glow = true
+    /// What the mascot should be doing. Defaults to resting so existing call
+    /// sites keep their previous look.
+    var pose: PhrenSprite.Pose = .idle
 
     @State private var up = false
+    @State private var blinking = false
+
+    @State private var rocking = false
 
     var body: some View {
-        Image("PhrenMascot")
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
-            .frame(width: size, height: size)
-            .shadow(color: glow ? PhrenTheme.cyan.opacity(0.25) : .clear, radius: size / 6)
-            .offset(y: up ? -6 : 0)
-            .animation(
-                bobbing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
-                value: up
-            )
-            .onAppear { if bobbing { up = true } }
-            .accessibilityHidden(true)
+        Group {
+            switch pose {
+            case .walking:
+                // Stride comes from the clock, so the sprite stays stateless.
+                TimelineView(.periodic(from: .now, by: 0.28)) { context in
+                    PhrenSprite(pose: pose, size: size, blinking: blinking,
+                                frame: Int(context.date.timeIntervalSinceReferenceDate / 0.28))
+                }
+            case .skating:
+                // Rolls in place: a slow rock plus a lean, like carving.
+                PhrenSprite(pose: pose, size: size, blinking: blinking)
+                    .rotationEffect(.degrees(rocking ? 4 : -4))
+                    .offset(x: rocking ? size * 0.06 : -size * 0.06)
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                               value: rocking)
+            default:
+                // Drawn from the shared 24×24 grid rather than the flattened
+                // PNG, so it stays crisp at any size and can change expression.
+                PhrenSprite(pose: pose, size: size, blinking: blinking)
+            }
+        }
+        .shadow(color: glow ? PhrenTheme.cyan.opacity(0.25) : .clear, radius: size / 6)
+        .offset(y: up ? -6 : 0)
+        .animation(
+            bobbing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
+            value: up
+        )
+        .onAppear {
+            if bobbing { up = true }
+            if pose == .skating { rocking = true }
+            guard pose != .resting else { return }
+            scheduleBlink()
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Irregular blinks. An evenly-timed blink reads as a machine; the varied
+    /// gap is what makes it look alive.
+    private func scheduleBlink() {
+        let delay = Double.random(in: 2.4...5.6)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            blinking = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+                blinking = false
+                scheduleBlink()
+            }
+        }
     }
 }
 

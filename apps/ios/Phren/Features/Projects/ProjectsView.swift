@@ -321,7 +321,7 @@ struct SummaryTab: View {
                     .padding()
                     .textSelection(.enabled)
             } else {
-                PhrenEmptyState(title: "No summary", message: "This project has no summary.md yet.")
+                PhrenEmptyState(title: "No summary", message: "This project has no summary.md yet.", pose: .resting)
                 .padding(.top, 60)
             }
         }
