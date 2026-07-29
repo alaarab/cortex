@@ -27,19 +27,23 @@ public enum SecretScanner {
     private static let hex40Global = JSRegex(#"[0-9a-f]{40}"#)
     private static let base64Blob = JSRegex(#"(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}"#)
 
+    /// The base64-blob check runs between the JWT and connection-string
+    /// patterns, matching dedup.ts. Naming its predecessor keeps that ordering
+    /// tied to the check itself — it used to be `if index == 3`, so inserting
+    /// anything into `checks` silently relocated it.
+    private static let base64CheckRunsAfter = "JWT token"
+
     /// Returns the detected secret type, or nil when clean.
     public static func scan(_ text: String) -> String? {
-        // Ordered exactly as dedup.ts — the base64 check sits between JWT and
-        // connection strings there.
-        for (index, check) in checks.enumerated() {
-            if index == 3 {
+        for check in checks {
+            if check.0.test(text) { return check.1 }
+            if check.1 == base64CheckRunsAfter {
                 // dedup.ts: long base64 blob check, exempting 40-char lowercase
                 // hex digests (git commit SHAs).
                 if !plainHex40.test(text), base64Blob.test(hex40Global.replaceAll(text, with: "")) {
                     return "long base64 secret"
                 }
             }
-            if check.0.test(text) { return check.1 }
         }
         return nil
     }

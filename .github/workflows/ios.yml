@@ -6,11 +6,28 @@ on:
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
+      # PhrenKit's markdown parsers are transcriptions of these. A format change
+      # here with no matching Swift change is exactly the drift the fixture
+      # tests exist to catch, so they have to actually run. (Duplicated rather
+      # than shared via a YAML anchor: GitHub Actions does not support anchors.)
+      - "packages/cli/src/content/**"
+      - "packages/cli/src/core/**"
+      - "packages/cli/src/finding/**"
+      - "packages/cli/src/data/access.ts"
   pull_request:
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
+      - "packages/cli/src/content/**"
+      - "packages/cli/src/core/**"
+      - "packages/cli/src/finding/**"
+      - "packages/cli/src/data/access.ts"
   workflow_dispatch:
+
+# macOS runners bill at a 10x minute multiplier; superseded runs are wasted spend.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   phrenkit-tests:
@@ -30,8 +47,15 @@ jobs:
     needs: phrenkit-tests
     steps:
       - uses: actions/checkout@v4
+      # Deliberately unpinned, and worth knowing why: XcodeGen's emitted project
+      # format is coupled to the Xcode version (see the note above), so pinning
+      # one without the other trades a random break for a guaranteed one. Log
+      # both versions instead, so a sudden failure is diagnosable from the run.
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+          xcodebuild -version
       - name: Generate project
         working-directory: apps/ios
         run: xcodegen generate
