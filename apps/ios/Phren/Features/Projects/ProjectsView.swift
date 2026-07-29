@@ -123,7 +123,10 @@ struct FindingsTab: View {
     @State private var editing: Finding?
 
     private var findings: [Finding] {
-        model.findings(storeId: storeId, project: project)
+        // The snapshot now carries archived findings too (flagged); this tab
+        // shows the live set. The archived toggle arrives with the detail-view
+        // phase.
+        model.findings(storeId: storeId, project: project).filter { !$0.archived }
     }
 
     private var groupedByDate: [(date: String, items: [Finding])] {

@@ -92,6 +92,8 @@ struct SearchView: View {
         case .note: return PhrenTheme.cyan
         case .task: return PhrenTheme.green
         case .summary: return PhrenTheme.textMuted
+        case .review: return PhrenTheme.accentHover
+        case .truth: return PhrenTheme.lavender
         }
     }
 }

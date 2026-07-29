@@ -67,7 +67,8 @@ public struct FindingsFile: Sendable {
                     scope: nil, machine: nil, actor: nil, supersededBy: nil,
                     supersedes: nil, contradicts: nil, status: .active,
                     statusUpdated: nil, statusReason: nil, statusRef: nil,
-                    archived: inArchiveBlock, typeTag: tag, rawLine: line
+                    archived: inArchiveBlock, typeTag: tag, rawLine: line,
+                    provenance: nil
                 ))
                 index += 1
                 continue
@@ -120,12 +121,40 @@ public struct FindingsFile: Sendable {
                 statusRef: lifecycle.statusRef,
                 archived: inArchiveBlock,
                 typeTag: typeTag,
-                rawLine: line
+                rawLine: line,
+                // The full struct, not just the three CLI-mirrored fields —
+                // source/tool/model/sessionId were previously parsed and
+                // dropped on the floor here.
+                provenance: provenance
             ))
             if citation != nil { i += 1 }
             index += 1
         }
         return items
+    }
+
+    /// Resolves a supersedes/superseded-by/contradicts reference to a finding.
+    ///
+    /// These comments carry the first ~60 characters of the *other finding's
+    /// text* (access.ts:108-113), not a fid — so resolution is a normalized
+    /// prefix match. Archived findings are legitimate targets: superseded
+    /// findings usually live in the archive block.
+    public static func resolveFindingRef(_ ref: String, in findings: [Finding]) -> Finding? {
+        let needle = normalizeFindingText(ref)
+        guard !needle.isEmpty else { return nil }
+        if let direct = findings.first(where: { normalizeFindingText($0.text).hasPrefix(needle) }) {
+            return direct
+        }
+        // CLI refs are `text.slice(0, 60)` and usually carry the `[tag]`
+        // prefix, but not always (untagged findings, hand edits). Retry with
+        // the tag stripped from BOTH sides so any tag/no-tag pairing resolves.
+        let untaggedNeedle = Self.findingTagPrefix.replaceFirst(needle, with: "")
+        guard !untaggedNeedle.isEmpty else { return nil }
+        return findings.first {
+            Self.findingTagPrefix
+                .replaceFirst(normalizeFindingText($0.text), with: "")
+                .hasPrefix(untaggedNeedle)
+        }
     }
 
     /// access.ts:164 `extractDateHeading`

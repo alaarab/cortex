@@ -101,6 +101,12 @@ public struct Finding: Codable, Equatable, Identifiable, Sendable {
 
     /// Raw markdown line this finding was parsed from (mutation key).
     public var rawLine: String
+
+    /// Full `<!-- source: -->` provenance. iOS-only read enrichment — the CLI's
+    /// `FindingItem` exposes only machine/actor/scope (mirrored above), so this
+    /// field is deliberately *outside* the 1:1 contract. Read-only: nothing
+    /// serializes it back, so the format contract is untouched.
+    public var provenance: FindingProvenance?
 }
 
 /// Mirrors `QueueItem` (packages/cli/src/data/access.ts).

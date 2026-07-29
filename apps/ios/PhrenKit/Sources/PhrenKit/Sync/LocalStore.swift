@@ -72,6 +72,10 @@ public actor LocalStore {
 
     private let root: URL
     private var manifest: Manifest
+    /// Bumped on every content change. Lets the app skip re-parsing and
+    /// re-indexing a store whose files haven't moved — sync status updates
+    /// fire far more often than content actually changes.
+    public private(set) var dataVersion: UInt64 = 0
 
     public init(rootDirectory: URL, owner: String, repo: String, branch: String) throws {
         self.root = rootDirectory
@@ -138,6 +142,7 @@ public actor LocalStore {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try Data(content.utf8).write(to: url, options: .atomic)
+        dataVersion += 1
         try updateManifest { manifest in
             if let blobSha {
                 manifest.blobShas[path] = blobSha
@@ -154,6 +159,7 @@ public actor LocalStore {
     /// locally-deleted file impossible to delete on GitHub.
     public func delete(_ path: String) throws {
         try? FileManager.default.removeItem(at: fileURL(path))
+        dataVersion += 1
         try updateManifest { manifest in
             if manifest.blobShas[path] != nil {
                 manifest.deletedPaths = (manifest.deletedPaths ?? []).union([path])
@@ -167,6 +173,7 @@ public actor LocalStore {
     /// Delete observed on the remote — no tombstone, nothing left to push.
     public func deleteSynced(_ path: String) throws {
         try? FileManager.default.removeItem(at: fileURL(path))
+        dataVersion += 1
         try updateManifest { manifest in
             manifest.blobShas.removeValue(forKey: path)
             manifest.dirtyPaths?.remove(path)
@@ -229,6 +236,7 @@ public actor LocalStore {
 
     public func wipe() throws {
         try? FileManager.default.removeItem(at: root)
+        dataVersion += 1
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
         manifest = Manifest(owner: manifest.owner, repo: manifest.repo, branch: manifest.branch)
@@ -243,8 +251,14 @@ public actor LocalStore {
         public var notes: [String: [Note]]
         public var reviewQueue: [ProjectQueueItem]
         public var summaries: [String: String]
+        /// project → truths.md contents. Synced read-only; was previously
+        /// downloaded and then silently discarded here.
+        public var truths: [String: String]
+        /// project → CLAUDE.md contents. Rendered in the Docs UI but kept out
+        /// of the search index (instruction boilerplate pollutes results).
+        public var claudeDocs: [String: String]
 
-        public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
+        public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:], truths: [:], claudeDocs: [:])
     }
 
     /// Parses every cached file into the UI model. Sorting of the cross-project
@@ -254,6 +268,8 @@ public actor LocalStore {
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
         var summaries: [String: String] = [:]
+        var truths: [String: String] = [:]
+        var claudeDocs: [String: String] = [:]
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
 
@@ -267,7 +283,10 @@ public actor LocalStore {
             if parts.count == 2 {
                 switch parts[1] {
                 case "FINDINGS.md":
-                    findings[project] = FindingsFile(content: content).parse()
+                    // Archived findings ride along, flagged by `archived` —
+                    // the UI filters by default; mutations on them already
+                    // throw archivedReadOnly, so exposure is safe.
+                    findings[project] = FindingsFile(content: content).parse(includeArchived: true)
                 case "tasks.md":
                     tasks[project] = TasksFile(project: project, content: content).doc
                 case "review.md":
@@ -276,6 +295,10 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
+                case "truths.md":
+                    truths[project] = content
+                case "CLAUDE.md":
+                    claudeDocs[project] = content
                 default:
                     break
                 }
@@ -296,7 +319,7 @@ public actor LocalStore {
         let projects = projectNames.sorted().map { name in
             Project(
                 name: name,
-                findingCount: findings[name]?.count ?? 0,
+                findingCount: findings[name]?.filter { !$0.archived }.count ?? 0,
                 taskCount: tasks[name].map { $0.active.count + $0.queue.count } ?? 0,
                 noteCount: notes[name]?.count ?? 0,
                 reviewCount: queue.filter { $0.project == name }.count
@@ -305,7 +328,8 @@ public actor LocalStore {
 
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
-            notes: notes, reviewQueue: queue, summaries: summaries
+            notes: notes, reviewQueue: queue, summaries: summaries,
+            truths: truths, claudeDocs: claudeDocs
         )
     }
 

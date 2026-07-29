@@ -11,6 +11,9 @@ final class StoreContext: Identifiable {
     let engine: SyncEngine
     var snapshot: LocalStore.Snapshot = .empty
     var status = SyncEngine.Status()
+    /// LocalStore.dataVersion the current snapshot was parsed from — the gate
+    /// that keeps status-only updates from re-parsing an unchanged store.
+    var snapshotVersion: UInt64?
 
     // nonisolated: witnesses the nonisolated Identifiable requirement without
     // a MainActor hop (descriptor is an immutable Sendable let).
@@ -69,6 +72,9 @@ final class AppModel {
     private(set) var user: GitHubUser?
     private(set) var storeContexts: [StoreContext] = []
     private(set) var searchIndex = SearchIndex()
+    /// Bumped whenever searchIndex is actually rebuilt. Search results cache
+    /// against this, so they refresh exactly when the index changes.
+    private(set) var indexGeneration = 0
     private(set) var syncStatus = SyncEngine.Status()
     /// Global store filter (store id) applied by list screens when set.
     var storeFilter: String?
@@ -362,6 +368,13 @@ final class AppModel {
         storeContexts.remove(at: index)
         if storeFilter == id { storeFilter = nil }
         persistDescriptors(storeDescriptors)
+        // Membership changed with no store's dataVersion moving — the gated
+        // refresh would keep the removed store's docs in the index. Rebuild
+        // unconditionally.
+        searchIndex = SearchIndex(snapshots: storeContexts.map {
+            (store: $0.id, snapshot: $0.snapshot)
+        })
+        indexGeneration += 1
         await refresh()
         if storeContexts.isEmpty {
             phase = .pickingRepo
@@ -399,15 +412,29 @@ final class AppModel {
     // MARK: - Data refresh
 
     func refresh() async {
+        // Sync status updates fire on every poll tick (twice per 7s per store,
+        // even on 304s); content changes are far rarer. Re-parse and re-index
+        // only stores whose dataVersion actually moved — status is always
+        // cheap to copy.
+        var contentChanged = false
         for context in storeContexts {
-            context.snapshot = await context.store.snapshot()
             context.status = await context.engine.currentStatus()
+            let version = await context.store.dataVersion
+            if context.snapshotVersion != version {
+                context.snapshot = await context.store.snapshot()
+                context.snapshotVersion = version
+                contentChanged = true
+            }
         }
-        // Key by store id (owner/name) — display names alone collide when two
-        // owners have same-named repos. The UI translates via storeName(for:).
-        searchIndex = SearchIndex(snapshots: storeContexts.map {
-            (store: $0.id, snapshot: $0.snapshot)
-        })
+        if contentChanged {
+            // Key by store id (owner/name) — display names alone collide when
+            // two owners have same-named repos. The UI translates via
+            // storeName(for:).
+            searchIndex = SearchIndex(snapshots: storeContexts.map {
+                (store: $0.id, snapshot: $0.snapshot)
+            })
+            indexGeneration += 1
+        }
         syncStatus = aggregateStatus()
     }
 
