@@ -58,19 +58,30 @@ struct WelcomeView: View {
                     .foregroundStyle(.red)
             }
 
-            Button {
-                Task { await startDeviceFlow() }
-            } label: {
-                Label("Sign in with GitHub", systemImage: "person.badge.key")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(polling)
+            if DeviceFlowAuth.isConfigured {
+                Button {
+                    Task { await startDeviceFlow() }
+                } label: {
+                    Label("Sign in with GitHub", systemImage: "person.badge.key")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(polling)
 
-            Button("Use a personal access token instead") {
-                showPATSheet = true
+                Button("Use a personal access token instead") {
+                    showPATSheet = true
+                }
+                .font(.footnote)
+            } else {
+                // No OAuth App registered yet — the PAT flow is the sign-in.
+                Button {
+                    showPATSheet = true
+                } label: {
+                    Label("Sign in with a GitHub token", systemImage: "person.badge.key")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .font(.footnote)
 
             Button("Explore the demo") {
                 Task { await model.enterDemoMode() }

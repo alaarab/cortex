@@ -12,6 +12,14 @@ public actor DeviceFlowAuth {
     /// then, the PAT sign-in path is fully functional.
     public static let defaultClientID = "REPLACE_WITH_PHREN_OAUTH_CLIENT_ID"
 
+    /// True once a real OAuth App client ID has been configured. The UI hides
+    /// the device-flow button until then — shipping a prominent sign-in button
+    /// that can only fail is an App Review (2.1) rejection, and it blamed the
+    /// network for a build-configuration gap.
+    public static var isConfigured: Bool {
+        defaultClientID != "REPLACE_WITH_PHREN_OAUTH_CLIENT_ID"
+    }
+
     /// `repo` is a classic scope — required for private store repos. OAuth
     /// apps cannot request fine-grained permissions.
     public static let scope = "repo"
