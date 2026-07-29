@@ -62,8 +62,7 @@ struct WelcomeView: View {
                 Button {
                     Task { await startDeviceFlow() }
                 } label: {
-                    Label("Sign in with GitHub", systemImage: "person.badge.key")
-                        .frame(maxWidth: .infinity)
+                    signInLabel
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(polling)
@@ -77,8 +76,7 @@ struct WelcomeView: View {
                 Button {
                     showPATSheet = true
                 } label: {
-                    Label("Sign in with a GitHub token", systemImage: "person.badge.key")
-                        .frame(maxWidth: .infinity)
+                    signInLabel
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -96,6 +94,21 @@ struct WelcomeView: View {
         .sheet(isPresented: $showPATSheet) {
             PATSignInSheet()
         }
+    }
+
+    /// The one prominent sign-in button: GitHub mark plus a taller hit area.
+    /// The mark is the official cutout glyph, so the cat shows the button's
+    /// accent color through it.
+    private var signInLabel: some View {
+        HStack(spacing: 10) {
+            Image("GitHubMark")
+                .resizable()
+                .frame(width: 22, height: 22)
+            Text("Sign in with GitHub")
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     private func startDeviceFlow() async {
