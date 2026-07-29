@@ -62,11 +62,31 @@ anything the CLI would reject.
 - **Reads**: `GET git/ref/heads/<branch>` with an `If-None-Match` ETag
   (304s don't count against the rate limit) → on change, recursive tree →
   fetch only changed blobs. Live mode polls every ~7s while foregrounded.
-- **Writes**: offline-first. Mutations apply to the local cache instantly,
-  queue as domain ops in `pending-ops.json`, and flush FIFO as per-file
-  Contents API PUTs (one commit per file, message `phren: <project>(<kind>) via ios`).
-  A sha conflict triggers refetch → re-apply → retry (3×), then parks the op
-  in Settings → "Needs attention".
+- **Writes**: offline-first, under one rule — **recompute on pull, never on
+  push**. Local content is defined as last-synced remote content with every
+  pending op applied in queue order. Mutations apply to the local cache once, at
+  enqueue, and queue as domain ops in `pending-ops.json`. `push` then uploads the
+  bytes that already exist locally as per-file Contents API PUTs (one commit per
+  file, message `phren: <project>(<kind>) via ios`); it never re-derives the
+  edits, because the content it would read from already contains them.
+
+  Ops are re-derived in exactly one place: `rebasePendingOps`, after a pull moves
+  a file the queue touches. Every affected path is first restored to last-synced
+  content, so the replay starts from a clean base. This is what makes a sha
+  conflict recoverable — refetch → re-apply → retry (3×) — and it means a replay
+  must be deterministic, so each op carries its own generated `fid`/`bid`/`nid`
+  and its enqueue timestamp rather than minting them at push time.
+
+  A domain failure during replay is downgraded to "already satisfied" only when
+  the op's postcondition provably holds (an id-addressed add whose id is already
+  present, a remove whose target is already gone). That makes at-least-once
+  delivery safe: a PUT that commits but whose response is lost drains cleanly
+  instead of parking. Text-addressed ops stay fail-visible and park in
+  Settings → "Needs attention".
+
+  Transport failures back off exponentially (capped, honoring
+  `x-ratelimit-reset`) and block only their own file's lane, so one repo's
+  permission error no longer stalls every other project's queue.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
   and `notes/YYYY-MM-DD.md` are ever written. `.config/`, `phren.root.yaml`,
   `stores.yaml`, `CLAUDE.md`, `summary.md`, `reference/`, `journal/` are

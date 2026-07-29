@@ -145,13 +145,19 @@ public struct FindingsFile: Sendable {
         public var scope: String?
         public var provenance: FindingProvenance?
         public var now: Date
+        /// Explicit `fid`, supplied by the sync engine so an op replayed after
+        /// a pull reproduces the bullet it already wrote locally. nil keeps the
+        /// CLI's random-id behavior.
+        public var id: String?
 
         public init(type: FindingType? = nil, scope: String? = nil,
-                    provenance: FindingProvenance? = nil, now: Date = Date()) {
+                    provenance: FindingProvenance? = nil, now: Date = Date(),
+                    id: String? = nil) {
             self.type = type
             self.scope = scope
             self.provenance = provenance
             self.now = now
+            self.id = id
         }
     }
 
@@ -178,7 +184,12 @@ public struct FindingsFile: Sendable {
             normalizedLearning = "[\(type.rawValue)] \(normalizedLearning)"
         }
 
-        let fid = Self.randomHexId()
+        let fid = options.id ?? Self.randomHexId()
+        // Replay no-op: this exact op already landed here (a push whose response
+        // was lost, or a rebase onto content that already carries it). Adding it
+        // again would either duplicate the bullet or throw as a duplicate.
+        if content.contains("<!-- fid:\(fid) -->") { return fid }
+
         var bullet = normalizedLearning.hasPrefix("- ") ? normalizedLearning : "- \(normalizedLearning)"
         bullet += " <!-- fid:\(fid) --> <!-- created: \(today) -->"
         let scopeComment = buildScopeComment(options.scope)

@@ -97,9 +97,13 @@ public struct NotesFile: Sendable {
     }
 
     @discardableResult
-    public mutating func add(text: String, time: String) throws -> Note {
+    public mutating func add(text: String, time: String, id: String? = nil) throws -> Note {
         let normalized = try Self.normalizeNoteText(text)
-        var stableId = FindingsFile.randomHexId()
+        // Replay no-op — see FindingsFile.add.
+        if let id, let existing = notes.first(where: { $0.stableId == id }) {
+            return existing
+        }
+        var stableId = id ?? FindingsFile.randomHexId()
         while notes.contains(where: { $0.stableId == stableId }) {
             stableId = FindingsFile.randomHexId()
         }

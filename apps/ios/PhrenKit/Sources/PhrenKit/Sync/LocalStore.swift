@@ -14,6 +14,16 @@ public actor LocalStore {
         /// repo path → blob SHA (the optimistic-concurrency key for writes)
         public var blobShas: [String: String]
         public var lastSyncedAt: Date?
+        /// Paths carrying local edits that have not been pushed yet. `push`
+        /// uploads exactly these; a clean path is skipped, which is what lets
+        /// several ops touching one file coalesce into a single commit.
+        ///
+        /// Optional so manifests written by earlier builds still decode — a
+        /// decode failure here silently resets every blob sha.
+        public var dirtyPaths: Set<String>?
+        /// Paths deleted locally but not yet deleted remotely. The blob sha is
+        /// deliberately retained in `blobShas` as the DELETE's concurrency key.
+        public var deletedPaths: Set<String>?
 
         public init(owner: String, repo: String, branch: String) {
             self.owner = owner
@@ -99,11 +109,30 @@ public actor LocalStore {
         root.appendingPathComponent("files").appendingPathComponent(path)
     }
 
-    public func read(_ path: String) -> String? {
-        guard let data = try? Data(contentsOf: fileURL(path)) else { return nil }
-        return String(data: data, encoding: .utf8)
+    /// nil means the file does not exist. An unreadable file *throws* rather
+    /// than reporting absence: collapsing an I/O error to "" let a transient
+    /// read failure push a near-empty file over a good remote one, using a
+    /// blob sha that was still valid.
+    public func read(_ path: String) throws -> String? {
+        do {
+            let data = try Data(contentsOf: fileURL(path))
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw PhrenKitError.validation("\(path) is not valid UTF-8.")
+            }
+            return text
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return nil
+        }
     }
 
+    /// Non-throwing read for the UI parse pass, which already skips files it
+    /// cannot read. Never use this on a write path.
+    public func readIfAvailable(_ path: String) -> String? {
+        (try? read(path)) ?? nil
+    }
+
+    /// A non-nil `blobSha` marks the write as synced with the remote; nil marks
+    /// it as a local, not-yet-pushed edit.
     public func write(_ path: String, content: String, blobSha: String?) throws {
         let url = fileURL(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
@@ -112,13 +141,66 @@ public actor LocalStore {
         try updateManifest { manifest in
             if let blobSha {
                 manifest.blobShas[path] = blobSha
+                manifest.dirtyPaths?.remove(path)
+            } else {
+                manifest.dirtyPaths = (manifest.dirtyPaths ?? []).union([path])
+            }
+            manifest.deletedPaths?.remove(path)
+        }
+    }
+
+    /// Local, optimistic delete. Keeps the blob sha and tombstones the path so
+    /// `push` can still issue the remote DELETE — dropping the sha here made a
+    /// locally-deleted file impossible to delete on GitHub.
+    public func delete(_ path: String) throws {
+        try? FileManager.default.removeItem(at: fileURL(path))
+        try updateManifest { manifest in
+            if manifest.blobShas[path] != nil {
+                manifest.deletedPaths = (manifest.deletedPaths ?? []).union([path])
+                manifest.dirtyPaths = (manifest.dirtyPaths ?? []).union([path])
+            } else {
+                manifest.dirtyPaths?.remove(path)
             }
         }
     }
 
-    public func delete(_ path: String) throws {
+    /// Delete observed on the remote — no tombstone, nothing left to push.
+    public func deleteSynced(_ path: String) throws {
         try? FileManager.default.removeItem(at: fileURL(path))
-        try updateManifest { $0.blobShas.removeValue(forKey: path) }
+        try updateManifest { manifest in
+            manifest.blobShas.removeValue(forKey: path)
+            manifest.dirtyPaths?.remove(path)
+            manifest.deletedPaths?.remove(path)
+        }
+    }
+
+    public func isDirty(_ path: String) -> Bool {
+        manifest.dirtyPaths?.contains(path) ?? false
+    }
+
+    public func isDeletedLocally(_ path: String) -> Bool {
+        manifest.deletedPaths?.contains(path) ?? false
+    }
+
+    /// Records a successful push. The new sha is always adopted — local is a
+    /// descendant of what was uploaded, so it is the correct concurrency key —
+    /// but the path stays dirty if another op mutated it while the PUT was in
+    /// flight, so that edit still gets its own push.
+    public func confirmPush(_ path: String, pushedContent: String, blobSha: String?) throws {
+        let current = (try? read(path)) ?? nil
+        let stillCurrent = current == pushedContent
+        try updateManifest { manifest in
+            if let blobSha { manifest.blobShas[path] = blobSha }
+            if stillCurrent { manifest.dirtyPaths?.remove(path) }
+        }
+    }
+
+    public func confirmDelete(_ path: String) throws {
+        try updateManifest { manifest in
+            manifest.blobShas.removeValue(forKey: path)
+            manifest.dirtyPaths?.remove(path)
+            manifest.deletedPaths?.remove(path)
+        }
     }
 
     public func blobSha(for path: String) -> String? {
@@ -180,7 +262,7 @@ public actor LocalStore {
             guard parts.count >= 2, Self.isProjectDirName(parts[0]) else { continue }
             let project = parts[0]
             projectNames.insert(project)
-            guard let content = read(path) else { continue }
+            guard let content = readIfAvailable(path) else { continue }
 
             if parts.count == 2 {
                 switch parts[1] {

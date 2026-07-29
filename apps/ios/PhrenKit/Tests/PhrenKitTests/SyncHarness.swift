@@ -27,6 +27,10 @@ struct SyncHarness {
 
         let engine = SyncEngine(client: repo, store: store, stateDirectory: dir)
         await engine.setWriteContext(.init(actor: "tester", machine: "test-machine"))
+        // Flushes are driven explicitly. Otherwise `enqueue`'s detached flush
+        // races whatever the test sets up next, and failures land on whichever
+        // side won.
+        await engine.setAutoFlush(false)
         return SyncHarness(dir: dir, store: store, engine: engine, repo: repo)
     }
 
@@ -35,7 +39,7 @@ struct SyncHarness {
     }
 
     func remote(_ path: String) async -> String? { await repo.content(path) }
-    func local(_ path: String) async -> String? { await store.read(path) }
+    func local(_ path: String) async -> String? { await store.readIfAvailable(path) }
 
     /// Asserts the op drained rather than parking, and that local and remote
     /// agree — the pair of properties every successful write must leave behind.

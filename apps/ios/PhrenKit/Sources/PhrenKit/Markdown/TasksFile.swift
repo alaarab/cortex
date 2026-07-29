@@ -347,12 +347,17 @@ public struct TasksFile: Sendable {
 
     /// tasks.ts:485 `addTask` — appends to Queue with a fresh bid.
     @discardableResult
-    public mutating func add(_ item: String, createdAt: String? = nil, sessionId: String? = nil) throws -> PhrenTask {
+    public mutating func add(_ item: String, createdAt: String? = nil, sessionId: String? = nil,
+                             id: String? = nil) throws -> PhrenTask {
         let line = JSRegex(#"^-\s*"#).replaceFirst(item, with: "").jsTrimmed
         guard !line.isEmpty else { throw PhrenKitError.emptyInput("Task text cannot be empty.") }
+        // Replay no-op — see FindingsFile.add.
+        if let id, let existing = (doc.active + doc.queue + doc.done).first(where: { $0.stableId == id }) {
+            return existing
+        }
         let newItem = PhrenTask(
             id: "Q\(doc.queue.count + 1)",
-            stableId: FindingsFile.randomHexId(),
+            stableId: id ?? FindingsFile.randomHexId(),
             section: .queue,
             line: line,
             checked: false,

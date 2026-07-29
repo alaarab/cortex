@@ -45,6 +45,28 @@ public enum PendingOp: Codable, Equatable, Sendable {
         return "phren: \(project)(\(kind)) via ios"
     }
 
+    /// Files this op writes. Derived from the op alone, so `push` can upload
+    /// what was already materialized locally without re-deriving the edits —
+    /// re-deriving against content that already contains the op is what made
+    /// every mutation either duplicate or park.
+    public var affectedPaths: [String] {
+        switch self {
+        case .addFinding, .editFinding, .removeFinding:
+            return ["\(project)/FINDINGS.md"]
+        case .approveQueue:
+            return ["\(project)/review.md"]
+        case .rejectQueue, .editQueue:
+            // The findings half is tolerant — it may or may not be touched.
+            return ["\(project)/review.md", "\(project)/FINDINGS.md"]
+        case .addNote(_, let date, _, _), .editNote(_, let date, _, _), .removeNote(_, let date, _):
+            return ["\(project)/notes/\(date).md"]
+        case .promoteNote(_, let date, _, _):
+            return ["\(project)/FINDINGS.md", "\(project)/notes/\(date).md"]
+        case .addTask, .completeTask, .removeTask, .updateTask:
+            return ["\(project)/tasks.md"]
+        }
+    }
+
     /// A short human label for the pending/failed ops UI.
     public var label: String {
         switch self {
@@ -72,12 +94,40 @@ public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
     public let queuedAt: Date
     public var attempts: Int
     public var lastError: String?
+    /// Earliest time this op may be retried, set by transport backoff and by
+    /// `x-ratelimit-reset`. Optional so queues written by earlier builds decode
+    /// unchanged — a decode failure discards every unpushed mutation.
+    public var nextAttemptAt: Date?
 
     public init(op: PendingOp) {
         self.id = UUID()
         self.op = op
         self.queuedAt = Date()
         self.attempts = 0
+    }
+
+    /// Identity for anything this op generates — a finding's `fid`, a task's
+    /// `bid`, a note's `nid`.
+    ///
+    /// Minted once at enqueue and stable across relaunch, because a replay has
+    /// to reproduce byte-identical content: an id drawn from `randomHexId()` at
+    /// push time would differ from the one already applied locally. Derived from
+    /// `id` rather than stored as a new field, so queues already on disk replay
+    /// correctly with no migration.
+    public var primaryId: String { Self.hex8(id, offset: 0) }
+
+    /// Second generated id for ops that mint two (promoteNote writes a finding
+    /// and marks a note).
+    public var secondaryId: String { Self.hex8(id, offset: 4) }
+
+    /// The enqueue instant, used as the clock for generated timestamps and date
+    /// headings. Replaying against `Date()` would file an op enqueued at 23:59
+    /// under the following day's heading.
+    public var clock: Date { queuedAt }
+
+    private static func hex8(_ uuid: UUID, offset: Int) -> String {
+        let bytes = withUnsafeBytes(of: uuid.uuid) { Array($0) }
+        return bytes[offset..<(offset + 4)].map { String(format: "%02x", $0) }.joined()
     }
 }
 
