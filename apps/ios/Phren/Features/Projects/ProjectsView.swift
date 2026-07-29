@@ -10,14 +10,17 @@ struct ProjectsView: View {
         return model.mergedProjects.filter { $0.project.name.localizedCaseInsensitiveContains(filter) }
     }
 
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        @Bindable var router = router
+        NavigationStack(path: $router.projectsPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
                 List(projects) { item in
-                    NavigationLink(value: item) {
+                    NavigationLink(value: Route.project(storeId: item.storeId, project: item.project.name)) {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 6) {
                                 Text(item.project.name).font(.headline)
@@ -68,9 +71,7 @@ struct ProjectsView: View {
                     }
                 }
             }
-            .navigationDestination(for: StoreProject.self) { item in
-                ProjectDetailView(storeId: item.storeId, project: item.project.name)
-            }
+            .phrenRoutes()
         }
     }
 }
@@ -78,15 +79,26 @@ struct ProjectsView: View {
 struct ProjectDetailView: View {
     let storeId: String
     let project: String
+    /// Deep links land on a specific section, optionally scrolled to an item.
+    var initialSection: Tab = .findings
+    var scrollTo: String?
 
     @Environment(AppModel.self) private var model
-    @State private var tab: Tab = .findings
+    @State private var tab: Tab
 
     enum Tab: String, CaseIterable {
         case findings = "Findings"
         case notes = "Notes"
         case tasks = "Tasks"
-        case summary = "Summary"
+        case docs = "Docs"
+    }
+
+    init(storeId: String, project: String, initialSection: Tab = .findings, scrollTo: String? = nil) {
+        self.storeId = storeId
+        self.project = project
+        self.initialSection = initialSection
+        self.scrollTo = scrollTo
+        _tab = State(initialValue: initialSection)
     }
 
     var body: some View {
@@ -101,10 +113,10 @@ struct ProjectDetailView: View {
             .padding(.bottom, 4)
 
             switch tab {
-            case .findings: FindingsTab(storeId: storeId, project: project)
-            case .notes: NotesTab(storeId: storeId, project: project)
+            case .findings: FindingsTab(storeId: storeId, project: project, scrollTo: scrollTo)
+            case .notes: NotesTab(storeId: storeId, project: project, scrollTo: scrollTo)
             case .tasks: TaskListView(scope: .project(storeId: storeId, project: project))
-            case .summary: SummaryTab(storeId: storeId, project: project)
+            case .docs: SummaryTab(storeId: storeId, project: project)
             }
         }
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
@@ -117,10 +129,12 @@ struct ProjectDetailView: View {
 struct FindingsTab: View {
     let storeId: String
     let project: String
+    var scrollTo: String?
 
     @Environment(AppModel.self) private var model
     @State private var showAdd = false
     @State private var editing: Finding?
+    @State private var highlighted: String?
 
     private var findings: [Finding] {
         // The snapshot now carries archived findings too (flagged); this tab
@@ -129,17 +143,34 @@ struct FindingsTab: View {
         model.findings(storeId: storeId, project: project).filter { !$0.archived }
     }
 
+    /// Deep-link landing: scroll to the target row and flash a highlight.
+    private func jumpToTarget(_ proxy: ScrollViewProxy) {
+        guard let scrollTo else { return }
+        withAnimation { proxy.scrollTo(scrollTo, anchor: .center) }
+        highlighted = scrollTo
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { highlighted = nil }
+        }
+    }
+
     private var groupedByDate: [(date: String, items: [Finding])] {
         let groups = Dictionary(grouping: findings, by: \.date)
         return groups.keys.sorted(by: >).map { ($0, groups[$0]!) }
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             ForEach(groupedByDate, id: \.date) { group in
                 Section(group.date) {
                     ForEach(group.items) { finding in
                         FindingRow(finding: finding)
+                            .id(finding.stableId ?? finding.id)
+                            .listRowBackground(
+                                (finding.stableId ?? finding.id) == highlighted
+                                    ? PhrenTheme.accent.opacity(0.18) : nil
+                            )
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     Task { await remove(finding) }
@@ -164,6 +195,8 @@ struct FindingsTab: View {
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
+        .onAppear { jumpToTarget(proxy) }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
@@ -203,14 +236,27 @@ struct FindingsTab: View {
 struct NotesTab: View {
     let storeId: String
     let project: String
+    var scrollTo: String?
 
     @Environment(AppModel.self) private var model
     @State private var showAdd = false
     @State private var editing: Note?
     @State private var promoting: Note?
+    @State private var highlighted: String?
 
     private var notes: [Note] {
         model.notes(storeId: storeId, project: project)
+    }
+
+    /// Deep-link landing: scroll to the target note and flash a highlight.
+    private func jumpToTarget(_ proxy: ScrollViewProxy) {
+        guard let scrollTo else { return }
+        withAnimation { proxy.scrollTo(scrollTo, anchor: .center) }
+        highlighted = scrollTo
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { highlighted = nil }
+        }
     }
 
     private var groupedByDay: [(date: String, items: [Note])] {
@@ -221,6 +267,7 @@ struct NotesTab: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             ForEach(groupedByDay, id: \.date) { group in
                 Section(group.date) {
@@ -236,6 +283,10 @@ struct NotesTab: View {
                                 }
                             }
                         }
+                        .id(note.stableId)
+                        .listRowBackground(
+                            note.stableId == highlighted ? PhrenTheme.accent.opacity(0.18) : nil
+                        )
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 Task {
@@ -270,6 +321,8 @@ struct NotesTab: View {
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
+        .onAppear { jumpToTarget(proxy) }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }

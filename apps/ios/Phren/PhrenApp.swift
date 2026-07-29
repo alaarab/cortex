@@ -4,6 +4,7 @@ import PhrenKit
 @main
 struct PhrenApp: App {
     @State private var model = AppModel()
+    @State private var router = AppRouter()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -14,6 +15,7 @@ struct PhrenApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(router)
                 .tint(PhrenTheme.accent)
                 // The phren identity is dark-only (docs/style.css).
                 .preferredColorScheme(.dark)
@@ -71,40 +73,30 @@ struct RootView: View {
 
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
-    @State private var selection = MainTabView.initialTab
+    @Environment(AppRouter.self) private var router
 
-    /// `-phren-tab <projects|review|tasks|search|settings>` opens straight to a
-    /// tab. Used alongside `-phren-demo` for automated UI screenshots.
-    static var initialTab: Int {
-        let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-phren-tab"), i + 1 < args.count else { return 0 }
-        switch args[i + 1].lowercased() {
-        case "review": return 1
-        case "tasks": return 2
-        case "search": return 3
-        case "settings": return 4
-        default: return 0
-        }
-    }
-
+    // Tab selection and per-tab paths live on AppRouter so search results,
+    // launch args (-phren-tab / -phren-route), and future Spotlight/quick
+    // actions can all navigate programmatically.
     var body: some View {
-        TabView(selection: $selection) {
+        @Bindable var router = router
+        TabView(selection: $router.selectedTab) {
             ProjectsView()
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
-                .tag(0)
+                .tag(AppTab.projects)
             ReviewView()
                 .tabItem { Label("Review", systemImage: "checkmark.seal") }
                 .badge(model.totalReviewCount)
-                .tag(1)
+                .tag(AppTab.review)
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
-                .tag(2)
+                .tag(AppTab.tasks)
             SearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                .tag(3)
+                .tag(AppTab.search)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(4)
+                .tag(AppTab.settings)
         }
     }
 }
