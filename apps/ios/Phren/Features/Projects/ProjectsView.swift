@@ -11,6 +11,11 @@ struct ProjectsView: View {
     }
 
     @Environment(AppRouter.self) private var router
+    @State private var newProjectStore: NewProjectTarget?
+
+    private var localStores: [StoreContext] {
+        model.storeContexts.filter { $0.descriptor.isLocal }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -63,6 +68,19 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                // Local stores are the only place the app can create projects
+                // (GitHub stores get theirs from the CLI), so the button only
+                // appears when one exists.
+                if let localStore = localStores.first {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            newProjectStore = NewProjectTarget(storeId: localStore.id)
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("New project")
+                    }
+                }
                 if model.hasMultipleStores {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
@@ -81,7 +99,53 @@ struct ProjectsView: View {
                 }
             }
             .phrenRoutes()
+            .sheet(item: $newProjectStore) { target in
+                NewProjectSheet(storeId: target.storeId)
+            }
         }
+    }
+}
+
+/// Wrapper so .sheet(item:) can take a store id without a retroactive
+/// Identifiable conformance on String.
+struct NewProjectTarget: Identifiable {
+    let storeId: String
+    var id: String { storeId }
+}
+
+/// Creates an empty project in a local store.
+struct NewProjectSheet: View {
+    let storeId: String
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Project name (e.g. my-app)", text: $name)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            .navigationTitle("New project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        Task {
+                            await model.createProject(named: name, storeId: storeId)
+                            dismiss()
+                        }
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 

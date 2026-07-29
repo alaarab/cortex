@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showAddStore = false
     @State private var removingStore: StoreDescriptor?
+    @State private var connectingStore: StoreDescriptor?
 
     var body: some View {
         NavigationStack {
@@ -31,6 +32,16 @@ struct SettingsView: View {
                                     removingStore = context.descriptor
                                 } label: {
                                     Label("Remove", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .leading) {
+                                if context.descriptor.isLocal {
+                                    Button {
+                                        connectingStore = context.descriptor
+                                    } label: {
+                                        Label("Connect", systemImage: "icloud.and.arrow.up")
+                                    }
+                                    .tint(PhrenTheme.accentSolid)
                                 }
                             }
                     }
@@ -114,6 +125,9 @@ struct SettingsView: View {
                 await model.pullToRefresh()
                 failedOps = await model.failedOps()
             }
+            .sheet(item: $connectingStore) { descriptor in
+                ConnectStoreSheet(descriptor: descriptor)
+            }
             .sheet(isPresented: $showAddStore) {
                 NavigationStack {
                     RepoPickerList(
@@ -165,14 +179,19 @@ struct StoreRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(context.descriptor.id)
+                Text(context.descriptor.isLocal ? context.descriptor.name : context.descriptor.id)
                     .font(.callout)
+                if context.descriptor.isLocal {
+                    TagChip(text: "on this device", role: .scope)
+                }
                 if !context.descriptor.canPush {
                     TagChip(text: "read-only", role: .warn)
                 }
             }
             HStack(spacing: 8) {
-                if let last = context.status.lastSyncedAt {
+                if context.descriptor.isLocal {
+                    Text("saved locally · not on GitHub")
+                } else if let last = context.status.lastSyncedAt {
                     Text("synced \(last.formatted(date: .omitted, time: .shortened))")
                 } else {
                     Text("not synced yet")
@@ -190,5 +209,68 @@ struct StoreRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+    }
+}
+
+
+/// Upgrades a local store to a GitHub-backed one. The user creates an empty
+/// repo on github.com first; the app uploads every file and reopens the store
+/// as a normal synced one.
+struct ConnectStoreSheet: View {
+    let descriptor: StoreDescriptor
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var owner = ""
+    @State private var repo = ""
+    @State private var working = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if model.user == nil {
+                    Section {
+                        Text("Sign in with GitHub first (remove the local-only setup by signing in from the welcome screen, or add a token in Settings), then come back here.")
+                            .font(.footnote)
+                    }
+                } else {
+                    Section {
+                        TextField("Owner (user or org)", text: $owner)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Repository name", text: $repo)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } footer: {
+                        Text("Create an empty private repository on github.com first. Everything in \(descriptor.name) uploads there, one commit per file, and the store becomes a normal synced one.")
+                    }
+                }
+            }
+            .navigationTitle("Connect to GitHub")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(working ? "Uploading…" : "Connect") {
+                        working = true
+                        Task {
+                            let ok = await model.connectLocalStore(
+                                storeId: descriptor.id,
+                                owner: owner.trimmingCharacters(in: .whitespaces),
+                                repo: repo.trimmingCharacters(in: .whitespaces)
+                            )
+                            working = false
+                            if ok { dismiss() }
+                        }
+                    }
+                    .disabled(working || model.user == nil
+                              || owner.trimmingCharacters(in: .whitespaces).isEmpty
+                              || repo.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }

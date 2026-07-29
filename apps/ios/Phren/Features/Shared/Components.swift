@@ -54,11 +54,15 @@ struct LiveStatusBar: View {
     }
 
     private var indicatorColor: Color {
+        if model.allStoresLocal { return PhrenTheme.lavender }
         if model.syncStatus.lastError != nil { return PhrenTheme.red }
         return model.syncStatus.isLive ? PhrenTheme.cyan : PhrenTheme.textDim
     }
 
     private var statusText: String {
+        if model.allStoresLocal {
+            return "local · saved on this device"
+        }
         if let error = model.syncStatus.lastError {
             return "sync error — \(error)"
         }

@@ -25,6 +25,7 @@ struct OnboardingFlow: View {
 struct WelcomeView: View {
     @Environment(AppModel.self) private var model
     @State private var showPATSheet = false
+    @State private var showCreateLocal = false
     @State private var deviceCode: DeviceCodeResponse?
     @State private var authError: String?
     @State private var polling = false
@@ -81,8 +82,8 @@ struct WelcomeView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Button("Explore the demo") {
-                Task { await model.enterDemoMode() }
+            Button("Start without GitHub — create a local store") {
+                showCreateLocal = true
             }
             .font(.footnote)
             .foregroundStyle(PhrenTheme.textMuted)
@@ -91,6 +92,9 @@ struct WelcomeView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PhrenTheme.bg)
+        .sheet(isPresented: $showCreateLocal) {
+            CreateLocalStoreSheet()
+        }
         .sheet(isPresented: $showPATSheet) {
             PATSignInSheet()
         }
@@ -394,5 +398,52 @@ struct InitialSyncView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PhrenTheme.bg)
+    }
+}
+
+
+/// Creates an on-device store with a first project. No GitHub involved; the
+/// store can be connected to a repo later from Settings.
+struct CreateLocalStoreSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var storeName = "my-phren"
+    @State private var projectName = ""
+    @State private var creating = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Store name", text: $storeName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("First project (e.g. my-app)", text: $projectName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("Lives on this device. You can connect it to a GitHub repo later from Settings, and nothing needs an account until then.")
+                }
+            }
+            .navigationTitle("New local store")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        creating = true
+                        Task {
+                            await model.createLocalStore(name: storeName, firstProject: projectName)
+                            dismiss()
+                        }
+                    }
+                    .disabled(creating || storeName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || projectName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }

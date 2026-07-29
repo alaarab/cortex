@@ -50,6 +50,9 @@ public actor SyncEngine {
     private var flushTask: Task<Void, Never>?
     private var flushRequested = false
     private var autoFlush = true
+    /// Offline engines (local stores with no repo behind them) apply ops to
+    /// the cache and stop: no pulls, no polling, no flushes, no sync errors.
+    private var isOffline = false
     private var pullTask: Task<Void, Never>?
     private var pullGeneration = 0
 
@@ -94,6 +97,7 @@ public actor SyncEngine {
     /// finds a pull in flight awaits it, and a forced caller then runs its own
     /// pass — the conflict-recovery path must never no-op on a stale sha.
     public func pull(force: Bool = false) async {
+        guard !isOffline else { return }
         if let inFlight = pullTask {
             await inFlight.value
             if !force { return }
@@ -185,7 +189,7 @@ public actor SyncEngine {
     /// Start continuous foreground polling. Conditional ref checks answered
     /// 304 don't count against the rate limit, so a tight interval is fine.
     public func startLive() {
-        guard liveTask == nil else { return }
+        guard !isOffline, liveTask == nil else { return }
         setStatus { $0.isLive = true }
         liveTask = Task { [weak self] in
             while let self, !Task.isCancelled {
@@ -209,6 +213,12 @@ public actor SyncEngine {
         // Local apply first — a domain error (empty text, secret, ambiguous
         // match) surfaces to the user immediately and nothing is queued.
         try await applyLocally(queued)
+        // Offline stores keep their state in the files themselves (dirty
+        // paths); queueing ops would only grow a queue nothing ever drains.
+        guard !isOffline else {
+            setStatus { _ in }
+            return
+        }
         queue.pending.append(queued)
         queue.save(to: queueURL)
         setStatus { _ in }
@@ -269,6 +279,16 @@ public actor SyncEngine {
     /// Test seam: the live pending queue, for asserting drain and ordering.
     func pendingOps() -> [QueuedOp] { queue.pending }
 
+    /// Puts the engine in offline mode — used for on-device stores that have
+    /// no GitHub repo yet. Everything still applies to the local cache and the
+    /// dirty-path bookkeeping keeps working, so a later "connect to GitHub"
+    /// can upload the accumulated state.
+    public func setOffline(_ offline: Bool) {
+        isOffline = offline
+        if offline { queue.pending.removeAll(); queue.save(to: queueURL) }
+        setStatus { $0.lastError = nil }
+    }
+
     /// Test seam: stop `enqueue` from spawning a detached flush, so a test can
     /// set up state between queueing an op and pushing it.
     func setAutoFlush(_ enabled: Bool) { autoFlush = enabled }
@@ -285,6 +305,7 @@ public actor SyncEngine {
     /// task being cleared in which an enqueue scheduled nothing — and with the
     /// app backgrounded there is no next poll to recover it.
     private func scheduleFlush() {
+        guard !isOffline else { return }
         flushRequested = true
         guard autoFlush else { return }
         guard flushTask == nil else { return }

@@ -87,6 +87,11 @@ final class AppModel {
 
     var storeDescriptors: [StoreDescriptor] { storeContexts.map(\.descriptor) }
     var hasMultipleStores: Bool { storeContexts.count > 1 }
+    /// True when every open store lives only on this device — the status bar
+    /// says "saved on this device" instead of implying a sync is owed.
+    var allStoresLocal: Bool {
+        !storeContexts.isEmpty && storeContexts.allSatisfy(\.descriptor.isLocal)
+    }
 
     func storeName(for id: String) -> String {
         storeContexts.first { $0.id == id }?.descriptor.displayName ?? id
@@ -170,7 +175,25 @@ final class AppModel {
             await enterDemoMode()
             return
         }
+        // `-phren-create-local <store> <project>` scripts the local-store flow
+        // for screenshot automation, same family as -phren-tab/-phren-route.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-phren-create-local"), i + 2 < args.count {
+            await createLocalStore(name: args[i + 1], firstProject: args[i + 2])
+            return
+        }
         guard let stored = KeychainStore.load() else {
+            // No token, but a registry of local-only stores still opens — a
+            // local store needs no GitHub at all.
+            let descriptors = loadDescriptors()
+            if !descriptors.isEmpty, descriptors.allSatisfy(\.isLocal) {
+                phase = .ready
+                for descriptor in descriptors {
+                    await openContext(descriptor)
+                }
+                await refresh()
+                return
+            }
             phase = .signedOut
             return
         }
@@ -321,20 +344,143 @@ final class AppModel {
     }
 
     func signOut() async {
-        for context in storeContexts {
+        // GitHub-backed stores are caches of the remote: wiping them is safe.
+        // Local stores are the ONLY copy of their data and don't depend on
+        // auth, so they survive sign-out untouched.
+        for context in storeContexts where !context.descriptor.isLocal {
             await context.engine.stopLive()
             try? await context.store.wipe()
         }
         KeychainStore.delete()
-        UserDefaults.standard.removeObject(forKey: Self.storesDefaultsKey)
-        UserDefaults.standard.removeObject(forKey: Self.legacyRepoDefaultsKey)
         await client.setToken(nil)
         user = nil
-        storeContexts = []
-        storeFilter = nil
-        searchIndex = SearchIndex()
-        syncStatus = SyncEngine.Status()
-        phase = .signedOut
+        storeContexts.removeAll { !$0.descriptor.isLocal }
+        if storeContexts.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.storesDefaultsKey)
+            UserDefaults.standard.removeObject(forKey: Self.legacyRepoDefaultsKey)
+            storeFilter = nil
+            searchIndex = SearchIndex()
+            syncStatus = SyncEngine.Status()
+            phase = .signedOut
+            return
+        }
+        persistDescriptors(storeDescriptors)
+        if let filter = storeFilter, !storeContexts.contains(where: { $0.id == filter }) {
+            storeFilter = nil
+        }
+        await refresh()
+    }
+
+    // MARK: - Local stores
+
+    /// Creates an on-device store with a first project so it's immediately
+    /// usable — the app's capture flows are all per-project, so an empty
+    /// store would be a dead end.
+    func createLocalStore(name: String, firstProject: String) async {
+        let storeName = Self.slugify(name)
+        let project = Self.slugify(firstProject)
+        guard !storeName.isEmpty, !project.isEmpty else {
+            lastActionError = "Store and project names need at least one letter or number."
+            return
+        }
+        let descriptor = StoreDescriptor.local(name: storeName)
+        guard !storeContexts.contains(where: { $0.id == descriptor.id }) else {
+            lastActionError = "A store named \(storeName) already exists."
+            return
+        }
+        await openContext(descriptor)
+        persistDescriptors(storeDescriptors)
+        await scaffoldProject(project, storeId: descriptor.id)
+        phase = .ready
+        await refresh()
+    }
+
+    /// Adds an empty project to a local store by writing its FINDINGS.md —
+    /// a project is just a directory with content, so this is all it takes.
+    func createProject(named rawName: String, storeId: String) async {
+        let name = Self.slugify(rawName)
+        guard !name.isEmpty else {
+            lastActionError = "Project names need at least one letter or number."
+            return
+        }
+        guard let context = storeContexts.first(where: { $0.id == storeId }),
+              context.descriptor.isLocal else {
+            lastActionError = "New projects can only be created in on-device stores. GitHub stores get projects from the CLI."
+            return
+        }
+        guard context.snapshot.findings[name] == nil,
+              !context.snapshot.projects.contains(where: { $0.name == name }) else {
+            lastActionError = "Project \(name) already exists."
+            return
+        }
+        await scaffoldProject(name, storeId: storeId)
+        await refresh()
+    }
+
+    private func scaffoldProject(_ name: String, storeId: String) async {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else { return }
+        do {
+            try await context.store.write("\(name)/FINDINGS.md",
+                                          content: "# \(name) Findings\n", blobSha: nil)
+        } catch {
+            lastActionError = error.localizedDescription
+        }
+    }
+
+    /// Upgrades a local store to a GitHub-backed one: uploads every file to
+    /// the given (already created, empty) repo, then reopens the store as a
+    /// normal synced one. Requires being signed in.
+    func connectLocalStore(storeId: String, owner: String, repo: String) async -> Bool {
+        guard user != nil else {
+            lastActionError = "Sign in with GitHub first — Settings > Account."
+            return false
+        }
+        guard let context = storeContexts.first(where: { $0.id == storeId }),
+              context.descriptor.isLocal else { return false }
+
+        let ghRepo: GitHubRepo
+        do {
+            ghRepo = try await client.repo(owner: owner, name: repo)
+        } catch {
+            lastActionError = "Couldn't open \(owner)/\(repo): \(error.localizedDescription)"
+            return false
+        }
+        guard ghRepo.permissions?.push ?? false else {
+            lastActionError = "Your token can't push to \(owner)/\(repo)."
+            return false
+        }
+
+        // Upload every local file. sha nil creates; an existing path means the
+        // repo wasn't empty and the write conflicts, which we surface.
+        let paths = await context.store.allPaths()
+        for path in paths.sorted() {
+            guard let content = await context.store.readIfAvailable(path) else { continue }
+            do {
+                _ = try await client.putFile(
+                    owner: ghRepo.owner.login, repo: ghRepo.name, path: path,
+                    branch: ghRepo.defaultBranch, content: Data(content.utf8),
+                    message: "phren: import \(context.descriptor.name) from ios", sha: nil
+                )
+            } catch {
+                lastActionError = "Upload stopped at \(path): \(error.localizedDescription). The repo should be empty."
+                return false
+            }
+        }
+
+        // Swap: retire the local context, adopt the repo as a normal store.
+        await context.engine.stopLive()
+        try? await context.store.wipe()
+        storeContexts.removeAll { $0.id == storeId }
+        await addStore(repo: ghRepo)
+        return true
+    }
+
+    static func slugify(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        let mapped = lowered.map { ch -> Character in
+            (ch.isLetter && ch.isASCII) || ch.isNumber ? ch : "-"
+        }
+        return String(mapped).split(separator: "-").joined(separator: "-")
     }
 
     // MARK: - Store management
@@ -398,6 +544,10 @@ final class AppModel {
             let context = StoreContext(descriptor: descriptor, store: store, engine: engine)
             storeContexts.append(context)
 
+            if descriptor.isLocal {
+                // No repo behind this store: apply-and-cache only, no sync.
+                await engine.setOffline(true)
+            }
             await engine.setWriteContext(.init(actor: user?.login, machine: deviceName()))
             await engine.setOnUpdate { [weak self] in
                 Task { @MainActor [weak self] in

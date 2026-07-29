@@ -12,19 +12,33 @@ public struct StoreDescriptor: Codable, Equatable, Identifiable, Sendable {
     /// Whether the token has push permission (from `GitHubRepo.permissions`).
     /// False renders the store read-only in the UI.
     public var canPush: Bool
+    /// A store created on this device with no GitHub repo behind it (yet).
+    /// Local stores never sync; "Connect to GitHub" upgrades them by uploading
+    /// their files to a repo and swapping the descriptor. Optional so
+    /// registries persisted by earlier builds keep decoding.
+    public var isLocal: Bool
 
     public var id: String { "\(owner)/\(name)" }
     public var displayName: String { name }
 
-    public init(owner: String, name: String, branch: String, canPush: Bool = true) {
+    public init(owner: String, name: String, branch: String, canPush: Bool = true,
+                isLocal: Bool = false) {
         self.owner = owner
         self.name = name
         self.branch = branch
         self.canPush = canPush
+        self.isLocal = isLocal
+    }
+
+    /// Convenience for on-device stores. The reserved "local" owner cannot
+    /// collide with a GitHub store id: GitHub logins can't contain "/", so no
+    /// real store is ever "local/<name>".
+    public static func local(name: String) -> StoreDescriptor {
+        StoreDescriptor(owner: "local", name: name, branch: "main", canPush: true, isLocal: true)
     }
 
     enum CodingKeys: String, CodingKey {
-        case owner, name, branch, canPush
+        case owner, name, branch, canPush, isLocal
     }
 
     public init(from decoder: Decoder) throws {
@@ -36,5 +50,6 @@ public struct StoreDescriptor: Codable, Equatable, Identifiable, Sendable {
         // owner/name/branch shape) — default to writable; corrected on the
         // next repo fetch.
         canPush = try container.decodeIfPresent(Bool.self, forKey: .canPush) ?? true
+        isLocal = try container.decodeIfPresent(Bool.self, forKey: .isLocal) ?? false
     }
 }
