@@ -102,6 +102,22 @@ xcodegen generate      # produces Phren.xcodeproj from project.yml
 open Phren.xcodeproj   # build & run the Phren scheme
 ```
 
+### Running on a real device
+
+Simulator builds need no signing. For a device you need an Apple Developer
+account and your Team ID, which stays out of this repo:
+
+```bash
+cp Local.xcconfig.example Local.xcconfig   # gitignored
+# put your 10-character Team ID in it (developer.apple.com > Membership)
+xcodegen generate
+```
+
+`Signing.xcconfig` pulls it in with an optional `#include?`, so CI and fresh
+clones build without it. Then plug in the phone, pick it as the run
+destination, and hit Run. Automatic signing registers the bundle id and
+provisions the device on the first build.
+
 PhrenKit alone builds and tests anywhere Swift runs (macOS or Linux):
 
 ```bash

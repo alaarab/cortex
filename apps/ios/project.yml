@@ -13,6 +13,10 @@ packages:
   PhrenKit:
     path: PhrenKit
 
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
+
 targets:
   Phren:
     type: application
@@ -35,5 +39,8 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         SWIFT_VERSION: "5.9"
+        # Xcode registers the bundle id and provisions the device on first
+        # device build, given a DEVELOPMENT_TEAM from Local.xcconfig.
+        CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: true

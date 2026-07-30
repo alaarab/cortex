@@ -1,0 +1,12 @@
+// Signing configuration.
+//
+// Your Team ID is personal and must not land in a public repo, so it lives in
+// Local.xcconfig (gitignored). The `?` makes the include optional: CI and
+// fresh clones build fine without it, they just can't sign for a device.
+//
+// To set yours up:
+//   cp Local.xcconfig.example Local.xcconfig
+//   # then put your 10-character Team ID in it
+//   xcodegen generate
+
+#include? "Local.xcconfig"

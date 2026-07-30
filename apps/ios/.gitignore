@@ -6,3 +6,6 @@ DerivedData/
 .build/
 *.xcresult
 .swiftpm/
+
+# Personal signing config — never commit a Team ID
+Local.xcconfig
