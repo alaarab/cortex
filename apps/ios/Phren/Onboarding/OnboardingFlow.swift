@@ -444,7 +444,8 @@ struct RepoPickerList: View {
             let repo = try await model.client.repo(owner: owner, name: name)
             onSelect(repo)
         } catch {
-            // TODO: match GitHubError.http(status: 404, _) directly once typed
+            // Matched on the message because GitHubError.http now carries a typed
+            // status; worth switching to a typed pattern next time this is touched.
             // error context lands (in progress elsewhere) — string matching
             // on the rendered description is a stopgap.
             if error.localizedDescription.contains("404") {

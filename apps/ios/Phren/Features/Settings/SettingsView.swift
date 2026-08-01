@@ -46,6 +46,13 @@ struct SettingsView: View {
                     ForEach(Array(model.duplicateProjectGroups.enumerated()), id: \.offset) { _, group in
                         DuplicateProjectHintRow(names: group)
                     }
+                    // Data that couldn't be read after an update is set aside
+                    // rather than dropped. The transient banner is easy to
+                    // miss, so the issue also persists here with the path the
+                    // quarantined bytes are recoverable from.
+                    ForEach(model.storageIssues) { issue in
+                        StorageIssueRow(issue: issue)
+                    }
                 } header: {
                     Text("Store health")
                 } footer: {
@@ -563,6 +570,29 @@ private struct StoreHealthCard: View {
 /// Awareness-only nudge for near-duplicate project names (Task: canonical-key
 /// normalization) — e.g. `max4liveplugins` vs `max4live-plugins` sitting side
 /// by side unnoticed. No merge/rename action: this only names the pattern.
+/// A persisted-state file that couldn't be read (after an update, or from a
+/// newer build) and was quarantined instead of discarded. Shown here as well
+/// as in the transient banner because the whole point of quarantining is that
+/// the bytes stay recoverable — the user needs somewhere durable to find out
+/// that happened, and where the copy went.
+private struct StorageIssueRow: View {
+    let issue: StorageIssue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(issue.userMessage, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(PhrenTheme.warning)
+            if let quarantine = issue.quarantineLocation {
+                Text(quarantine)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
 private struct DuplicateProjectHintRow: View {
     let names: [String]
 
