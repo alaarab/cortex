@@ -132,19 +132,86 @@ public actor GitHubClient {
                       as: [GitHubRepo].self)
     }
 
+    /// Every page of `listRepos`, stopping at the first short page or the cap.
+    /// Accounts with hundreds of repos kept their store off the picker when
+    /// only page 1 was fetched; the cap bounds the worst case at
+    /// `maxPages × perPage` repos and as many requests.
+    public func listAllRepos(maxPages: Int = 5, perPage: Int = 100) async throws -> [GitHubRepo] {
+        var all: [GitHubRepo] = []
+        var seen = Set<Int>()
+        for page in 1...max(1, maxPages) {
+            let batch = try await listRepos(page: page, perPage: perPage)
+            for repo in batch where seen.insert(repo.id).inserted {
+                all.append(repo)
+            }
+            if batch.count < perPage { break }
+        }
+        return all
+    }
+
     public func repo(owner: String, name: String) async throws -> GitHubRepo {
         try await get("repos/\(owner)/\(name)", as: GitHubRepo.self)
     }
 
-    /// True when the repo contains `phren.root.yaml` at its root — the marker
-    /// of a phren store (packages/cli/src/phren-paths.ts ROOT_MANIFEST_FILENAME).
-    public func isPhrenStore(owner: String, name: String) async -> Bool {
+    /// What a store probe learned. `noAccess` exists because GitHub answers
+    /// 404 both for "no such file" and for "repository your token may not
+    /// read" — collapsing them into a plain `false` is what made a token-scope
+    /// mistake look like "this repo isn't a phren store".
+    public enum StoreProbe: Equatable, Sendable {
+        case isStore
+        case notStore
+        /// The token can't read the repository (404/403 on the repo itself).
+        case noAccess
+        /// Network failure, throttling, or anything else worth retrying.
+        case error(String)
+    }
+
+    /// Probes for `phren.root.yaml` at the repo root — the marker of a phren
+    /// store (packages/cli/src/phren-paths.ts ROOT_MANIFEST_FILENAME).
+    ///
+    /// A 404 on the contents path is ambiguous, so it is resolved with one
+    /// follow-up request for the repository itself. Pass `disambiguate404:
+    /// false` for repos already known to be visible (anything `listRepos`
+    /// returned) to keep the probe at one request each.
+    public func probeStore(owner: String, name: String,
+                           disambiguate404: Bool = true) async -> StoreProbe {
         do {
             let (_, http) = try await request("repos/\(owner)/\(name)/contents/phren.root.yaml")
-            return (200..<300).contains(http.statusCode)
+            switch http.statusCode {
+            case 200..<300:
+                return .isStore
+            case 401, 403:
+                return .noAccess
+            case 404:
+                guard disambiguate404 else { return .notStore }
+                return await repoIsReadable(owner: owner, name: name) ? .notStore : .noAccess
+            default:
+                return .error(GitHubError.http(status: http.statusCode, message: "request failed",
+                                               method: "GET",
+                                               path: "repos/\(owner)/\(name)/contents/phren.root.yaml")
+                    .localizedDescription)
+            }
         } catch {
-            return false
+            return .error(error.localizedDescription)
         }
+    }
+
+    /// Probe for a repo the caller already listed — visible by construction,
+    /// so a 404 means "no manifest" and costs no extra request.
+    public func probeStore(_ repo: GitHubRepo) async -> StoreProbe {
+        await probeStore(owner: repo.owner.login, name: repo.name, disambiguate404: false)
+    }
+
+    private func repoIsReadable(owner: String, name: String) async -> Bool {
+        guard let (_, http) = try? await request("repos/\(owner)/\(name)") else { return false }
+        return (200..<300).contains(http.statusCode)
+    }
+
+    /// True when the repo contains `phren.root.yaml` at its root. Retained for
+    /// call sites that only need a yes/no; `probeStore` distinguishes "not a
+    /// store" from "token can't see it".
+    public func isPhrenStore(owner: String, name: String) async -> Bool {
+        await probeStore(owner: owner, name: name, disambiguate404: false) == .isStore
     }
 
     // MARK: - Git data reads
