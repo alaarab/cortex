@@ -234,6 +234,7 @@ struct RepoPickerList: View {
     @State private var repos: [GitHubRepo] = []
     @State private var phrenStoreNames: Set<String> = []
     @State private var loading = true
+    @State private var loadError: String?
     @State private var error: String?
     @State private var manualEntry = ""
 
@@ -253,6 +254,13 @@ struct RepoPickerList: View {
         repos.filter { !phrenStoreNames.contains($0.fullName) }
     }
 
+    /// True once repos have loaded and every one of them is public — a token
+    /// scoped away from a private store repo still lists successfully, it
+    /// just silently omits the repo the user actually needs.
+    private var onlyPublicReposListed: Bool {
+        !loading && loadError == nil && !repos.isEmpty && repos.allSatisfy { !$0.isPrivate }
+    }
+
     var body: some View {
         List {
             if !likelyStores.isEmpty {
@@ -262,12 +270,25 @@ struct RepoPickerList: View {
                     }
                 }
             }
-            Section(likelyStores.isEmpty ? "Your repositories" : "Other repositories") {
+            Section {
                 if loading {
                     HStack { ProgressView(); Text("Loading repositories…") }
+                } else if let loadError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(loadError).foregroundStyle(.red).font(.footnote)
+                        Button("Try again") {
+                            Task { await load() }
+                        }
+                    }
                 }
                 ForEach(otherRepos) { repo in
                     repoRow(repo, isStore: false)
+                }
+            } header: {
+                Text(likelyStores.isEmpty ? "Your repositories" : "Other repositories")
+            } footer: {
+                if onlyPublicReposListed {
+                    Text("Only public repositories are listed. If your phren store repo is private, your token doesn't have access to it yet — add the repo under Repository access on GitHub, then pull to refresh.")
                 }
             }
             Section {
@@ -327,6 +348,7 @@ struct RepoPickerList: View {
 
     private func load() async {
         loading = true
+        loadError = nil
         defer { loading = false }
         do {
             repos = try await model.client.listRepos()
@@ -338,18 +360,27 @@ struct RepoPickerList: View {
                 }
             }
         } catch {
-            self.error = error.localizedDescription
+            loadError = error.localizedDescription
         }
     }
 
     private func openManual() async {
         let parts = manualEntry.trimmingCharacters(in: .whitespaces).split(separator: "/")
         guard parts.count == 2 else { return }
+        let owner = String(parts[0])
+        let name = String(parts[1])
         do {
-            let repo = try await model.client.repo(owner: String(parts[0]), name: String(parts[1]))
+            let repo = try await model.client.repo(owner: owner, name: name)
             onSelect(repo)
         } catch {
-            self.error = "Couldn't open \(manualEntry): \(error.localizedDescription)"
+            // TODO: match GitHubError.http(status: 404, _) directly once typed
+            // error context lands (in progress elsewhere) — string matching
+            // on the rendered description is a stopgap.
+            if error.localizedDescription.contains("404") {
+                self.error = "Can't see \(owner)/\(name). GitHub returns 'not found' for private repositories your token can't read. Give the token access under Repository access on GitHub (Contents: Read and write, Metadata: Read), then try again."
+            } else {
+                self.error = "Couldn't open \(manualEntry): \(error.localizedDescription)"
+            }
         }
     }
 }
