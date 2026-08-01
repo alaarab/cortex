@@ -241,8 +241,9 @@ public actor GitHubClient {
 
     // MARK: - Contents writes
 
-    /// One commit per file, mirroring the granularity of phren's own hook
-    /// commits. `sha` is the cached blob SHA; nil creates a new file.
+    /// One commit per call, mirroring the granularity of phren's own hook
+    /// commits — the sync engine coalesces a batch of ops into one call per
+    /// file. `sha` is the cached blob SHA; nil creates a new file.
     public func putFile(owner: String, repo: String, path: String, branch: String,
                         content: Data, message: String, sha: String?) async throws -> ContentsPutResponse {
         var payload: [String: Any] = [

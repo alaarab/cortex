@@ -63,10 +63,19 @@ anything the CLI would reject.
   (304s don't count against the rate limit) → on change, recursive tree →
   fetch only changed blobs. Live mode polls every ~7s while foregrounded.
 - **Writes**: offline-first. Mutations apply to the local cache instantly,
-  queue as domain ops in `pending-ops.json`, and flush FIFO as per-file
-  Contents API PUTs (one commit per file, message `phren: <project>(<kind>) via ios`).
-  A sha conflict triggers refetch → re-apply → retry (3×), then parks the op
-  in Settings → "Needs attention".
+  queue as domain ops in `pending-ops.json`, and flush FIFO — **coalesced**:
+  consecutive queued ops that target the same file are applied to the local
+  document in order, serialized once, and pushed as a *single* Contents API
+  PUT. One commit per file-batch, not per op: batch-approving 40 review items
+  is one commit to `review.md`, not 40 racing the 7s poll. The message is
+  `phren: <project>(<kind>) via ios`, with the batch size appended when a
+  commit carries more than one op (`phren: myproj(update x12) via ios`).
+  A group is always a contiguous prefix of the queue, so ops on different
+  files never merge and never reorder.
+- **Write conflicts**: a sha conflict on a group triggers refetch → re-apply
+  the whole group onto the fresh content → retry (3×), then parks the ops
+  in Settings → "Needs attention". Parking is per op, so an item another
+  machine already handled parks alone while the rest of the batch commits.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
   and `notes/YYYY-MM-DD.md` are ever written. `.config/`, `phren.root.yaml`,
   `stores.yaml`, `CLAUDE.md`, `summary.md`, `reference/`, `journal/` are
