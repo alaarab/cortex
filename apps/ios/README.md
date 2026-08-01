@@ -28,9 +28,11 @@ apps/ios/
       Models/            # Finding, Note, PhrenTask, QueueItem — mirror the TS shapes
       Metadata/          # transcribed regexes from content/metadata.ts et al.
       Markdown/          # FindingsFile / ReviewFile / NotesFile / TasksFile
+                         #   + TruthsFile, TopicDocument (read-only tiers)
       GitHub/            # REST client + OAuth device flow + PAT validation
-      Sync/              # LocalStore cache, pending-ops queue, SyncEngine
-      Search/            # on-device inverted index
+      Sync/              # LocalStore cache, pending-ops queue, SyncEngine,
+                         #   ColdStore (archived-findings catalogue + cache)
+      Search/            # on-device inverted index (live knowledge only)
     Tests/               # fixture-driven tests (see "Fixtures" below)
   scripts/generate-fixtures.mjs
 ```
@@ -62,9 +64,77 @@ anything the CLI would reject.
 
 ### Sync model
 
-- **Reads**: `GET git/ref/heads/<branch>` with an `If-None-Match` ETag
-  (304s don't count against the rate limit) → on change, recursive tree →
-  fetch only changed blobs. Live mode polls every ~7s while foregrounded.
+The store is split into two tiers. The **hot tier** is mirrored eagerly and
+parsed on every sync; the **cold tier** is catalogued for free and downloaded
+one document at a time, only when you open it.
+
+#### Hot tier — mirrored
+
+`phren.root.yaml`, `stores.yaml`, and per project directory `FINDINGS.md`,
+`tasks.md`, `review.md`, `summary.md`, `CLAUDE.md`, `truths.md`, and
+`notes/YYYY-MM-DD.md`.
+
+`truths.md` — phren's pinned, always-injected, never-decaying memory — renders
+as a read-only section at the head of the Findings tab and is searchable as
+its own `truth` kind. Pinning is `phren pin <project> "…"` from a computer;
+the app never writes it.
+
+`global/` is in the hot tier too, but only `FINDINGS.md` and `CLAUDE.md`, and
+strictly **read-only**: it is the consolidate skill's cross-project output —
+often the largest findings file in a store — and the phone has no business
+rewriting it. `LocalStore.isSyncedPath` admits it on its own branch rather
+than by relaxing `isProjectDirName`, because `isWritablePath` delegates to
+that predicate; the split is pinned by negative tests. Every write surface
+(add/edit/delete, the voice mic, Siri) asks `isReadOnlyProject` before drawing
+a control, and `SyncEngine.enqueue` refuses a non-writable path outright
+rather than applying it locally and parking it at flush time.
+
+Reads: `GET git/ref/heads/<branch>` with an `If-None-Match` ETag (304s don't
+count against the rate limit) → on change, recursive tree → fetch only changed
+blobs. Live mode polls every ~7s while foregrounded.
+
+#### Cold tier — catalogued, hydrated on demand
+
+Once a project passes its findings cap, the CLI's `autoArchiveToReference`
+moves its oldest findings into `reference/topics/<slug>.md`. That is a lot of
+content — on one real store, 94% of all finding-bytes — and syncing it eagerly
+was measured at **5.5× the 30-day download, 6.9× the cold-start payload and
+6.9× the per-poll parse**. So it isn't synced. Instead:
+
+- The recursive tree the engine already fetches carries every blob's path,
+  sha **and size**, so `ColdStore` builds a complete catalogue of the archive
+  from a response that has already been paid for — zero extra requests, zero
+  extra bytes. It persists as `cold-tier.json`.
+- A document's text is fetched only when you open that topic.
+  `ColdStore.hydration(for:)` is the only way in, so the cached-sha vs
+  tree-sha comparison can't be skipped: a topic re-consolidated since you last
+  read it is refetched, never rendered stale.
+- Oversized blobs are refused *before* the request, on the size the tree
+  already reported — 1 MB raw, against a largest observed topic doc of ~341 KB
+  (~445 KB base64 through the blobs API). Better a clear message than a
+  spinner on a cellular connection.
+- Hydrated documents cache under a 4 MB budget with LRU eviction, outside
+  `LocalStore`'s mirrored `files/` tree.
+- **Cold content never enters `SearchIndex`.** Every entry parsed out of a
+  topic doc is stamped `archived`, which the index filters by construction —
+  a phone search returns live knowledge, matching the CLI, which strips
+  archived content from its own index. There is no separate search over
+  hydrated cold docs either.
+
+The Findings tab ends in one row — "Archived 2026-08-01 — 214 findings in 6
+topics" — that opens the archive browser. The date comes from the
+`<!-- consolidated: … -->` stamp the CLI leaves in the project's own
+`FINDINGS.md`, a file already synced; the topic count and byte total come from
+the catalogue. The finding count only appears once every topic in the project
+has been hydrated at least once, because until then the number lives inside
+documents nobody has downloaded. Archived entries are marked as such and have
+no edit affordance — they are read-only everywhere else in phren too.
+
+`journal/`, `skills/`, `.config/` and the rest of `reference/` are not synced
+at all.
+
+#### Writes
+
 - **Writes**: offline-first. Mutations apply to the local cache instantly,
   queue as domain ops in `pending-ops.json`, and flush FIFO — **coalesced**:
   consecutive queued ops that target the same file are applied to the local
@@ -80,9 +150,12 @@ anything the CLI would reject.
   in Settings → "Needs attention". Parking is per op, so an item another
   machine already handled parks alone while the rest of the batch commits.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
-  and `notes/YYYY-MM-DD.md` are ever written. `.config/`, `phren.root.yaml`,
-  `stores.yaml`, `CLAUDE.md`, `summary.md`, `reference/`, `journal/` are
-  read-only or untouched.
+  and `notes/YYYY-MM-DD.md` are ever written, and only for a `<project>` that
+  is a real project directory. `.config/`, `phren.root.yaml`, `stores.yaml`,
+  `CLAUDE.md`, `summary.md`, `truths.md`, `reference/`, `journal/`, `global/`
+  and every reserved directory (`profiles`, `templates`, `scripts`, mirroring
+  the CLI's `RESERVED_PROJECT_DIR_NAMES` plus `link.sh`'s store scaffolding)
+  are read-only or untouched.
 
 ## Building
 

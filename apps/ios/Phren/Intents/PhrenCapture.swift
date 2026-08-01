@@ -123,14 +123,16 @@ enum PhrenCapture {
     private static func liveTargets(_ model: AppModel) -> [PhrenCaptureTarget] {
         model.storeContexts.flatMap { context in
             context.descriptor.canPush
-                ? context.snapshot.projects.map {
-                    PhrenCaptureTarget(
-                        storeId: context.id,
-                        storeName: context.descriptor.displayName,
-                        project: $0.name,
-                        qualified: model.hasMultipleStores
-                    )
-                }
+                ? context.snapshot.projects
+                    .filter { !LocalStore.isReadOnlyProject($0.name) }
+                    .map {
+                        PhrenCaptureTarget(
+                            storeId: context.id,
+                            storeName: context.descriptor.displayName,
+                            project: $0.name,
+                            qualified: model.hasMultipleStores
+                        )
+                    }
                 : []
         }
         .sorted { ($0.project, $0.storeName) < ($1.project, $1.storeName) }
@@ -154,17 +156,21 @@ enum PhrenCapture {
         return result.sorted { ($0.project, $0.storeName) < ($1.project, $1.storeName) }
     }
 
-    /// Project names straight off the cached tree — every path `LocalStore`
-    /// holds is either a project-scoped file or one of the two root YAMLs
-    /// (which have no directory component), so the first component of any
-    /// two-part-or-longer path is a project. Cheaper than `snapshot()`, which
-    /// would parse every findings/tasks/notes file just to list names.
+    /// Writable project names straight off the cached tree — every path
+    /// `LocalStore` holds is either a project-scoped file or one of the two
+    /// root YAMLs (which have no directory component), so the first component
+    /// of any two-part-or-longer path is a project directory. Cheaper than
+    /// `snapshot()`, which would parse every findings/tasks/notes file just to
+    /// list names. Read-only tiers (`global`) are dropped here rather than at
+    /// enqueue time so they never appear as a Siri destination at all.
     private static func projectNames(in store: LocalStore) async -> [String] {
         var names = Set<String>()
         for path in await store.allPaths() {
             let parts = path.split(separator: "/")
             guard parts.count >= 2 else { continue }
-            names.insert(String(parts[0]))
+            let name = String(parts[0])
+            guard !LocalStore.isReadOnlyProject(name) else { continue }
+            names.insert(name)
         }
         return names.sorted()
     }

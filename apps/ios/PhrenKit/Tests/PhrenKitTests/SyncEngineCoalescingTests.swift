@@ -13,6 +13,10 @@ actor FakeGitHubClient: GitHubAPI {
     }
 
     private(set) var writes: [Write] = []
+    /// Paths whose blob was actually downloaded, in order. The cold tier's
+    /// central claim — that cataloguing the archive costs no extra requests —
+    /// is only checkable against this.
+    private(set) var blobFetches: [String] = []
     private var files: [String: String] = [:]
     private var shas: [String: String] = [:]
     private var head = "head-0"
@@ -59,14 +63,17 @@ actor FakeGitHubClient: GitHubAPI {
     func headSha(owner: String, repo: String, branch: String) async throws -> String? { head }
 
     func tree(owner: String, repo: String, sha: String) async throws -> GitTree {
+        // Real trees carry `size` on every blob; the cold tier's catalogue is
+        // built entirely from what this response already contains.
         GitTree(sha: sha, truncated: false, tree: files.keys.sorted().map { path in
-            GitTree.Entry(path: path, type: "blob", sha: shas[path], size: nil)
+            GitTree.Entry(path: path, type: "blob", sha: shas[path], size: files[path]?.utf8.count)
         })
     }
 
     func blob(owner: String, repo: String, sha: String) async throws -> Data {
         guard let path = shas.first(where: { $0.value == sha })?.key,
               let content = files[path] else { throw GitHubError.invalidResponse }
+        blobFetches.append(path)
         return Data(content.utf8)
     }
 

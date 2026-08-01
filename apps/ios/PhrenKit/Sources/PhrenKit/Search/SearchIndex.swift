@@ -6,7 +6,7 @@ import Foundation
 /// Archived content is excluded, matching the CLI's FTS index behavior.
 public struct SearchIndex: Sendable {
     public enum DocKind: String, CaseIterable, Sendable {
-        case finding, note, task, summary
+        case finding, note, task, summary, truth
     }
 
     public struct Result: Identifiable, Equatable, Sendable {
@@ -68,6 +68,18 @@ public struct SearchIndex: Sendable {
                         id: "t:\(store):\(project):\(task.stableId ?? task.id)",
                         store: store, project: project, kind: .task, text: task.line,
                         date: task.createdAt.map { String($0.prefix(10)) }, typeTag: nil
+                    ))
+                }
+            }
+            // Truths are the *most* live knowledge in a store — pinned,
+            // always injected by the CLI, never decayed — so they belong in
+            // the index for exactly the reason archived findings don't.
+            for (project, truths) in snapshot.truths {
+                for truth in truths {
+                    docs.append(Self.doc(
+                        id: "p:\(store):\(project):\(truth.id)",
+                        store: store, project: project, kind: .truth, text: truth.text,
+                        date: truth.addedDate, typeTag: nil
                     ))
                 }
             }
