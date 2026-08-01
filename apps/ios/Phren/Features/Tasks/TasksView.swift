@@ -33,17 +33,19 @@ struct TaskListView: View {
     let scope: Scope
 
     @Environment(AppModel.self) private var model
-    @State private var section: PhrenTask.Section = .active
     @State private var selectedProject: String?
     @State private var showAdd = false
     @State private var editing: TaskListRow?
+    // Done is collapsed by default — the section still shows a live count in
+    // its header so a completed task never reads as "vanished".
+    @State private var doneExpanded = false
 
     private var isProjectScoped: Bool {
         if case .project = scope { return true }
         return false
     }
 
-    private var rows: [TaskListRow] {
+    private func rows(in section: PhrenTask.Section) -> [TaskListRow] {
         var result: [TaskListRow] = []
         if case .project(let scopeStore, let scopeProject) = scope {
             // Project scope reads the store's snapshot directly — the global
@@ -70,6 +72,10 @@ struct TaskListView: View {
         }
     }
 
+    private var activeRows: [TaskListRow] { rows(in: .active) }
+    private var queueRows: [TaskListRow] { rows(in: .queue) }
+    private var doneRows: [TaskListRow] { rows(in: .done) }
+
     private var projectNames: [String] {
         // Key paths can't traverse tuple elements — use a closure.
         Array(Set(model.mergedTaskDocs.map { $0.doc.project })).sorted()
@@ -87,50 +93,22 @@ struct TaskListView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            Picker("Section", selection: $section) {
-                ForEach(PhrenTask.Section.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-
             List {
-                ForEach(rows) { row in
-                    TaskRow(
-                        row: row,
-                        showProject: !isProjectScoped,
-                        showStore: !isProjectScoped && model.hasMultipleStores
-                    ) {
-                        Task {
-                            await model.perform(.completeTask(
-                                project: row.project,
-                                match: row.task.stableId ?? row.task.line
-                            ), in: row.storeId)
-                        }
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task {
-                                await model.perform(.removeTask(
-                                    project: row.project,
-                                    match: row.task.stableId ?? row.task.line
-                                ), in: row.storeId)
-                            }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        Button {
-                            editing = row
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                        .tint(.blue)
+                Section("Active (\(activeRows.count))") {
+                    taskRows(activeRows)
+                }
+                Section("Queue (\(queueRows.count))") {
+                    taskRows(queueRows)
+                }
+                Section {
+                    DisclosureGroup("Done (\(doneRows.count))", isExpanded: $doneExpanded) {
+                        taskRows(doneRows)
                     }
                 }
             }
             .overlay {
-                if rows.isEmpty {
-                    PhrenEmptyState(title: "Nothing in \(section.rawValue)", message: "Add a task with the + button.")
+                if activeRows.isEmpty && queueRows.isEmpty && doneRows.isEmpty {
+                    PhrenEmptyState(title: "No tasks yet", message: emptyMessage)
                 }
             }
             .refreshable { await model.pullToRefresh() }
@@ -169,6 +147,102 @@ struct TaskListView: View {
         }
         .sheet(item: $editing) { row in
             TaskEditSheet(row: row)
+        }
+    }
+
+    /// The + button is disabled cross-store when no (store, project) pair is
+    /// writable — explain why, rather than leaving the empty state silent
+    /// about a control the user can see but can't press.
+    private var emptyMessage: String {
+        if !isProjectScoped && addTargets.isEmpty {
+            return "No writable store yet — your GitHub token needs Contents: Read and write on the store repo before you can add tasks."
+        }
+        return "Add a task with the + button."
+    }
+
+    @ViewBuilder
+    private func taskRows(_ items: [TaskListRow]) -> some View {
+        ForEach(items) { row in
+            TaskRow(
+                row: row,
+                showProject: !isProjectScoped,
+                showStore: !isProjectScoped && model.hasMultipleStores
+            ) {
+                toggle(row)
+            }
+            .swipeActions(edge: .leading) {
+                Button {
+                    toggle(row)
+                } label: {
+                    row.task.checked
+                        ? Label("Reopen", systemImage: "arrow.uturn.backward")
+                        : Label("Complete", systemImage: "checkmark")
+                }
+                .tint(row.task.checked ? .blue : .green)
+            }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    delete(row)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                Button {
+                    editing = row
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+            .contextMenu {
+                Button {
+                    toggle(row)
+                } label: {
+                    row.task.checked
+                        ? Label("Reopen", systemImage: "arrow.uturn.backward")
+                        : Label("Complete", systemImage: "checkmark")
+                }
+                Button {
+                    editing = row
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    delete(row)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    /// Checking a Done row un-checks it back into Active — TasksFile.update
+    /// already un-checks on section move, so this is just a section change,
+    /// not a fresh completeTask.
+    private func toggle(_ row: TaskListRow) {
+        Task {
+            if row.task.checked {
+                await model.perform(.updateTask(
+                    project: row.project,
+                    match: row.task.stableId ?? row.task.line,
+                    text: nil,
+                    priority: nil,
+                    section: PhrenTask.Section.active.rawValue
+                ), in: row.storeId)
+            } else {
+                await model.perform(.completeTask(
+                    project: row.project,
+                    match: row.task.stableId ?? row.task.line
+                ), in: row.storeId)
+            }
+        }
+    }
+
+    private func delete(_ row: TaskListRow) {
+        Task {
+            await model.perform(.removeTask(
+                project: row.project,
+                match: row.task.stableId ?? row.task.line
+            ), in: row.storeId)
         }
     }
 }
@@ -220,7 +294,7 @@ struct AddTaskSheet: View {
                     }
                 }
             }
-            .navigationTitle("Add task")
+            .navigationTitle("Add to Queue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -266,7 +340,6 @@ struct TaskRow: View {
                     .font(.title3)
             }
             .buttonStyle(.plain)
-            .disabled(row.task.checked)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayLine)
@@ -321,12 +394,14 @@ struct TaskEditSheet: View {
     @State private var text: String
     @State private var priority: PhrenTask.Priority?
     @State private var section: PhrenTask.Section
+    @State private var pinned: Bool
 
     init(row: TaskListRow) {
         self.row = row
         _text = State(initialValue: TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line)))
         _priority = State(initialValue: row.task.priority)
         _section = State(initialValue: row.task.section)
+        _pinned = State(initialValue: row.task.pinned ?? false)
     }
 
     var body: some View {
@@ -334,6 +409,7 @@ struct TaskEditSheet: View {
             Form {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
+                Toggle("Pinned", isOn: $pinned)
                 Picker("Priority", selection: $priority) {
                     Text("none").tag(PhrenTask.Priority?.none)
                     ForEach(PhrenTask.Priority.allCases, id: \.self) { p in
@@ -354,7 +430,13 @@ struct TaskEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let newText = text
+                        // TasksFile.update recomputes `pinned` from the text
+                        // it's given, so the tag has to be re-appended here —
+                        // otherwise saving silently unpins the task.
+                        var newText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if pinned {
+                            newText += " [pinned]"
+                        }
                         let newPriority = priority
                         let newSection = section != row.task.section ? section : nil
                         Task {
