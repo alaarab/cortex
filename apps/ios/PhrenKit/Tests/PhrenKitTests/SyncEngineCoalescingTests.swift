@@ -336,6 +336,15 @@ final class SyncEngineCoalescingTests: XCTestCase {
         let status = await engine.currentStatus()
         XCTAssertEqual(status.pendingCount, 0)
         XCTAssertEqual(status.failedCount, 1)
+
+        // Retrying re-applies it (its edit never reached the document) and
+        // parks it again rather than pushing a commit that contains nothing.
+        await engine.retryFailed()
+        await engine.flushNow()
+        let stillFailed = await engine.failedOps()
+        XCTAssertEqual(stillFailed.count, 1)
+        let afterRetry = await client.writes
+        XCTAssertEqual(afterRetry.count, 2, "a no-op retry must not manufacture a commit")
     }
 
     func testUnresolvedConflictParksEachOpIndividually() async throws {

@@ -211,9 +211,31 @@ public actor SyncEngine {
         scheduleFlush()
     }
 
-    public func retryFailed() {
-        queue.pending.append(contentsOf: queue.failed)
+    /// Re-queues everything in "Needs attention". An op parked before its edit
+    /// reached the local document (its target had vanished when the group was
+    /// re-applied) is applied again here — the flush pushes the local document
+    /// as it stands, so without this the retry would commit nothing for it.
+    /// Ops parked with their edit already in place are simply re-queued.
+    public func retryFailed() async {
+        let retrying = queue.failed
         queue.failed.removeAll()
+        for var queued in retrying {
+            if queued.paths?.isEmpty ?? false {
+                do {
+                    let applied = try await applyLocally(queued.op)
+                    queued.paths = applied.paths
+                    queued.deletedShas = applied.deletedShas.isEmpty ? nil : applied.deletedShas
+                } catch {
+                    // Still unresolvable — leave it parked rather than
+                    // pretending the retry pushed it.
+                    queued.lastError = error.localizedDescription
+                    queue.failed.append(queued)
+                    continue
+                }
+            }
+            queued.lastError = nil
+            queue.pending.append(queued)
+        }
         queue.save(to: queueURL)
         setStatus { _ in }
         scheduleFlush()
@@ -463,7 +485,13 @@ public actor SyncEngine {
                 updated.deletedShas = nil
                 applied.append(updated)
             } catch {
-                parked.append((op: queued, error: error.localizedDescription))
+                // Nothing of this op is in the materialized batch below, so
+                // record it as un-applied: a later retry must re-apply it
+                // rather than assume the document already carries it.
+                var failed = queued
+                failed.paths = []
+                failed.deletedShas = nil
+                parked.append((op: failed, error: error.localizedDescription))
             }
         }
 
