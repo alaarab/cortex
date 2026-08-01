@@ -4,10 +4,20 @@ import PhrenKit
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var filter = ""
+    @State private var showVoiceCapture = false
 
     private var projects: [StoreProject] {
         guard !filter.isEmpty else { return model.mergedProjects }
         return model.mergedProjects.filter { $0.project.name.localizedCaseInsensitiveContains(filter) }
+    }
+
+    /// Every writable (store, project) pair — the global quick-capture mic
+    /// is hidden entirely when none exist, same reasoning as TasksView's
+    /// addTargets-gated + button.
+    private var voiceCaptureTargets: [VoiceCaptureTarget] {
+        model.mergedProjects
+            .filter { model.canPush(storeId: $0.storeId) }
+            .map { VoiceCaptureTarget(storeId: $0.storeId, storeName: $0.storeName, project: $0.project.name) }
     }
 
     var body: some View {
@@ -67,9 +77,25 @@ struct ProjectsView: View {
                         }
                     }
                 }
+                // Global quick capture: dictate a note without opening a
+                // project first. Hidden (not just disabled) when no store is
+                // writable — mirrors TasksView's addTargets-gated + button.
+                if !voiceCaptureTargets.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showVoiceCapture = true
+                        } label: {
+                            Image(systemName: "mic.fill")
+                        }
+                        .accessibilityLabel("Dictate a note")
+                    }
+                }
             }
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
+            }
+            .sheet(isPresented: $showVoiceCapture) {
+                VoiceCaptureView(targets: voiceCaptureTargets)
             }
         }
     }
@@ -204,9 +230,17 @@ struct NotesTab: View {
     @State private var showAdd = false
     @State private var editing: Note?
     @State private var promoting: Note?
+    @State private var showVoiceCapture = false
 
     private var notes: [Note] {
         model.notes(storeId: storeId, project: project)
+    }
+
+    /// This tab's project, pre-selected — the mic button next to + only
+    /// appears when this specific (store, project) pair is writable.
+    private var voiceCaptureTarget: VoiceCaptureTarget? {
+        guard model.canPush(storeId: storeId) else { return nil }
+        return VoiceCaptureTarget(storeId: storeId, storeName: model.storeName(for: storeId), project: project)
     }
 
     private var groupedByDay: [(date: String, items: [Note])] {
@@ -267,6 +301,16 @@ struct NotesTab: View {
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
         .toolbar {
+            if voiceCaptureTarget != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showVoiceCapture = true
+                    } label: {
+                        Image(systemName: "mic.fill")
+                    }
+                    .accessibilityLabel("Dictate a note")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
             }
@@ -275,6 +319,11 @@ struct NotesTab: View {
             TextEntrySheet(title: "Add note", confirmLabel: "Add") { text, _ in
                 let now = model.nowNoteTimestamp()
                 await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text), in: storeId)
+            }
+        }
+        .sheet(isPresented: $showVoiceCapture) {
+            if let voiceCaptureTarget {
+                VoiceCaptureView(targets: [voiceCaptureTarget], preselected: voiceCaptureTarget)
             }
         }
         .sheet(item: $editing) { note in
