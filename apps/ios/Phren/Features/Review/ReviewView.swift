@@ -11,12 +11,21 @@ struct ReviewView: View {
     @State private var selection = Set<String>()
     @State private var editMode: EditMode = .inactive
     @State private var editing: StoreQueueEntry?
+    @State private var triaging = false
 
     private var items: [StoreQueueEntry] {
         model.mergedReviewQueue.filter { item in
             if let projectFilter, item.entry.project != projectFilter { return false }
             if flaggedOnly, !item.entry.item.risky { return false }
             return true
+        }
+    }
+
+    /// The deck triage works: the same items the list shows, in the same
+    /// order they're rendered — section by section, top to bottom.
+    private var triageDeck: [StoreQueueEntry] {
+        QueueItem.Section.allCases.flatMap { section in
+            items.filter { $0.entry.item.section == section }
         }
     }
 
@@ -116,6 +125,19 @@ struct ReviewView: View {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                     }
                 }
+                if editMode == .inactive {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            triaging = true
+                        } label: {
+                            Label("Triage", systemImage: "square.stack")
+                                .labelStyle(.titleAndIcon)
+                                .fontWeight(.semibold)
+                        }
+                        .tint(PhrenTheme.accentHover)
+                        .disabled(triageDeck.isEmpty)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         withAnimation {
@@ -143,6 +165,9 @@ struct ReviewView: View {
                         in: entry.storeId
                     )
                 }
+            }
+            .fullScreenCover(isPresented: $triaging) {
+                TriageView(entries: triageDeck)
             }
         }
     }
