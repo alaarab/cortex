@@ -34,7 +34,7 @@ struct ReviewView: View {
                     ForEach(QueueItem.Section.allCases, id: \.self) { section in
                         let sectionItems = items.filter { $0.entry.item.section == section }
                         if !sectionItems.isEmpty {
-                            Section(section.rawValue) {
+                            Section("\(section.rawValue) (\(sectionItems.count))") {
                                 ForEach(sectionItems) { entry in
                                     ReviewRow(entry: entry, showStore: model.hasMultipleStores)
                                         .tag(entry.id)
@@ -57,6 +57,21 @@ struct ReviewView: View {
                                             }
                                             .tint(.blue)
                                         }
+                                        .contextMenu {
+                                            Button {
+                                                Task { await approve([entry]) }
+                                            } label: {
+                                                Label("Approve", systemImage: "checkmark")
+                                            }
+                                            Button { editing = entry } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
+                                            Button(role: .destructive) {
+                                                Task { await reject([entry]) }
+                                            } label: {
+                                                Label("Reject", systemImage: "xmark")
+                                            }
+                                        }
                                 }
                             }
                         }
@@ -65,13 +80,16 @@ struct ReviewView: View {
                 .environment(\.editMode, $editMode)
                 .overlay {
                     if items.isEmpty {
-                        PhrenEmptyState(title: "Review queue is clear", message: "Auto-captured findings land here for approval.")
+                        PhrenEmptyState(
+                            title: "Review queue is clear",
+                            message: "Auto-captured findings land here for approval — approving keeps the finding, rejecting deletes it permanently."
+                        )
                     }
                 }
                 .refreshable { await model.pullToRefresh() }
         .phrenScreen()
 
-                if editMode == .active && !selection.isEmpty {
+                if editMode == .active {
                     batchBar
                 }
             }
@@ -99,10 +117,17 @@ struct ReviewView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(editMode == .active ? "Done" : "Select") {
+                    Button {
                         withAnimation {
                             editMode = editMode == .active ? .inactive : .active
                             if editMode == .inactive { selection.removeAll() }
+                        }
+                    } label: {
+                        if editMode == .active {
+                            Text("Done")
+                        } else {
+                            Label("Select", systemImage: "checklist")
+                                .labelStyle(.titleAndIcon)
                         }
                     }
                 }
@@ -122,19 +147,33 @@ struct ReviewView: View {
         }
     }
 
+    private var allVisibleSelected: Bool {
+        !items.isEmpty && selection.count == items.count
+    }
+
     private var batchBar: some View {
         HStack {
-            Text("\(selection.count) selected")
+            Button(allVisibleSelected ? "Deselect All" : "Select All") {
+                withAnimation {
+                    selection = allVisibleSelected ? [] : Set(items.map(\.id))
+                }
+            }
+            .font(.footnote)
+            .disabled(items.isEmpty)
+
+            Text(selection.isEmpty ? "None selected" : "\(selection.count) selected")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Reject", role: .destructive) {
                 Task { await reject(selectedEntries()) }
             }
+            .disabled(selection.isEmpty)
             Button("Approve") {
                 Task { await approve(selectedEntries()) }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(selection.isEmpty)
         }
         .padding()
         .background(.bar)
