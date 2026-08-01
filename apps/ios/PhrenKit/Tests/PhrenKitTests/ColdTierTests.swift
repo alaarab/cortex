@@ -207,6 +207,27 @@ final class ColdTierTests: XCTestCase {
         XCTAssertEqual(hydration, .unknown)
     }
 
+    /// The archive row's data — a date and a topic count — has to survive the
+    /// trip through `snapshot()` and the catalogue, or the footer has nothing
+    /// to render.
+    func testSnapshotCarriesTheConsolidationDate() async throws {
+        let (engine, _) = try await makeEngine(remote: [
+            "myproj/FINDINGS.md": Self.findingsSeed,
+            "myproj/reference/topics/build-tooling.md": Self.topicDoc,
+            "other/FINDINGS.md": "# other Findings\n\n## 2026-08-02\n\n- never consolidated\n",
+        ])
+        await engine.pull(force: true)
+
+        let store = try LocalStore(rootDirectory: directory, owner: "o", repo: "r", branch: "main")
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.consolidated["myproj"], "2026-08-01")
+        XCTAssertNil(snapshot.consolidated["other"], "a project with no stamp has no archive")
+
+        let summaries = await engine.coldStore.projectSummaries()
+        XCTAssertEqual(summaries["myproj"]?.topicCount, 1)
+        XCTAssertNil(summaries["other"])
+    }
+
     // MARK: - Search isolation
 
     /// Cold content must not be searchable from the phone: a search returns

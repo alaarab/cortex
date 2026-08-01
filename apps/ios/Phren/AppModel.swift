@@ -254,6 +254,13 @@ final class AppModel {
         snapshot(for: storeId).summaries[project]
     }
 
+    /// The date this project was last consolidated, if it ever was — read from
+    /// the `<!-- consolidated: … -->` stamp in a FINDINGS.md the app already
+    /// syncs, so knowing an archive exists costs nothing.
+    func consolidatedDate(storeId: String, project: String) -> String? {
+        snapshot(for: storeId).consolidated[project]
+    }
+
     var totalReviewCount: Int {
         storeContexts.reduce(0) { $0 + $1.snapshot.reviewQueue.count }
     }

@@ -221,9 +221,10 @@ struct FindingsTab: View {
                     }
                 }
             }
+            ArchiveFooter(storeId: storeId, project: project)
         }
         .overlay {
-            if findings.isEmpty {
+            if findings.isEmpty && !hasArchive {
                 PhrenEmptyState(title: "No findings", message: emptyMessage)
             }
         }
@@ -254,6 +255,14 @@ struct FindingsTab: View {
                 ), in: storeId)
             }
         }
+    }
+
+    /// A project whose findings have all been consolidated away has an empty
+    /// hot tier but is anything but empty — the "no findings" state would be
+    /// a lie, and the archive row is the truth.
+    private var hasArchive: Bool {
+        model.consolidatedDate(storeId: storeId, project: project) != nil
+            || (model.coldSummary(storeId: storeId, project: project)?.topicCount ?? 0) > 0
     }
 
     private var emptyMessage: String {

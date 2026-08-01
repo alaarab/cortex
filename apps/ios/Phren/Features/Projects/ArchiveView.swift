@@ -1,6 +1,70 @@
 import SwiftUI
 import PhrenKit
 
+/// The one row at the foot of the Findings tab that says an archive exists.
+///
+/// Everything it shows is already on the device: the date comes from the
+/// `<!-- consolidated: … -->` stamp the CLI leaves in the project's own
+/// FINDINGS.md, the topic count and byte total from the catalogue the
+/// recursive tree paid for. Nothing here triggers a fetch — tapping it does.
+struct ArchiveFooter: View {
+    let storeId: String
+    let project: String
+
+    @Environment(AppModel.self) private var model
+
+    private var consolidatedDate: String? {
+        model.consolidatedDate(storeId: storeId, project: project)
+    }
+
+    private var summary: ColdSummary? {
+        model.coldSummary(storeId: storeId, project: project)
+    }
+
+    var body: some View {
+        if let summary, summary.topicCount > 0 {
+            Section {
+                NavigationLink {
+                    ArchiveBrowserView(storeId: storeId, project: project)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(headline(summary)).font(.subheadline.weight(.semibold))
+                            Text("\(ArchiveFormat.size(summary.totalBytes)), downloaded when you open it")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "archivebox")
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } else if let consolidatedDate {
+            // Consolidated, but this store holds no `reference/topics/` — the
+            // archive is real and simply isn't here. Say so rather than
+            // leaving the findings look inexplicably short.
+            Section {
+                Label("Consolidated \(consolidatedDate) — no archive topics in this store",
+                      systemImage: "archivebox")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// "Archived 2026-08-01 — 214 findings in 6 topics" once every topic has
+    /// been read at least once; until then the finding count is genuinely
+    /// unknown (it lives inside documents nobody has downloaded) and the row
+    /// says what it can stand behind instead of guessing.
+    private func headline(_ summary: ColdSummary) -> String {
+        let topics = "\(summary.topicCount) topic\(summary.topicCount == 1 ? "" : "s")"
+        let scope = summary.findingCount.map { "\($0) finding\($0 == 1 ? "" : "s") in \(topics)" } ?? topics
+        guard let consolidatedDate else { return "Archived — \(scope)" }
+        return "Archived \(consolidatedDate) — \(scope)"
+    }
+}
+
 /// The cold tier's table of contents for one project: every
 /// `reference/topics/*.md` the CLI's consolidation wrote, listed from the
 /// catalogue the recursive tree already paid for. Opening a row is the only

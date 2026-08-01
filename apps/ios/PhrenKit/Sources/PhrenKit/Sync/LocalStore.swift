@@ -267,6 +267,11 @@ public actor LocalStore {
         public var notes: [String: [Note]]
         public var reviewQueue: [ProjectQueueItem]
         public var summaries: [String: String]
+        /// project → the date of its last consolidation, from the
+        /// `<!-- consolidated: … -->` stamp in its FINDINGS.md. Present means
+        /// findings have been moved to the cold tier; absent means the project
+        /// has never been consolidated and nothing of it is hidden.
+        public var consolidated: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -278,6 +283,7 @@ public actor LocalStore {
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
         var summaries: [String: String] = [:]
+        var consolidated: [String: String] = [:]
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
 
@@ -291,7 +297,12 @@ public actor LocalStore {
             if parts.count == 2 {
                 switch parts[1] {
                 case "FINDINGS.md":
-                    findings[project] = FindingsFile(content: content).parse()
+                    let file = FindingsFile(content: content)
+                    findings[project] = file.parse()
+                    // The consolidation stamp rides along in a file already
+                    // parsed — the archive costs nothing to *notice*, only to
+                    // read.
+                    consolidated[project] = file.consolidatedDate
                 case "tasks.md":
                     tasks[project] = TasksFile(project: project, content: content).doc
                 case "review.md":
@@ -329,7 +340,8 @@ public actor LocalStore {
 
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
-            notes: notes, reviewQueue: queue, summaries: summaries
+            notes: notes, reviewQueue: queue, summaries: summaries,
+            consolidated: consolidated
         )
     }
 
