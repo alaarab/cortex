@@ -101,6 +101,40 @@ cd apps/ios/PhrenKit
 swift test
 ```
 
+## Releasing
+
+Every build so far has been Debug + unsigned or Debug + device. The App Group
+entitlement (`group.com.phren.ios`, shared by `com.phren.ios` and
+`com.phren.ios.widgets`) is declared in `project.yml` but **not yet
+registered** with an Apple Developer account, which blocks a signed archive.
+Before the owner can produce one:
+
+1. **Register both App IDs** in the Apple Developer portal → Certificates,
+   Identifiers & Profiles → Identifiers: `com.phren.ios` (the app) and
+   `com.phren.ios.widgets` (the `PhrenWidgets` extension).
+2. **Create the App Group** `group.com.phren.ios` (same section → App Groups),
+   then enable it on both App IDs above.
+3. **Re-run `xcodegen generate`** and archive. Do **not** hand-edit
+   `Phren/Phren.entitlements` or `PhrenWidgets/PhrenWidgets.entitlements` —
+   both are gitignored and fully regenerated from the `entitlements:` blocks
+   in `project.yml` on every `xcodegen generate`; any manual edit is silently
+   overwritten the next time someone runs it.
+
+Until that portal setup is done, two local paths still work without it:
+
+- **Unsigned build** (what CI / release-readiness checks use):
+  `CODE_SIGNING_ALLOWED=NO` skips code signing entirely, so the unregistered
+  App Group entitlement is never evaluated:
+  ```bash
+  xcodebuild -project Phren.xcodeproj -scheme Phren -configuration Release \
+    -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+  ```
+- **Signed Debug-to-device build**, e.g. with a personal (free) team that
+  can't provision an unregistered App Group: override
+  `CODE_SIGN_ENTITLEMENTS=` (empty) so the signing step has no entitlements
+  file to satisfy, at the cost of the app and widget not actually sharing
+  data on that install until the App Group is registered for real.
+
 ## GitHub OAuth App (one-time owner setup)
 
 Device-flow sign-in needs a registered GitHub **OAuth App** (not a GitHub App):
