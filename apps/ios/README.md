@@ -28,7 +28,8 @@ apps/ios/
       Models/            # Finding, Note, PhrenTask, QueueItem — mirror the TS shapes
       Metadata/          # transcribed regexes from content/metadata.ts et al.
       Markdown/          # FindingsFile / ReviewFile / NotesFile / TasksFile
-                         #   + TruthsFile, TopicDocument (read-only tiers)
+                         #   + JournalFile (team stores), TruthsFile and
+                         #   TopicDocument (read-only tiers)
       GitHub/            # REST client + OAuth device flow + PAT validation
       Sync/              # LocalStore cache, pending-ops queue, SyncEngine,
                          #   ColdStore (archived-findings catalogue + cache)
@@ -70,9 +71,14 @@ one document at a time, only when you open it.
 
 #### Hot tier — mirrored
 
-`phren.root.yaml`, `stores.yaml`, and per project directory `FINDINGS.md`,
-`tasks.md`, `review.md`, `summary.md`, `CLAUDE.md`, `truths.md`, and
-`notes/YYYY-MM-DD.md`.
+`phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`, and per project directory
+`FINDINGS.md`, `tasks.md`, `review.md`, `summary.md`, `CLAUDE.md`, `truths.md`,
+`notes/YYYY-MM-DD.md`, and `journal/YYYY-MM-DD-<actor>.md`.
+
+The journal is where a team store's findings actually live (see "Team stores"
+below). It is the same shape as `notes/` — one small file per day — with an
+actor suffix, so it grows with the number of people writing rather than with
+the size of what they wrote.
 
 `truths.md` — phren's pinned, always-injected, never-decaying memory — renders
 as a read-only section at the head of the Findings tab and is searchable as
@@ -130,8 +136,7 @@ has been hydrated at least once, because until then the number lives inside
 documents nobody has downloaded. Archived entries are marked as such and have
 no edit affordance — they are read-only everywhere else in phren too.
 
-`journal/`, `skills/`, `.config/` and the rest of `reference/` are not synced
-at all.
+`skills/`, `.config/` and the rest of `reference/` are not synced at all.
 
 #### Writes
 
@@ -150,12 +155,15 @@ at all.
   in Settings → "Needs attention". Parking is per op, so an item another
   machine already handled parks alone while the rest of the batch commits.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
-  and `notes/YYYY-MM-DD.md` are ever written, and only for a `<project>` that
-  is a real project directory. `.config/`, `phren.root.yaml`, `stores.yaml`,
-  `CLAUDE.md`, `summary.md`, `truths.md`, `reference/`, `journal/`, `global/`
-  and every reserved directory (`profiles`, `templates`, `scripts`, mirroring
-  the CLI's `RESERVED_PROJECT_DIR_NAMES` plus `link.sh`'s store scaffolding)
-  are read-only or untouched.
+  `notes/YYYY-MM-DD.md` and `journal/YYYY-MM-DD-<actor>.md` are ever written,
+  and only for a `<project>` that is a real project directory. `.config/`,
+  `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`, `CLAUDE.md`,
+  `summary.md`, `truths.md`, `reference/`, `global/` and every reserved
+  directory (`profiles`, `templates`, `scripts`, mirroring the CLI's
+  `RESERVED_PROJECT_DIR_NAMES` plus `link.sh`'s store scaffolding) are
+  read-only or untouched. The journal is gated on the same project-directory
+  predicate as `FINDINGS.md`, which is what keeps a team store from making
+  `global/` writable by the back door.
 
 ## Building
 
@@ -323,15 +331,39 @@ Semantics, and where they intentionally diverge from the CLI:
   exists in two stores silently shows only the first copy. The app keys by
   *(store, project)* and shows both, disambiguated by store badge. No data is
   hidden.
-- The app does not read `stores.yaml` (the CLI's registry stores local
-  filesystem paths and unnormalized — often SSH — remotes, which aren't
-  actionable on a phone). Stores are added explicitly via the repo picker.
+- Stores are never *discovered* from `stores.yaml` — the CLI's registry holds
+  local filesystem paths and unnormalized (often SSH) remotes, neither of
+  which is actionable on a phone. You add each repo explicitly via the picker.
+  The app does read the file, from whichever attached store carries it, for
+  the two things it can act on: claim badges and store roles.
 - Writes work the same in every store; repos where your token lacks push
-  permission are marked **read-only**. Note the CLI routes finding-adds for
-  `role: team`-claimed projects through append-only `journal/` files — the app
-  writes `FINDINGS.md` directly everywhere for now (journal writes are the
-  planned v2 for heavily shared repos).
+  permission are marked **read-only**.
 - Removing a store in Settings deletes only this device's local copy.
+
+### Team stores
+
+A store with `role: team` does not line-splice `FINDINGS.md` when a finding is
+added. The CLI appends to `<project>/journal/YYYY-MM-DD-<actor>.md` and returns
+without touching `FINDINGS.md` (`tools/finding.ts` → `finding/journal.ts`), so
+two people capturing findings the same afternoon write two different files and
+git merges them instead of conflicting on adjacent lines in one. The app
+follows the same rule in both directions:
+
+- `journal/*.md` is in the hot tier and merges into the project's findings, so
+  a project whose whole history lives there is no longer invisible. Entries are
+  attributed to the actor in the filename and searchable like any other live
+  finding.
+- Adds (and note promotions) append to *this device's* file for today, byte-
+  identical to `appendTeamJournal` — pinned by `JournalFileTests` against
+  fixtures the real CLI wrote. Another actor's file is never rewritten.
+- Journal entries have no edit or delete: `edit_finding`/`remove_finding`
+  splice `FINDINGS.md` in every store (only the add path forks), so the
+  controls could only offer a refusal. The log is append-only on both sides —
+  nothing rewrites a journal line in place.
+- A store's role comes from its own `.phren-team.yaml` first, then from a
+  `stores.yaml` entry matching its name. Both are hot-tier files. A role
+  nothing declares is left alone rather than guessed: journalling a personal
+  store would write files the CLI never compacts.
 
 Legacy single-store installs migrate automatically on first launch.
 
@@ -362,8 +394,8 @@ exactly which transcription needs updating.
 ## Not in the MVP
 
 - The 3D graph tab (the web UI's Graph view)
-- Journal-based writes for team stores — heavily shared repos should
-  eventually write findings through the append-only journal
-  (`packages/cli/src/finding/journal.ts`) instead of direct `FINDINGS.md` edits
+- Editing or retracting a journal entry (the CLI can't either — its lifecycle
+  tools address `FINDINGS.md`, and folding a journal into it has no command
+  yet, only `materializeTeamFindings` in `finding/journal.ts`)
 - `stores.yaml` auto-discovery as an add-store suggestion source
 - Skills/Hooks/Settings management tabs from the web UI
