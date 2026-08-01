@@ -53,9 +53,16 @@ public actor LocalStore {
     }
 
     /// Only these paths are ever written back to GitHub. Everything else in
-    /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`, `CLAUDE.md`,
-    /// `summary.md`, `truths.md`, `reference/`, `journal/`, and everything
-    /// under a reserved directory (`global/` above all) — is read-only.
+    /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`,
+    /// `.phren-team.yaml`, `CLAUDE.md`, `summary.md`, `truths.md`,
+    /// `reference/`, and everything under a reserved directory (`global/`
+    /// above all) — is read-only.
+    ///
+    /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
+    /// same ``isProjectDirName`` predicate as `FINDINGS.md`, which is what
+    /// makes routing a team store's adds to the journal a no-op for every
+    /// read-only tier: `global/journal/…` is refused for the same reason
+    /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
@@ -65,11 +72,14 @@ public actor LocalStore {
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
         }
+        if parts.count == 3, parts[1] == JournalFile.directoryName {
+            return JournalFile.parseFileName(parts[2]) != nil
+        }
         return false
     }
 
     /// Paths the sync engine mirrors locally — the **hot tier**. Skips
-    /// `.config/`, `journal/`, and `reference/`; `reference/topics/` instead
+    /// `.config/` and `reference/`; `reference/topics/` instead
     /// gets a lazily hydrated cold tier (``ColdStore``), and the rest is
     /// deliberately untouched.
     ///
@@ -81,6 +91,11 @@ public actor LocalStore {
     /// predicate and would otherwise make the phone able to rewrite it.
     public static func isSyncedPath(_ path: String) -> Bool {
         if path == "phren.root.yaml" || path == "stores.yaml" { return true }
+        // A team store repo describes itself: `.phren-team.yaml` is what the
+        // CLI reads to decide the role it registers a joined store under
+        // (cli/namespaces-store.ts:147), so it is also how the phone knows
+        // whether this repo's finding-adds belong in the journal.
+        if path == TeamBootstrap.fileName { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2 else { return false }
         if parts[0] == globalDirName {
@@ -95,6 +110,16 @@ public actor LocalStore {
         }
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
+        }
+        // In a team store this is where the findings *are*: the CLI's add path
+        // appends here and returns without touching FINDINGS.md
+        // (tools/finding.ts:186). Leaving it out of the hot tier rendered a
+        // project whose whole history lives in the journal as empty. Same
+        // shape as `notes/` — one small file per day — with an actor suffix,
+        // so it grows with the number of people writing, not with the size of
+        // what they wrote.
+        if parts.count == 3, parts[1] == JournalFile.directoryName {
+            return JournalFile.parseFileName(parts[2]) != nil
         }
         return false
     }
@@ -290,6 +315,7 @@ public actor LocalStore {
         var consolidated: [String: String] = [:]
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
+        var journals: [String: [JournalFile]] = [:]
 
         for path in allPaths() {
             let parts = path.split(separator: "/").map(String.init)
@@ -324,6 +350,24 @@ public actor LocalStore {
                 let date = String(parts[2].dropLast(3))
                 let file = NotesFile(project: project, date: date, content: content)
                 notes[project, default: []].append(contentsOf: file.notes)
+            } else if parts.count == 3, parts[1] == JournalFile.directoryName,
+                      let name = JournalFile.parseFileName(parts[2]) {
+                journals[project, default: []]
+                    .append(JournalFile(date: name.date, actor: name.actor, content: content))
+            }
+        }
+
+        // journal.ts:184 — filenames sorted then reversed, i.e. newest
+        // actor-day first. Appended after the FINDINGS.md bullets rather than
+        // interleaved: every consumer groups by date anyway (the Findings tab
+        // and `TopicDocument.groupedByDate` both do), and keeping the two
+        // sources in blocks keeps `L…`/`J…` ids stable within each.
+        for (project, files) in journals {
+            var idOffset = 0
+            for file in files.sorted(by: { $0.fileName > $1.fileName }) {
+                let entries = file.findings(idOffset: idOffset)
+                idOffset += entries.count
+                findings[project, default: []].append(contentsOf: entries)
             }
         }
 

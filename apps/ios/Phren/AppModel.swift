@@ -147,16 +147,27 @@ final class AppModel {
     /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
     var selectedTab: AppTab = .projects
 
-    /// Parsed `stores.yaml`, read from the primary store's local cache (see
-    /// `refreshStoresManifest`). Powers the claim-awareness badges in
-    /// Projects and the health-section summary in Settings.
+    /// Parsed `stores.yaml`, from whichever attached store actually carries
+    /// the registry (see `refreshStoreRegistry`). Powers the claim-awareness
+    /// badges in Projects, the health-section summary in Settings, and — as
+    /// the fallback behind `.phren-team.yaml` — `storeRoles`.
     private(set) var storesManifest = StoresManifest()
-    /// Last raw content parsed into `storesManifest`, so a refresh only
-    /// re-parses when the file actually changed — which, since `stores.yaml`
-    /// is a synced root path (LocalStore.isSyncedPath), only happens when the
-    /// store's ref sha moves. This is what keys the re-parse to the ref sha
-    /// without fetching the file separately on every ~7s poll.
-    private var lastStoresYAMLRaw: String?
+    /// Last raw registry content parsed into `storesManifest` and
+    /// `storeRoles`, keyed by store id, so a refresh only re-parses when a
+    /// file actually changed — which, since `stores.yaml` and
+    /// `.phren-team.yaml` are synced root paths (LocalStore.isSyncedPath),
+    /// only happens when a store's ref sha moves. This is what keys the
+    /// re-parse to the ref sha without fetching anything separately on every
+    /// ~7s poll.
+    private var lastRegistryRaw: [String: String] = [:]
+    /// Store id → the CLI registry role that store is treated as
+    /// ("primary" | "team" | "readonly"). Absent means "nothing in any
+    /// attached store says", which is not the same as primary — see
+    /// ``usesTeamJournal(storeId:)``.
+    private(set) var storeRoles: [String: String] = [:]
+    /// The journal routing already pushed into each engine's write context,
+    /// so a ~7s refresh doesn't re-send an unchanged one.
+    private var appliedJournalRouting: [String: Bool] = [:]
 
     let client = GitHubClient()
 
@@ -194,13 +205,19 @@ final class AppModel {
         mergedProjects.filter { canWrite(storeId: $0.storeId, project: $0.project.name) }
     }
 
-    /// The store treated as "primary" for `stores.yaml` sourcing: the first
-    /// one added. The app has no per-store equivalent of the registry's own
-    /// `role: primary` (that's a property of entries *inside* stores.yaml,
-    /// not of the app's GitHub-repo store list) — first-added is the closest
-    /// stand-in, and matches how a single pre-existing store migrates in as
-    /// the sole (and therefore first) entry.
-    private var primaryStoreContext: StoreContext? { storeContexts.first }
+    /// Whether a finding added to this store must be journalled rather than
+    /// spliced into `FINDINGS.md` — the app's side of tools/finding.ts:186.
+    ///
+    /// Only a store the registry positively calls `team` journals. An
+    /// *unknown* role does not: the phone may simply have no visibility (the
+    /// personal store that holds `stores.yaml` isn't attached, and this repo
+    /// carries no `.phren-team.yaml`), and guessing "team" there would write
+    /// journal files the CLI never compacts into a personal store's
+    /// FINDINGS.md. Guessing wrong in this direction is the status quo;
+    /// guessing wrong in the other invents a file nothing reads.
+    func usesTeamJournal(storeId: String) -> Bool {
+        storeRoles[storeId] == "team"
+    }
 
     // MARK: - Merged accessors
 
@@ -341,24 +358,87 @@ final class AppModel {
         name.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
     }
 
-    /// Re-parses `stores.yaml` from the primary store's local cache when its
-    /// content has changed since the last refresh. `LocalStore` already
-    /// mirrors `stores.yaml` as part of the normal recursive-tree sync
-    /// (`LocalStore.isSyncedPath`), so this is a local file read, not a
-    /// network call — the file's content (and hence the raw-content equality
-    /// check below) only changes when the store's ref sha moves, which is
-    /// exactly the "once per sync generation, keyed on the ref sha" the file
-    /// needs to respect the live ~7s poll.
-    private func refreshStoresManifest() async {
-        guard let primary = primaryStoreContext else {
-            storesManifest = .empty
-            lastStoresYAMLRaw = nil
-            return
+    /// Re-parses the CLI's two registry files from every attached store's
+    /// local cache, when any of them has changed since the last refresh.
+    /// `LocalStore` already mirrors both as part of the normal recursive-tree
+    /// sync (`LocalStore.isSyncedPath`), so these are local file reads, not
+    /// network calls — their content (and hence the raw-content equality check
+    /// below) only changes when a store's ref sha moves, which is exactly the
+    /// "once per sync generation, keyed on the ref sha" cadence the live ~7s
+    /// poll needs.
+    ///
+    /// **Every store, not the first one.** `stores.yaml` is the *primary*
+    /// store's registry (`storesFilePath`, store-registry.ts:59); a team store
+    /// repo never has one. Reading it from `storeContexts.first` — the app's
+    /// old stand-in for "primary" — therefore found nothing at all for anyone
+    /// who happened to attach a team repo first. Scanning all of them removes
+    /// the guess: whichever attached store actually carries the registry is
+    /// the one that has it, and a store that declares a `primary` entry wins
+    /// over one that doesn't if somehow two do.
+    private func refreshStoreRegistry() async {
+        var raws: [String: String] = [:]
+        var manifests: [StoresManifest] = []
+        var bootstraps: [String: TeamBootstrap] = [:]
+
+        for context in storeContexts {
+            let registryRaw = await context.store.read("stores.yaml")
+            let bootstrapRaw = await context.store.read(TeamBootstrap.fileName)
+            raws[context.id] = "\(registryRaw ?? "")\u{0}\(bootstrapRaw ?? "")"
+            if let registryRaw {
+                let manifest = StoresManifest.parse(registryRaw)
+                if !manifest.stores.isEmpty { manifests.append(manifest) }
+            }
+            if let bootstrapRaw, let bootstrap = TeamBootstrap.parse(bootstrapRaw) {
+                bootstraps[context.id] = bootstrap
+            }
         }
-        let raw = await primary.store.read("stores.yaml")
-        guard raw != lastStoresYAMLRaw else { return }
-        lastStoresYAMLRaw = raw
-        storesManifest = raw.map(StoresManifest.parse) ?? .empty
+
+        guard raws != lastRegistryRaw else { return }
+        lastRegistryRaw = raws
+        storesManifest = manifests.first { entry in entry.stores.contains(where: \.isPrimary) }
+            ?? manifests.first
+            ?? .empty
+        storeRoles = resolveStoreRoles(bootstraps: bootstraps)
+    }
+
+    /// The role each attached store is treated as.
+    ///
+    /// `.phren-team.yaml` wins, because that is the CLI's own precedence:
+    /// `phren store add` takes the role from `bootstrap?.default_role` ahead
+    /// of the `--role` flag the user typed (cli/namespaces-store.ts:147). It
+    /// is also the only signal that lives inside the repo being described, so
+    /// it holds even when the store that registers it isn't on this device.
+    ///
+    /// The registry is the fallback, matched on store name. That match is the
+    /// same display-name-is-registry-name assumption `claimingStoreName`
+    /// already makes; a store renamed away from its repo name just falls
+    /// through to "unknown", which routes exactly as the app did before.
+    private func resolveStoreRoles(bootstraps: [String: TeamBootstrap]) -> [String: String] {
+        var roles: [String: String] = [:]
+        for context in storeContexts {
+            if let bootstrap = bootstraps[context.id] {
+                roles[context.id] = bootstrap.role
+                continue
+            }
+            if let entry = storesManifest.stores.first(where: { $0.name == context.descriptor.displayName }) {
+                roles[context.id] = entry.role
+            }
+        }
+        return roles
+    }
+
+    /// Pushes journal routing into each engine, only when it changed. Called
+    /// after the registry refresh, so an engine's very first write already
+    /// knows where it belongs.
+    private func applyWriteContexts() async {
+        for context in storeContexts {
+            let journal = usesTeamJournal(storeId: context.id)
+            guard appliedJournalRouting[context.id] != journal else { continue }
+            appliedJournalRouting[context.id] = journal
+            await context.engine.setWriteContext(
+                .init(actor: user?.login, machine: deviceName(), usesTeamJournal: journal)
+            )
+        }
     }
 
     // MARK: - Lifecycle
@@ -490,6 +570,10 @@ final class AppModel {
         user = nil
         storeContexts = []
         storeFilter = nil
+        storesManifest = StoresManifest()
+        storeRoles = [:]
+        appliedJournalRouting = [:]
+        lastRegistryRaw = [:]
         searchIndex = SearchIndex()
         syncStatus = SyncEngine.Status()
         // Sign-out deleted the local copies, quarantined ones included, so
@@ -538,6 +622,9 @@ final class AppModel {
         try? await context.store.wipe()
         storeContexts.remove(at: index)
         if storeFilter == id { storeFilter = nil }
+        storeRoles.removeValue(forKey: id)
+        appliedJournalRouting.removeValue(forKey: id)
+        lastRegistryRaw.removeValue(forKey: id)
         persistDescriptors(storeDescriptors)
         await refresh()
         if storeContexts.isEmpty {
@@ -554,7 +641,12 @@ final class AppModel {
             let context = StoreContext(descriptor: descriptor, store: store, engine: engine)
             storeContexts.append(context)
 
-            await engine.setWriteContext(.init(actor: user?.login, machine: deviceName()))
+            // The write context is `applyWriteContexts`'s to set — it is the
+            // one place that knows whether this store journals its findings,
+            // and a second writer here would race it. `refresh()` runs it
+            // before anything can be enqueued, on every path that opens a
+            // store.
+            appliedJournalRouting.removeValue(forKey: descriptor.id)
             await engine.setOnUpdate { [weak self] in
                 Task { @MainActor [weak self] in
                     await self?.refresh()
@@ -588,7 +680,8 @@ final class AppModel {
         })
         syncStatus = aggregateStatus()
         collectStorageIssues()
-        await refreshStoresManifest()
+        await refreshStoreRegistry()
+        await applyWriteContexts()
         // Store health (syncStatus) and the review/task data the widget
         // needs both settle right here — the same generation, every ~7s
         // live-poll cycle. WidgetBridge itself gates the widget-visible
