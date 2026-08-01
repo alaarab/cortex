@@ -10,7 +10,9 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            VStack(spacing: 0) {
+                ActionErrorBanner()
+                Form {
                 Section("Account") {
                     if let user = model.user {
                         LabeledContent("GitHub", value: "@\(user.login)")
@@ -154,6 +156,7 @@ struct SettingsView: View {
                 Button("Sign out", role: .destructive) {
                     Task { await model.signOut() }
                 }
+            }
             }
         }
     }
