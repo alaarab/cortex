@@ -196,6 +196,14 @@ struct FindingsTab: View {
     /// shown and then refused (`SyncEngine.enqueue`).
     private var isReadOnly: Bool { LocalStore.isReadOnlyProject(project) }
 
+    /// True when this store's registry role is `team`, i.e. adds append to
+    /// `journal/YYYY-MM-DD-<actor>.md` rather than splicing FINDINGS.md.
+    /// Worth saying out loud once: it is why some rows here can't be edited,
+    /// and why a finding added on the phone doesn't land in FINDINGS.md.
+    private var isJournalled: Bool {
+        !isReadOnly && model.usesTeamJournal(storeId: storeId)
+    }
+
     private var groupedByDate: [(date: String, items: [Finding])] {
         let groups = Dictionary(grouping: findings, by: \.date)
         return groups.keys.sorted(by: >).map { ($0, groups[$0]!) }
@@ -222,7 +230,13 @@ struct FindingsTab: View {
                     ForEach(group.items) { finding in
                         ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
                             .swipeActions(edge: .trailing) {
-                                if !isReadOnly {
+                                // A journal entry has no edit or delete: the
+                                // CLI's `edit_finding`/`remove_finding` splice
+                                // FINDINGS.md in every store, team or not
+                                // (only the *add* path forks), so the controls
+                                // could only ever offer a refusal — the same
+                                // rule `truths.md` rows follow.
+                                if !isReadOnly && !finding.isJournalEntry {
                                     Button(role: .destructive) {
                                         Task { await remove(finding) }
                                     } label: {
@@ -240,6 +254,17 @@ struct FindingsTab: View {
                 }
             }
             ArchiveFooter(storeId: storeId, project: project)
+            if isJournalled {
+                Section {
+                    Label(
+                        "Shared store — findings you add here append to today's journal file, "
+                        + "so they merge with your teammates' instead of colliding.",
+                        systemImage: "person.2"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .overlay {
             if isEmpty {
