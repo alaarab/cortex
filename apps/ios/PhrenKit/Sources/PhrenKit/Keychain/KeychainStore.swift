@@ -54,6 +54,11 @@ public enum KeychainStore {
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
+        // Deliberately NOT a versioned/quarantined document, unlike everything
+        // in Persistence/: this is a credential, not user data. Nothing is
+        // lost if it can't be read — the user signs in again and gets a new
+        // token — and copying a token to a quarantine file to preserve it
+        // would be strictly worse than dropping it.
         return try? JSONDecoder().decode(StoredToken.self, from: data)
     }
 

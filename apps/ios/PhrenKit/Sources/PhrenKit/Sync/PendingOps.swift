@@ -3,6 +3,13 @@ import Foundation
 /// A user mutation, expressed as a domain operation rather than a file diff so
 /// it can be re-applied onto fresh content after a remote change (the
 /// refetch-reapply half of sha-conflict recovery).
+///
+/// **Persisted.** This enum is written into `pending-ops.json` and is the
+/// single most breakage-prone type in the app: adding a case makes queues
+/// written by the new build unreadable to every older build, and renaming one
+/// makes queues written by *older* builds unreadable here. Either is a schema
+/// break — see the contract on ``VersionedDocument``, and bump
+/// ``PendingOpsQueue/currentSchemaVersion`` when you take one.
 public enum PendingOp: Codable, Equatable, Sendable {
     case addFinding(project: String, text: String, type: String?)
     case editFinding(project: String, match: String, newText: String)
@@ -112,6 +119,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
     }
 }
 
+/// **Persisted** inside `pending-ops.json`. Every field added since the first
+/// release is optional on purpose — see the contract on ``VersionedDocument``.
 public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let op: PendingOp
@@ -143,23 +152,55 @@ public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
 }
 
 /// FIFO durable queue persisted next to the manifest.
-public struct PendingOpsQueue: Codable, Sendable {
+///
+/// **This file is user data, not a cache.** It holds mutations that exist
+/// nowhere else until a flush reaches GitHub, so it is never discarded on a
+/// bad read — see the contract on ``VersionedDocument`` before changing this
+/// type or ``PendingOp``.
+public struct PendingOpsQueue: Codable, Sendable, VersionedDocument {
+    /// Still 1: `schemaVersion` is itself an additive field, and the shape
+    /// every shipped build wrote (without the key) is version 1 by definition.
+    /// Bump this only alongside a real break — a new `PendingOp` case, say.
+    public static let currentSchemaVersion = 1
+
+    public var schemaVersion: Int = PendingOpsQueue.currentSchemaVersion
     public var pending: [QueuedOp] = []
     /// Ops that failed permanently (ambiguous / not-found after a remote
     /// change) — surfaced in Settings as "needs attention".
     public var failed: [QueuedOp] = []
 
-    static func load(from url: URL) -> PendingOpsQueue {
-        guard let data = try? Data(contentsOf: url),
-              let queue = try? JSONDecoder().decode(PendingOpsQueue.self, from: data) else {
-            return PendingOpsQueue()
-        }
-        return queue
+    /// What the user calls this file when it goes wrong.
+    static let documentName = "unsynced changes"
+
+    public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, pending, failed
     }
 
-    func save(to url: URL) {
-        if let data = try? JSONEncoder().encode(self) {
-            try? data.write(to: url, options: .atomic)
-        }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Absent in every queue written before versioning existed. That shape
+        // is version 1, and it has to keep decoding forever.
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? Self.initialSchemaVersion
+        pending = try container.decodeIfPresent([QueuedOp].self, forKey: .pending) ?? []
+        failed = try container.decodeIfPresent([QueuedOp].self, forKey: .failed) ?? []
+    }
+
+    /// Reads the queue, reporting rather than dropping anything unreadable:
+    /// a file that can't be decoded is moved aside by ``PersistedState`` and
+    /// the caller starts empty from there, with an issue to show the user.
+    static func load(from url: URL) -> (queue: PendingOpsQueue, issue: StorageIssue?) {
+        let result = PersistedState.load(PendingOpsQueue.self, from: url, document: documentName)
+        return (result.value ?? PendingOpsQueue(), result.issue)
+    }
+
+    /// Returns the failure instead of swallowing it — a queue that can't be
+    /// written is offline work that dies when the app is killed, and the user
+    /// gets to know that before it happens.
+    @discardableResult
+    func save(to url: URL) -> StorageIssue? {
+        PersistedState.save(self, to: url, document: Self.documentName)
     }
 }

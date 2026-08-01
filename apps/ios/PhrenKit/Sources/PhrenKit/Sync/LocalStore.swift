@@ -6,7 +6,16 @@ import Foundation
 /// database — parsing the whole store is trivial at phren's documented scale
 /// (docs/performance.md: <1K findings is "small").
 public actor LocalStore {
-    public struct Manifest: Codable, Sendable {
+    /// **Persisted** as `manifest.json`. Less precious than the pending-ops
+    /// queue — the cache it indexes can be refetched — but losing it silently
+    /// forces a full re-download and hides real corruption, so it follows the
+    /// same contract. See ``VersionedDocument`` before adding a field.
+    public struct Manifest: Codable, Sendable, VersionedDocument {
+        /// Still 1: adding `schemaVersion` is additive, and the shape shipped
+        /// builds wrote (without the key) is version 1 by definition.
+        public static let currentSchemaVersion = 1
+
+        public var schemaVersion: Int = Manifest.currentSchemaVersion
         public var owner: String
         public var repo: String
         public var branch: String
@@ -15,11 +24,31 @@ public actor LocalStore {
         public var blobShas: [String: String]
         public var lastSyncedAt: Date?
 
+        /// What the user calls this file when it goes wrong.
+        static let documentName = "offline cache records"
+
         public init(owner: String, repo: String, branch: String) {
             self.owner = owner
             self.repo = repo
             self.branch = branch
             self.blobShas = [:]
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion, owner, repo, branch, headSha, blobShas, lastSyncedAt
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // Absent in every manifest written before versioning existed.
+            schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+                ?? Self.initialSchemaVersion
+            owner = try container.decode(String.self, forKey: .owner)
+            repo = try container.decode(String.self, forKey: .repo)
+            branch = try container.decode(String.self, forKey: .branch)
+            headSha = try container.decodeIfPresent(String.self, forKey: .headSha)
+            blobShas = try container.decodeIfPresent([String: String].self, forKey: .blobShas) ?? [:]
+            lastSyncedAt = try container.decodeIfPresent(Date.self, forKey: .lastSyncedAt)
         }
     }
 
@@ -62,15 +91,27 @@ public actor LocalStore {
 
     private let root: URL
     private var manifest: Manifest
+    /// Persistence problems hit while opening this store. Kept for per-store
+    /// attribution; the app surfaces them through `StorageIssueLog`, which
+    /// already has them.
+    public private(set) var storageIssues: [StorageIssue] = []
 
     public init(rootDirectory: URL, owner: String, repo: String, branch: String) throws {
         self.root = rootDirectory
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
-        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
-        if let data = try? Data(contentsOf: manifestURL),
-           let saved = try? JSONDecoder().decode(Manifest.self, from: data),
-           saved.owner == owner, saved.repo == repo {
+        let loaded = PersistedState.load(
+            Manifest.self,
+            from: rootDirectory.appendingPathComponent("manifest.json"),
+            document: Manifest.documentName
+        )
+        if let issue = loaded.issue {
+            self.storageIssues = [issue]
+        }
+        // An owner/repo mismatch is a reused directory, not corruption — the
+        // path is keyed on `owner__repo`, so it takes a rename to get here.
+        // Start clean rather than quarantine: nothing of this store's is lost.
+        if let saved = loaded.value, saved.owner == owner, saved.repo == repo {
             self.manifest = saved
         } else {
             self.manifest = Manifest(owner: owner, repo: repo, branch: branch)
@@ -87,10 +128,18 @@ public actor LocalStore {
 
     public var currentManifest: Manifest { manifest }
 
+    private var manifestURL: URL { root.appendingPathComponent("manifest.json") }
+
+    /// Throws on a failed write rather than reporting it: every caller here is
+    /// already a throwing write path (`write`, `delete`), so a manifest that
+    /// can't be persisted fails the mutation that needed it.
     public func updateManifest(_ mutate: (inout Manifest) -> Void) throws {
         mutate(&manifest)
+        // Always stamped at the version we are actually writing, whatever the
+        // file we loaded said — a v1 file re-serialized here is now current.
+        manifest.schemaVersion = Manifest.currentSchemaVersion
         let data = try JSONEncoder().encode(manifest)
-        try data.write(to: root.appendingPathComponent("manifest.json"), options: .atomic)
+        try data.write(to: manifestURL, options: .atomic)
     }
 
     // MARK: - Files
@@ -150,6 +199,9 @@ public actor LocalStore {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
         manifest = Manifest(owner: manifest.owner, repo: manifest.repo, branch: manifest.branch)
+        // The quarantined copies went with the directory, so stop telling the
+        // user they're still recoverable in the app's data folder.
+        storageIssues = []
     }
 
     // MARK: - Snapshot (parsed view for the UI)

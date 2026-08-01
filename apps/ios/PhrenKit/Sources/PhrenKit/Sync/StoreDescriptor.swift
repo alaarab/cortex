@@ -5,7 +5,20 @@ import Foundation
 /// Deliberately not the CLI's `stores.yaml` schema — that registry holds local
 /// filesystem paths and unnormalized (often SSH) git remotes, neither of which
 /// is portable to the phone. Stores are added manually via the repo picker.
-public struct StoreDescriptor: Codable, Equatable, Identifiable, Sendable {
+///
+/// **Persisted** in `UserDefaults`, both as a list (`phren.stores`) and, for
+/// installs old enough, on its own under the legacy single-store key. Losing
+/// it destroys no findings — the local caches survive and re-adding the repo
+/// reattaches them — but it does drop the user back at the repo picker with no
+/// explanation, so it follows the same contract as everything else here. See
+/// ``VersionedDocument`` before adding a field; `canPush` shows the shape a new
+/// field has to take.
+public struct StoreDescriptor: Codable, Equatable, Identifiable, Sendable, VersionedDocument {
+    /// Still 1: every field added since the first release decodes with a
+    /// default, so both directions of an upgrade read this fine.
+    public static let currentSchemaVersion = 1
+
+    public var schemaVersion: Int = StoreDescriptor.currentSchemaVersion
     public var owner: String
     public var name: String
     public var branch: String
@@ -24,11 +37,13 @@ public struct StoreDescriptor: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case owner, name, branch, canPush
+        case schemaVersion, owner, name, branch, canPush
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? Self.initialSchemaVersion
         owner = try container.decode(String.self, forKey: .owner)
         name = try container.decode(String.self, forKey: .name)
         branch = try container.decode(String.self, forKey: .branch)

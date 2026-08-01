@@ -51,6 +51,10 @@ public actor SyncEngine {
     /// Tests drive `flushNow()` by hand so a background flush can't push the
     /// first op of a batch before the rest are queued. Always on in the app.
     private var autoFlush = true
+    /// Queue reads that had to be quarantined and queue writes that failed.
+    /// Kept for per-store attribution; the app surfaces them through
+    /// `StorageIssueLog`, which already has them.
+    public private(set) var storageIssues: [StorageIssue] = []
 
     /// Fires after any content change (remote pull or local apply) and on
     /// status transitions — the app re-reads the snapshot and re-renders.
@@ -60,7 +64,13 @@ public actor SyncEngine {
         self.client = client
         self.store = store
         self.queueURL = stateDirectory.appendingPathComponent("pending-ops.json")
-        self.queue = PendingOpsQueue.load(from: queueURL)
+        let loaded = PendingOpsQueue.load(from: queueURL)
+        self.queue = loaded.queue
+        // An unreadable queue starts empty — but from a file that was moved
+        // aside, with an issue the app shows. Never silently.
+        if let issue = loaded.issue {
+            self.storageIssues = [issue]
+        }
         self.status.pendingCount = queue.pending.count
         self.status.failedCount = queue.failed.count
     }
@@ -197,6 +207,17 @@ public actor SyncEngine {
 
     // MARK: - Mutations
 
+    /// Persists the queue, recording a failed write instead of dropping it on
+    /// the floor: without this, work the user did offline disappears the next
+    /// time iOS kills the app, with nothing having gone wrong on screen.
+    private func persistQueue() {
+        guard let issue = queue.save(to: queueURL) else { return }
+        // Repeated failures are one condition, not many — keep the newest so a
+        // device that refuses every write doesn't grow this without bound.
+        storageIssues.removeAll { $0.kind == .unwritable }
+        storageIssues.append(issue)
+    }
+
     /// Applies the op locally (instant UI), persists it, and schedules a flush.
     public func enqueue(_ op: PendingOp) async throws {
         // Local apply first — a domain error (empty text, secret, ambiguous
@@ -206,7 +227,7 @@ public actor SyncEngine {
         queued.paths = applied.paths
         queued.deletedShas = applied.deletedShas.isEmpty ? nil : applied.deletedShas
         queue.pending.append(queued)
-        queue.save(to: queueURL)
+        persistQueue()
         setStatus { _ in }
         scheduleFlush()
     }
@@ -236,14 +257,14 @@ public actor SyncEngine {
             queued.lastError = nil
             queue.pending.append(queued)
         }
-        queue.save(to: queueURL)
+        persistQueue()
         setStatus { _ in }
         scheduleFlush()
     }
 
     public func discardFailed(id: UUID) {
         queue.failed.removeAll { $0.id == id }
-        queue.save(to: queueURL)
+        persistQueue()
         setStatus { _ in }
     }
 
@@ -343,7 +364,7 @@ public actor SyncEngine {
                     queue.pending[index].attempts += 1
                     queue.pending[index].lastError = transient.localizedDescription
                 }
-                queue.save(to: queueURL)
+                persistQueue()
                 setStatus { $0.lastError = transient.localizedDescription }
                 return
             }
@@ -354,7 +375,7 @@ public actor SyncEngine {
                 failed.lastError = entry.error
                 queue.failed.append(failed)
             }
-            queue.save(to: queueURL)
+            persistQueue()
             setStatus { _ in }
         }
     }
