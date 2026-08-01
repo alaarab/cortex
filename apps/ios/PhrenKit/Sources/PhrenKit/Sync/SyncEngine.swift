@@ -40,6 +40,10 @@ public actor SyncEngine {
 
     private let client: any GitHubAPI
     private let store: LocalStore
+    /// The cold tier's catalogue and cache. `nonisolated` so a view can read
+    /// the catalogue without queueing behind an engine that spends most of its
+    /// life awaiting the network — `ColdStore` does its own isolation.
+    public nonisolated let coldStore: ColdStore
     private let queueURL: URL
     private var queue: PendingOpsQueue
     private var status = Status()
@@ -63,6 +67,7 @@ public actor SyncEngine {
     public init(client: any GitHubAPI, store: LocalStore, stateDirectory: URL) {
         self.client = client
         self.store = store
+        self.coldStore = ColdStore(rootDirectory: stateDirectory)
         self.queueURL = stateDirectory.appendingPathComponent("pending-ops.json")
         let loaded = PendingOpsQueue.load(from: queueURL)
         self.queue = loaded.queue
@@ -142,6 +147,12 @@ public actor SyncEngine {
             }
 
             let tree = try await client.tree(owner: manifest.owner, repo: manifest.repo, sha: headSha)
+            // The recursive tree already carries every cold blob's path, sha
+            // AND size, so cataloguing the archive tier costs zero extra
+            // requests and zero extra bytes — the filter below used to throw
+            // all of it away, which is why consolidated findings vanished on
+            // the phone instead of collapsing into an archive.
+            await coldStore.replaceCatalogue(tree.tree.compactMap(ColdDocRef.init(entry:)))
             let remote = Dictionary(
                 tree.tree
                     .filter { $0.type == "blob" && LocalStore.isSyncedPath($0.path) }
@@ -184,6 +195,44 @@ public actor SyncEngine {
         }
     }
 
+    // MARK: - Cold tier
+
+    /// Reads one archived-findings document, fetching its blob **only** if the
+    /// cache doesn't already hold it at the tree's current sha.
+    ///
+    /// This is the single place a cold blob is ever fetched, and it is only
+    /// ever reached by a user opening a specific topic. The staleness check is
+    /// inside `ColdStore.hydration(for:)` rather than here, so no caller can
+    /// render cached archive text without it.
+    public func coldDocument(at path: String) async throws -> TopicDocument {
+        guard let reference = await coldStore.reference(for: path) else {
+            throw PhrenKitError.notFound("That archive topic isn't in this store any more.")
+        }
+        switch await coldStore.hydration(for: path) {
+        case .cached(let text):
+            return TopicDocument(reference: reference, content: text)
+        case .unknown:
+            throw PhrenKitError.notFound("That archive topic isn't in this store any more.")
+        case .tooLarge(let bytes):
+            // Refused on the size the tree already gave us — before a request
+            // that would sit there spinning on a cellular connection.
+            throw PhrenKitError.validation(
+                "\(reference.displayName) is \(Self.megabytes(bytes)) of archived findings — too large to open on the phone. Read it from your computer."
+            )
+        case .fetch(let sha):
+            let manifest = await store.currentManifest
+            let data = try await client.blob(owner: manifest.owner, repo: manifest.repo, sha: sha)
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let document = TopicDocument(reference: reference, content: text)
+            await coldStore.cache(path: path, text: text, sha: sha, findingCount: document.entries.count)
+            return document
+        }
+    }
+
+    private static func megabytes(_ bytes: Int) -> String {
+        String(format: "%.1f MB", Double(bytes) / 1_048_576)
+    }
+
     // MARK: - Live polling
 
     /// Start continuous foreground polling. Conditional ref checks answered
@@ -220,7 +269,18 @@ public actor SyncEngine {
 
     /// Applies the op locally (instant UI), persists it, and schedules a flush.
     public func enqueue(_ op: PendingOp) async throws {
-        // Local apply first — a domain error (empty text, secret, ambiguous
+        // Writability first. `write` checks the same predicate at flush time,
+        // but by then the op has already been applied to the local cache and
+        // shown to the user — a read-only tier (`global`) would appear to have
+        // accepted the edit and then park it in "Needs attention" minutes
+        // later. Refusing here is the same rule, enforced while the user is
+        // still looking at what they did.
+        guard LocalStore.isWritablePath(op.primaryPath) else {
+            throw PhrenKitError.validation(
+                "\"\(op.project)\" is read-only in the app — edit it with the phren CLI."
+            )
+        }
+        // Local apply next — a domain error (empty text, secret, ambiguous
         // match) surfaces to the user immediately and nothing is queued.
         let applied = try await applyLocally(op)
         var queued = QueuedOp(op: op)

@@ -1,4 +1,5 @@
 import AppIntents
+import PhrenKit
 
 /// The phrases Siri answers to out of the box — no setup in the Shortcuts app.
 ///
@@ -53,9 +54,16 @@ extension PhrenAppShortcuts {
     /// sync generation's parsed state settles.
     @MainActor
     static func donateProjects(from model: AppModel) {
+        // Deliberately not `model.writableProjects`, which honours the UI's
+        // store filter: what Siri can hear must not narrow because the user
+        // filtered a list on screen.
         let projects = model.storeContexts
             .filter(\.descriptor.canPush)
-            .flatMap { context in context.snapshot.projects.map { "\(context.id)|\($0.name)" } }
+            .flatMap { context in
+                context.snapshot.projects
+                    .filter { !LocalStore.isReadOnlyProject($0.name) }
+                    .map { "\(context.id)|\($0.name)" }
+            }
             .sorted()
         guard projects != donatedProjects else { return }
         donatedProjects = projects

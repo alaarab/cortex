@@ -54,7 +54,8 @@ public actor LocalStore {
 
     /// Only these paths are ever written back to GitHub. Everything else in
     /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`, `CLAUDE.md`,
-    /// `summary.md`, `reference/`, `journal/` — is read-only for the app.
+    /// `summary.md`, `truths.md`, `reference/`, `journal/`, and everything
+    /// under a reserved directory (`global/` above all) — is read-only.
     public static func isWritablePath(_ path: String) -> Bool {
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
@@ -67,12 +68,28 @@ public actor LocalStore {
         return false
     }
 
-    /// Paths the sync engine mirrors locally. Skips `.config/`, `reference/`,
-    /// `journal/`, and `global/` for the MVP (plan §GitHub sync engine).
+    /// Paths the sync engine mirrors locally — the **hot tier**. Skips
+    /// `.config/`, `journal/`, and `reference/`; `reference/topics/` instead
+    /// gets a lazily hydrated cold tier (``ColdStore``), and the rest is
+    /// deliberately untouched.
+    ///
+    /// `global/` is hot but read-only: `global/FINDINGS.md` is the
+    /// consolidate skill's cross-project output — typically the largest
+    /// findings file in a store — and hiding it was hiding the store's
+    /// highest-value content. It is admitted here *without* being admitted to
+    /// ``isProjectDirName``, because ``isWritablePath`` delegates to that
+    /// predicate and would otherwise make the phone able to rewrite it.
     public static func isSyncedPath(_ path: String) -> Bool {
         if path == "phren.root.yaml" || path == "stores.yaml" { return true }
         let parts = path.split(separator: "/").map(String.init)
-        guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
+        guard parts.count >= 2 else { return false }
+        if parts[0] == globalDirName {
+            // Findings plus the instructions that frame them. Nothing else
+            // under `global/` is hot — its notes/tasks/review are CLI-side
+            // machinery with no phone surface.
+            return parts.count == 2 && ["FINDINGS.md", "CLAUDE.md"].contains(parts[1])
+        }
+        guard isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
             return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md"].contains(parts[1])
         }
@@ -82,11 +99,48 @@ public actor LocalStore {
         return false
     }
 
+    /// The cross-project tier: consolidated findings that apply everywhere,
+    /// written by the CLI's consolidate skill and by nothing on the phone.
+    public static let globalDirName = "global"
+
+    /// Directory names phren reserves for infrastructure, so none of them is
+    /// ever a project. Mirrors the CLI's `RESERVED_PROJECT_DIR_NAMES`
+    /// (packages/cli/src/phren-core.ts:32) plus `scripts`, which
+    /// `setupSparseCheckout` (packages/cli/src/link/link.ts:202) materializes
+    /// at the store root next to `profiles` and `global`.
+    ///
+    /// The dot-prefixed names can't survive ``isProjectDirName``'s regex
+    /// anyway; they are listed so this set stays diffable against the CLI's
+    /// rather than silently drifting the next time either side gains an entry.
+    static let reservedDirNames: Set<String> = [
+        globalDirName, ".runtime", ".sessions", ".config", "profiles", "templates", "scripts",
+    ]
+
     /// Project directory names mirror `isValidProjectName` (lowercase letters,
-    /// numbers, hyphens), excluding reserved/dot/global/archived dirs.
+    /// numbers, hyphens), excluding reserved and archived dirs.
+    ///
+    /// **This is the writability predicate.** ``isWritablePath`` delegates to
+    /// it, so admitting a name here makes that directory's findings/tasks/
+    /// notes editable from the phone. Read-only tiers belong in
+    /// ``isReadableProjectDirName``, never here.
     static func isProjectDirName(_ name: String) -> Bool {
         guard JSRegex(#"^[a-z0-9][a-z0-9-]*$"#).test(name) else { return false }
-        return name != "global" && name != "profiles" && !name.hasSuffix(".archived")
+        return !reservedDirNames.contains(name) && !name.hasSuffix(".archived")
+    }
+
+    /// Directories the app *renders* as projects: the writable ones plus
+    /// `global`. Split from ``isProjectDirName`` on purpose — see that
+    /// predicate's note on why relaxing it instead would have made the
+    /// cross-project tier writable.
+    public static func isReadableProjectDirName(_ name: String) -> Bool {
+        isProjectDirName(name) || name == globalDirName
+    }
+
+    /// True for a project the app shows but must never offer to edit. The UI
+    /// asks this before drawing an add/edit/delete affordance; the sync engine
+    /// enforces the same answer through ``isWritablePath`` at flush time.
+    public static func isReadOnlyProject(_ name: String) -> Bool {
+        isReadableProjectDirName(name) && !isProjectDirName(name)
     }
 
     private let root: URL
@@ -213,6 +267,14 @@ public actor LocalStore {
         public var notes: [String: [Note]]
         public var reviewQueue: [ProjectQueueItem]
         public var summaries: [String: String]
+        /// project → its pinned truths (`truths.md`). Downloaded since the
+        /// first release; parsed into something as of this one.
+        public var truths: [String: [Truth]] = [:]
+        /// project → the date of its last consolidation, from the
+        /// `<!-- consolidated: … -->` stamp in its FINDINGS.md. Present means
+        /// findings have been moved to the cold tier; absent means the project
+        /// has never been consolidated and nothing of it is hidden.
+        public var consolidated: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -224,12 +286,14 @@ public actor LocalStore {
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
         var summaries: [String: String] = [:]
+        var truths: [String: [Truth]] = [:]
+        var consolidated: [String: String] = [:]
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
 
         for path in allPaths() {
             let parts = path.split(separator: "/").map(String.init)
-            guard parts.count >= 2, Self.isProjectDirName(parts[0]) else { continue }
+            guard parts.count >= 2, Self.isReadableProjectDirName(parts[0]) else { continue }
             let project = parts[0]
             projectNames.insert(project)
             guard let content = read(path) else { continue }
@@ -237,7 +301,12 @@ public actor LocalStore {
             if parts.count == 2 {
                 switch parts[1] {
                 case "FINDINGS.md":
-                    findings[project] = FindingsFile(content: content).parse()
+                    let file = FindingsFile(content: content)
+                    findings[project] = file.parse()
+                    // The consolidation stamp rides along in a file already
+                    // parsed — the archive costs nothing to *notice*, only to
+                    // read.
+                    consolidated[project] = file.consolidatedDate
                 case "tasks.md":
                     tasks[project] = TasksFile(project: project, content: content).doc
                 case "review.md":
@@ -246,6 +315,8 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
+                case "truths.md":
+                    truths[project] = TruthsFile(content: content).truths
                 default:
                     break
                 }
@@ -275,7 +346,8 @@ public actor LocalStore {
 
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
-            notes: notes, reviewQueue: queue, summaries: summaries
+            notes: notes, reviewQueue: queue, summaries: summaries,
+            truths: truths, consolidated: consolidated
         )
     }
 

@@ -30,6 +30,30 @@ final class FindingsFileTests: XCTestCase {
         }
     }
 
+    /// The stamp `autoArchiveToReference` leaves behind (archive.ts:236) is
+    /// how the app knows an archive exists at all, from a file it already
+    /// syncs. Matching mirrors the CLI's own (validate.ts:56).
+    func testConsolidatedMarkerIsParsed() throws {
+        let marked = """
+        # myproj Findings
+
+        <!-- consolidated: 2026-08-01 -->
+
+        ## 2026-08-02
+
+        - [decision] Keep JWT expiry at 15 minutes
+        """
+        XCTAssertEqual(FindingsFile(content: marked).consolidatedDate, "2026-08-01")
+
+        // Indented, spaced, and with trailing text — all forms the CLI's own
+        // regex accepts, since it neither anchors nor requires the close.
+        XCTAssertEqual(FindingsFile(content: "  <!--   consolidated:   2025-12-31 more -->").consolidatedDate,
+                       "2025-12-31")
+        // Never consolidated is a different answer from consolidated-and-empty.
+        XCTAssertNil(FindingsFile(content: try Fixtures.text("findings-after-remove.md")).consolidatedDate)
+        XCTAssertNil(FindingsFile(content: "<!-- consolidated: soon -->").consolidatedDate)
+    }
+
     func testEditMatchesCLIByteForByte() throws {
         // CLI ran: editFinding("Plain finding with no tag", "Edited finding text that replaced the plain one")
         var file = FindingsFile(content: try Fixtures.text("findings-after-add.md"))

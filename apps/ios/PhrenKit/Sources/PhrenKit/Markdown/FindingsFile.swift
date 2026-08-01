@@ -128,6 +128,19 @@ public struct FindingsFile: Sendable {
         return items
     }
 
+    /// The date of the last consolidation, from the `<!-- consolidated: … -->`
+    /// stamp `autoArchiveToReference` writes into the file it just emptied
+    /// (content/archive.ts:236). Matching is the CLI's own
+    /// (content/validate.ts:56) — leading whitespace tolerated, trailing text
+    /// ignored — so a marker either side reads the same date.
+    ///
+    /// This is what lets the app tell "this project has never been
+    /// consolidated" from "everything older than N findings moved to the cold
+    /// tier", using a file it already syncs and at no extra cost.
+    public var consolidatedDate: String? {
+        JSRegex(#"<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})"#).group(content)
+    }
+
     /// access.ts:164 `extractDateHeading`
     static func extractDateHeading(_ line: String) -> String? {
         guard let raw = JSRegex(#"^##\s+(.+)$"#).group(line)?.jsTrimmed else { return nil }
