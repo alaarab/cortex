@@ -45,6 +45,15 @@ struct TaskListView: View {
         return false
     }
 
+    /// Scoped to a project phren never lets the phone write (`global`). The +
+    /// is hidden rather than disabled: a read-only tier has no "fix your
+    /// token" story, so a greyed control would only pose a question with no
+    /// answer.
+    private var isReadOnlyScope: Bool {
+        guard case .project(_, let project) = scope else { return false }
+        return LocalStore.isReadOnlyProject(project)
+    }
+
     private func rows(in section: PhrenTask.Section) -> [TaskListRow] {
         var result: [TaskListRow] = []
         if case .project(let scopeStore, let scopeProject) = scope {
@@ -85,9 +94,7 @@ struct TaskListView: View {
     /// project list (not just existing task docs) so a project can receive
     /// its first task — the write path creates tasks.md if missing.
     private var addTargets: [(storeId: String, storeName: String, project: String)] {
-        model.mergedProjects
-            .filter { model.canPush(storeId: $0.storeId) }
-            .map { ($0.storeId, $0.storeName, $0.project.name) }
+        model.writableProjects.map { ($0.storeId, $0.storeName, $0.project.name) }
     }
 
     var body: some View {
@@ -137,9 +144,11 @@ struct TaskListView: View {
                     }
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showAdd = true } label: { Image(systemName: "plus") }
-                    .disabled(!isProjectScoped && addTargets.isEmpty)
+            if !isReadOnlyScope {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showAdd = true } label: { Image(systemName: "plus") }
+                        .disabled(!isProjectScoped && addTargets.isEmpty)
+                }
             }
         }
         .sheet(isPresented: $showAdd) {

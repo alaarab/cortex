@@ -175,6 +175,21 @@ final class AppModel {
         storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? true
     }
 
+    /// Whether this (store, project) pair can take a write at all. Two
+    /// independent reasons it can't: the token has no push on the repo, or the
+    /// project is one of phren's read-only tiers (`global` — the consolidate
+    /// skill owns it). Every surface that offers an add/edit/delete affordance
+    /// asks this, so a read-only project never presents a control that would
+    /// fail at flush time against `LocalStore.isWritablePath`.
+    func canWrite(storeId: String, project: String) -> Bool {
+        canPush(storeId: storeId) && !LocalStore.isReadOnlyProject(project)
+    }
+
+    /// Every (store, project) pair a capture can actually land in.
+    var writableProjects: [StoreProject] {
+        mergedProjects.filter { canWrite(storeId: $0.storeId, project: $0.project.name) }
+    }
+
     /// The store treated as "primary" for `stores.yaml` sourcing: the first
     /// one added. The app has no per-store equivalent of the registry's own
     /// `role: primary` (that's a property of entries *inside* stores.yaml,

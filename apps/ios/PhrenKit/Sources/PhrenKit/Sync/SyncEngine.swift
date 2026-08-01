@@ -220,7 +220,18 @@ public actor SyncEngine {
 
     /// Applies the op locally (instant UI), persists it, and schedules a flush.
     public func enqueue(_ op: PendingOp) async throws {
-        // Local apply first — a domain error (empty text, secret, ambiguous
+        // Writability first. `write` checks the same predicate at flush time,
+        // but by then the op has already been applied to the local cache and
+        // shown to the user — a read-only tier (`global`) would appear to have
+        // accepted the edit and then park it in "Needs attention" minutes
+        // later. Refusing here is the same rule, enforced while the user is
+        // still looking at what they did.
+        guard LocalStore.isWritablePath(op.primaryPath) else {
+            throw PhrenKitError.validation(
+                "\"\(op.project)\" is read-only in the app — edit it with the phren CLI."
+            )
+        }
+        // Local apply next — a domain error (empty text, secret, ambiguous
         // match) surfaces to the user immediately and nothing is queued.
         let applied = try await applyLocally(op)
         var queued = QueuedOp(op: op)

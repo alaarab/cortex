@@ -15,8 +15,7 @@ struct ProjectsView: View {
     /// is hidden entirely when none exist, same reasoning as TasksView's
     /// addTargets-gated + button.
     private var voiceCaptureTargets: [VoiceCaptureTarget] {
-        model.mergedProjects
-            .filter { model.canPush(storeId: $0.storeId) }
+        model.writableProjects
             .map { VoiceCaptureTarget(storeId: $0.storeId, storeName: $0.storeName, project: $0.project.name) }
     }
 
@@ -33,6 +32,11 @@ struct ProjectsView: View {
                                 Text(item.project.name).font(.headline)
                                 if model.hasMultipleStores {
                                     TagChip(text: item.storeName, role: .store)
+                                }
+                                // `global` is the store's cross-project tier:
+                                // visible, searchable, never editable here.
+                                if LocalStore.isReadOnlyProject(item.project.name) {
+                                    TagChip(text: "read-only", role: .status)
                                 }
                                 if let claimant = model.claimingStoreName(for: item) {
                                     ClaimBadge(storeName: claimant)
@@ -183,6 +187,11 @@ struct FindingsTab: View {
         model.findings(storeId: storeId, project: project)
     }
 
+    /// `global` (and any future read-only tier) renders here but is written
+    /// only by the CLI — every edit affordance disappears rather than being
+    /// shown and then refused (`SyncEngine.enqueue`).
+    private var isReadOnly: Bool { LocalStore.isReadOnlyProject(project) }
+
     private var groupedByDate: [(date: String, items: [Finding])] {
         let groups = Dictionary(grouping: findings, by: \.date)
         return groups.keys.sorted(by: >).map { ($0, groups[$0]!) }
@@ -195,17 +204,19 @@ struct FindingsTab: View {
                     ForEach(group.items) { finding in
                         ExpandableFindingRow(finding: finding, expandedIds: $expandedFindingIds)
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await remove(finding) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                if !isReadOnly {
+                                    Button(role: .destructive) {
+                                        Task { await remove(finding) }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    Button {
+                                        editing = finding
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    .tint(.blue)
                                 }
-                                Button {
-                                    editing = finding
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(.blue)
                             }
                     }
                 }
@@ -213,14 +224,16 @@ struct FindingsTab: View {
         }
         .overlay {
             if findings.isEmpty {
-                PhrenEmptyState(title: "No findings", message: "Capture your first finding with the + button.")
+                PhrenEmptyState(title: "No findings", message: emptyMessage)
             }
         }
         .refreshable { await model.pullToRefresh() }
         .phrenScreen()
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showAdd = true } label: { Image(systemName: "plus") }
+            if !isReadOnly {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showAdd = true } label: { Image(systemName: "plus") }
+                }
             }
         }
         .sheet(isPresented: $showAdd) {
@@ -241,6 +254,12 @@ struct FindingsTab: View {
                 ), in: storeId)
             }
         }
+    }
+
+    private var emptyMessage: String {
+        isReadOnly
+            ? "\(project) is phren's cross-project tier — the consolidate skill writes it from your computer."
+            : "Capture your first finding with the + button."
     }
 
     private func remove(_ finding: Finding) async {
@@ -352,10 +371,13 @@ struct NotesTab: View {
         model.notes(storeId: storeId, project: project)
     }
 
+    /// Same rule as `FindingsTab`: a read-only tier shows no way to write.
+    private var isReadOnly: Bool { LocalStore.isReadOnlyProject(project) }
+
     /// This tab's project, pre-selected — the mic button next to + only
     /// appears when this specific (store, project) pair is writable.
     private var voiceCaptureTarget: VoiceCaptureTarget? {
-        guard model.canPush(storeId: storeId) else { return nil }
+        guard model.canWrite(storeId: storeId, project: project) else { return nil }
         return VoiceCaptureTarget(storeId: storeId, storeName: model.storeName(for: storeId), project: project)
     }
 
@@ -400,22 +422,24 @@ struct NotesTab: View {
                             }
                         }
                         .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                Task {
-                                    await model.perform(.removeNote(
-                                        project: project, date: note.date, stableId: note.stableId
-                                    ), in: storeId)
+                            if !isReadOnly {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await model.perform(.removeNote(
+                                            project: project, date: note.date, stableId: note.stableId
+                                        ), in: storeId)
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                                Button { editing = note } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
                             }
-                            Button { editing = note } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
-                            .tint(.blue)
                         }
                         .swipeActions(edge: .leading) {
-                            if !note.promoted {
+                            if !note.promoted, !isReadOnly {
                                 Button { promoting = note } label: {
                                     Label("Promote", systemImage: "arrow.up.circle")
                                 }
@@ -444,8 +468,10 @@ struct NotesTab: View {
                     .accessibilityLabel("Dictate a note or task")
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showAdd = true } label: { Image(systemName: "plus") }
+            if !isReadOnly {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showAdd = true } label: { Image(systemName: "plus") }
+                }
             }
         }
         .sheet(isPresented: $showAdd) {
