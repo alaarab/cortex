@@ -43,7 +43,7 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
             TypewriterFindingCard()
                 .padding(.top, 4)
-            Text("Sign in with GitHub to open your phren store.")
+            Text("Connect a GitHub token to open your phren store. It's stored only in this device's Keychain.")
                 .font(.footnote)
                 .foregroundStyle(PhrenTheme.textMuted)
                 .multilineTextAlignment(.center)
@@ -58,19 +58,23 @@ struct WelcomeView: View {
                     .foregroundStyle(.red)
             }
 
-            Button {
-                Task { await startDeviceFlow() }
-            } label: {
-                Label("Sign in with GitHub", systemImage: "person.badge.key")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(polling)
+            VStack(spacing: 12) {
+                Button {
+                    showPATSheet = true
+                } label: {
+                    Label("Connect with a GitHub token", systemImage: "key.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
 
-            Button("Use a personal access token instead") {
-                showPATSheet = true
+                if DeviceFlowAuth.isConfigured {
+                    Button("Sign in with GitHub instead") {
+                        Task { await startDeviceFlow() }
+                    }
+                    .font(.footnote)
+                    .disabled(polling)
+                }
             }
-            .font(.footnote)
             .padding(.bottom)
         }
         .padding()
@@ -83,6 +87,10 @@ struct WelcomeView: View {
 
     private func startDeviceFlow() async {
         authError = nil
+        guard DeviceFlowAuth.isConfigured else {
+            authError = "GitHub sign-in isn't set up yet — use a token instead."
+            return
+        }
         let auth = DeviceFlowAuth()
         do {
             let code = try await auth.requestCode()
@@ -150,13 +158,14 @@ struct PATSignInSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
                     SecureField("github_pat_… or ghp_…", text: $token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
                     Text("Personal access token")
                 } footer: {
-                    Text("Create a fine-grained token with **Contents: Read and write** and **Metadata: Read** on your phren store repository. The token is stored only in this device's Keychain.")
+                    Text("Create a fine-grained token with **Contents: Read and write** and **Metadata: Read** on your phren store repository. The token is stored only in this device's Keychain. Under Repository access, select your store repository — a token that can't see it will show only your public repos.")
                 }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
@@ -185,7 +194,7 @@ struct PATSignInSheet: View {
             try await model.signIn(token: token, kind: .pat)
             dismiss()
         } catch {
-            self.error = "Token rejected: \(error.localizedDescription)"
+            self.error = "GitHub rejected that token. Check you pasted all of it and that it hasn't expired."
         }
     }
 }
