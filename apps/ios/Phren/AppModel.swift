@@ -72,10 +72,49 @@ enum AppTab: Hashable {
     case projects, review, tasks, search, settings
 }
 
+/// Why a mutation couldn't be routed to a store. Surfaced as
+/// `lastActionError` in the UI and spoken verbatim by Siri when an App Intent
+/// hits the same condition (`CustomLocalizedStringResourceConvertible` is what
+/// AppIntents reads an error's dialog from).
+enum StoreWriteError: LocalizedError, CustomLocalizedStringResourceConvertible {
+    case storeNotOpen(String)
+    case readOnly(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .storeNotOpen(let id):
+            return "Store \(id) is not open."
+        case .readOnly(let name):
+            return "\(name) is read-only — your GitHub token can't push to it."
+        }
+    }
+
+    var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .storeNotOpen:
+            return "phren couldn't reach that store. Open the app and try again."
+        case .readOnly(let name):
+            return "\(name) is read-only — your GitHub token can't push to it."
+        }
+    }
+}
+
 /// Root observable state: auth, the store list, merged snapshots, and sync.
 /// Views read the merged accessors and route mutations by store id.
 @Observable @MainActor
 final class AppModel {
+    /// The live model, for code that runs outside the SwiftUI environment —
+    /// App Intents execute in this process but have no view hierarchy to read
+    /// `@Environment(AppModel.self)` from. Weak on purpose: a background
+    /// launch that never connects a scene may not keep the App struct's
+    /// `@State` alive, and a nil hook is exactly the signal the capture path
+    /// needs to take its own offline route (see `PhrenCapture`).
+    private(set) static weak var current: AppModel?
+
+    init() {
+        Self.current = self
+    }
+
     enum Phase {
         case loading
         case signedOut
@@ -285,26 +324,33 @@ final class AppModel {
         await pullAllAndGoLive()
     }
 
-    private func loadDescriptors() -> [StoreDescriptor] {
+    private func loadDescriptors() -> [StoreDescriptor] { Self.storedDescriptors() }
+
+    private func persistDescriptors(_ descriptors: [StoreDescriptor]) { Self.persist(descriptors) }
+
+    /// The attached-store registry, readable without a bootstrapped model —
+    /// an App Intent cold-launched in the background has no `storeContexts`
+    /// yet but still needs to know which stores exist and which are writable.
+    static func storedDescriptors() -> [StoreDescriptor] {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: Self.storesDefaultsKey),
+        if let data = defaults.data(forKey: storesDefaultsKey),
            let list = try? JSONDecoder().decode([StoreDescriptor].self, from: data) {
             return list
         }
         // Migrate the legacy single-store key: same owner/name/branch JSON
         // shape; canPush defaults true via StoreDescriptor's decoder.
-        if let data = defaults.data(forKey: Self.legacyRepoDefaultsKey),
+        if let data = defaults.data(forKey: legacyRepoDefaultsKey),
            let legacy = try? JSONDecoder().decode(StoreDescriptor.self, from: data) {
-            persistDescriptors([legacy])
-            defaults.removeObject(forKey: Self.legacyRepoDefaultsKey)
+            persist([legacy])
+            defaults.removeObject(forKey: legacyRepoDefaultsKey)
             return [legacy]
         }
         return []
     }
 
-    private func persistDescriptors(_ descriptors: [StoreDescriptor]) {
+    private static func persist(_ descriptors: [StoreDescriptor]) {
         if let data = try? JSONEncoder().encode(descriptors) {
-            UserDefaults.standard.set(data, forKey: Self.storesDefaultsKey)
+            UserDefaults.standard.set(data, forKey: storesDefaultsKey)
         }
     }
 
@@ -512,21 +558,30 @@ final class AppModel {
     // MARK: - Mutations
 
     func perform(_ op: PendingOp, in storeId: String) async {
-        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
-            lastActionError = "Store \(storeId) is not open."
-            return
-        }
-        guard context.descriptor.canPush else {
-            lastActionError = "\(context.descriptor.displayName) is read-only — your GitHub token can't push to it."
-            return
-        }
         do {
-            try await context.engine.enqueue(op)
+            try await enqueue(op, in: storeId)
             lastActionError = nil
+        } catch let routing as StoreWriteError {
+            // Nothing was applied, so there is nothing to re-read.
+            lastActionError = routing.errorDescription
+            return
         } catch {
             lastActionError = error.localizedDescription
         }
         await refresh()
+    }
+
+    /// Throwing core of `perform`, shared with the App Intents capture path —
+    /// Siri needs the failure itself (to speak it), not a string parked in
+    /// `lastActionError` for a view that isn't on screen.
+    func enqueue(_ op: PendingOp, in storeId: String) async throws {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
+            throw StoreWriteError.storeNotOpen(storeId)
+        }
+        guard context.descriptor.canPush else {
+            throw StoreWriteError.readOnly(context.descriptor.displayName)
+        }
+        try await context.engine.enqueue(op)
     }
 
     func retryFailedOps() async {
@@ -553,8 +608,10 @@ final class AppModel {
     }
 
     /// Current time formatted as the note heading time (HH:MM:SS UTC —
-    /// matching `now.toISOString().slice(11,19)` in notes.ts:181).
-    func nowNoteTimestamp() -> (date: String, time: String) {
+    /// matching `now.toISOString().slice(11,19)` in notes.ts:181). Static so
+    /// the App Intents capture path, which may have no model at all, stamps
+    /// notes exactly the way the capture sheet does.
+    static func nowNoteTimestamp() -> (date: String, time: String) {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")

@@ -446,7 +446,7 @@ struct NotesTab: View {
         }
         .sheet(isPresented: $showAdd) {
             TextEntrySheet(title: "Add note", confirmLabel: "Add") { text, _ in
-                let now = model.nowNoteTimestamp()
+                let now = AppModel.nowNoteTimestamp()
                 await model.perform(.addNote(project: project, date: now.date, time: now.time, text: text), in: storeId)
             }
         }

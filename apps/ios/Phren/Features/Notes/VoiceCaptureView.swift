@@ -397,7 +397,7 @@ struct VoiceCaptureView: View {
         let op: PendingOp
         switch kind {
         case .note:
-            let timestamp = model.nowNoteTimestamp()
+            let timestamp = AppModel.nowNoteTimestamp()
             op = .addNote(project: target.project, date: timestamp.date, time: timestamp.time, text: value)
         case .task:
             op = .addTask(project: target.project, text: value)
