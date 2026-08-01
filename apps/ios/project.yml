@@ -28,6 +28,31 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.phren.ios
+    # Only what has no INFOPLIST_KEY_ build-setting form lives here.
+    # GENERATE_INFOPLIST_FILE stays on and merges the INFOPLIST_KEY_* settings
+    # below into this file, so the plist keeps a single source per key rather
+    # than a hand-maintained copy of everything Xcode already synthesizes.
+    info:
+      path: Phren/Info.plist
+      properties:
+        # XcodeGen's info: template otherwise hardcodes a literal "1.0"/"1"
+        # here (see PhrenWidgets below). GENERATE_INFOPLIST_FILE's own
+        # MARKETING_VERSION substitution currently wins over the file, but
+        # only while it stays on — spell the versions out so the file is
+        # right on its own terms either way.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Siri hears "phren" as "friend" or "fren" more often than not —
+        # dictation has no entry for the word. These are the app names Siri
+        # will also accept for "…to phren" phrases; the pronunciation hint
+        # tells it they all sound like "fren".
+        INAlternativeAppNames:
+          - INAlternativeAppName: Fren
+            INAlternativeAppNamePronunciationHint: fren
+          - INAlternativeAppName: Friend
+            INAlternativeAppNamePronunciationHint: fren
+          - INAlternativeAppName: Phren
+            INAlternativeAppNamePronunciationHint: fren
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios
