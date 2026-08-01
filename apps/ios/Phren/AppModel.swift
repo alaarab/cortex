@@ -11,6 +11,10 @@ final class StoreContext: Identifiable {
     let engine: SyncEngine
     var snapshot: LocalStore.Snapshot = .empty
     var status = SyncEngine.Status()
+    /// Per-project cold-tier summary (project → topics + bytes), refreshed
+    /// with the snapshot. Read entirely from the catalogue the tree already
+    /// paid for — no network, no hydration, safe to recompute every poll.
+    var coldSummaries: [String: ColdSummary] = [:]
 
     // nonisolated: witnesses the nonisolated Identifiable requirement without
     // a MainActor hop. Captured once at init rather than derived from
@@ -252,6 +256,33 @@ final class AppModel {
 
     var totalReviewCount: Int {
         storeContexts.reduce(0) { $0 + $1.snapshot.reviewQueue.count }
+    }
+
+    // MARK: - Cold tier (archived findings)
+
+    /// What this project's archive weighs, without reading any of it.
+    func coldSummary(storeId: String, project: String) -> ColdSummary? {
+        storeContexts.first { $0.id == storeId }?.coldSummaries[project]
+    }
+
+    /// The archive's table of contents — catalogue only, still no fetch.
+    func coldTopics(storeId: String, project: String) async -> [ColdDocRef] {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else { return [] }
+        return await context.engine.coldStore.topics(for: project)
+    }
+
+    /// Reads one archived topic, fetching its blob only if the cache doesn't
+    /// hold it at the tree's current sha. The only cold fetch in the app, and
+    /// it only ever happens because someone opened this topic.
+    func coldDocument(storeId: String, path: String) async throws -> TopicDocument {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
+            throw StoreWriteError.storeNotOpen(storeId)
+        }
+        let document = try await context.engine.coldDocument(at: path)
+        // Hydrating changes what the archive row can honestly claim (it can
+        // now count this topic's findings), so let the summaries catch up.
+        context.coldSummaries = await context.engine.coldStore.projectSummaries()
+        return document
     }
 
     // MARK: - stores.yaml claim awareness
@@ -535,6 +566,7 @@ final class AppModel {
         for context in storeContexts {
             context.snapshot = await context.store.snapshot()
             context.status = await context.engine.currentStatus()
+            context.coldSummaries = await context.engine.coldStore.projectSummaries()
         }
         // Key by store id (owner/name) — display names alone collide when two
         // owners have same-named repos. The UI translates via storeName(for:).
