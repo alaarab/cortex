@@ -21,6 +21,13 @@ targets:
       - Phren
     dependencies:
       - package: PhrenKit
+      - target: PhrenWidgets
+        embed: true
+    entitlements:
+      path: Phren/Phren.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.phren.ios
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios
@@ -35,4 +42,37 @@ targets:
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Phren transcribes your dictation into a note on this device when possible."
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_USER_SCRIPT_SANDBOXING: true
+
+  PhrenWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - PhrenWidgets
+    info:
+      path: PhrenWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: phren
+        # XcodeGen's info: template otherwise hardcodes a literal "1.0"/"1"
+        # here instead of tracking the target's own build settings, which
+        # Xcode flags at build time ("must match that of its containing
+        # parent app") once the two targets' versions drift.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: PhrenWidgets/PhrenWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.phren.ios
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios.widgets
+        PRODUCT_NAME: PhrenWidgets
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: true
         ENABLE_USER_SCRIPT_SANDBOXING: true

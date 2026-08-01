@@ -18,8 +18,10 @@ apps/ios/
   project.yml            # XcodeGen definition (the .xcodeproj is generated)
   Phren/                 # SwiftUI app target
     AppModel.swift       # root state: auth, store, snapshot, sync status
+    WidgetBridge.swift   # writes the JSON snapshot the widgets read
     Onboarding/          # welcome → sign-in → repo picker → initial sync
     Features/            # Projects, Review, Tasks, Search, Settings tabs
+  PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
   PhrenKit/              # Swift package: everything testable, UI-free
     Sources/PhrenKit/
       Models/            # Finding, Note, PhrenTask, QueueItem — mirror the TS shapes
@@ -112,6 +114,40 @@ Device-flow sign-in needs a registered GitHub **OAuth App** (not a GitHub App):
 Until then, the **personal access token** sign-in path works out of the box:
 create a fine-grained PAT with **Contents: Read and write** + **Metadata:
 Read** on the store repo.
+
+## Widgets
+
+The `PhrenWidgets` extension (`com.phren.ios.widgets`) puts the review queue
+and your top active task on the Home Screen and Lock Screen without opening
+the app:
+
+- **systemSmall** — review count, big numeral.
+- **systemMedium** — review count + top task line + relative last-sync; the
+  review half and task half deep-link separately (`phren://review`,
+  `phren://tasks`).
+- **accessoryCircular** / **accessoryRectangular** (Lock Screen) — review
+  count, and "Review N" + top task line respectively.
+
+The widget can't link PhrenKit or the app target (Apple keeps extensions
+dependency-thin, and this one stays fully offline besides). The bridge is a
+JSON file: `AppModel.refresh()` — the same place the per-store sync status
+settles every ~7s live-poll cycle — writes a `WidgetSnapshot` (review count,
+per-store breakdown, top task, last-sync date) to the `group.com.phren.ios`
+App Group container, then calls `WidgetCenter.shared.reloadAllTimelines()`
+**only** when the visible content actually changed, so a quiet poll never
+touches the widget refresh budget. Before the app has ever run, the widgets
+show an "open phren" state rather than fake numbers or a blank card.
+
+Tapping a widget delivers straight to `PhrenApp`'s `onOpenURL` (no
+`CFBundleURLTypes` registration needed for widget-originated opens), which
+selects the matching tab.
+
+Building the widget target requires no extra setup — `xcodegen generate`
+declares both the extension and the App Group entitlements for both targets.
+The App Group only needs to be provisioned with an actual Apple Developer
+account for a **signed** build to a device or for the app and widget to
+actually share data; an unsigned `xcodebuild build` (e.g. CI) builds and
+embeds the extension fine regardless.
 
 ## Multiple stores
 

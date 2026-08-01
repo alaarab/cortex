@@ -65,6 +65,13 @@ struct FailedOpEntry: Identifiable {
     var id: UUID { op.id }
 }
 
+/// The app's tabs, in `MainTabView` display order. Exists as a binding
+/// target (rather than the TabView's default no-selection mode) so a widget
+/// deep link's `onOpenURL` handler can jump the user straight to a tab.
+enum AppTab: Hashable {
+    case projects, review, tasks, search, settings
+}
+
 /// Root observable state: auth, the store list, merged snapshots, and sync.
 /// Views read the merged accessors and route mutations by store id.
 @Observable @MainActor
@@ -85,6 +92,9 @@ final class AppModel {
     /// Global store filter (store id) applied by list screens when set.
     var storeFilter: String?
     var lastActionError: String?
+    /// Bound to `MainTabView`'s `TabView` selection — set from a widget deep
+    /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
+    var selectedTab: AppTab = .projects
 
     /// Parsed `stores.yaml`, read from the primary store's local cache (see
     /// `refreshStoresManifest`). Powers the claim-awareness badges in
@@ -451,6 +461,11 @@ final class AppModel {
         })
         syncStatus = aggregateStatus()
         await refreshStoresManifest()
+        // Store health (syncStatus) and the review/task data the widget
+        // needs both settle right here — the same generation, every ~7s
+        // live-poll cycle. WidgetBridge itself gates the widget-visible
+        // reload on content actually changing.
+        WidgetBridge.publish(from: self)
     }
 
     private func aggregateStatus() -> SyncEngine.Status {
