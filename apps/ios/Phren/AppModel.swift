@@ -512,6 +512,9 @@ final class AppModel {
         // live-poll cycle. WidgetBridge itself gates the widget-visible
         // reload on content actually changing.
         WidgetBridge.publish(from: self)
+        // Likewise for the project names Siri can resolve by voice — gated
+        // on the project set changing, not on every poll.
+        PhrenAppShortcuts.donateProjects(from: self)
     }
 
     private func aggregateStatus() -> SyncEngine.Status {
