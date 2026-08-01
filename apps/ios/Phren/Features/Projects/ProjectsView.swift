@@ -187,6 +187,10 @@ struct FindingsTab: View {
         model.findings(storeId: storeId, project: project)
     }
 
+    private var truths: [Truth] {
+        model.truths(storeId: storeId, project: project)
+    }
+
     /// `global` (and any future read-only tier) renders here but is written
     /// only by the CLI — every edit affordance disappears rather than being
     /// shown and then refused (`SyncEngine.enqueue`).
@@ -199,6 +203,20 @@ struct FindingsTab: View {
 
     var body: some View {
         List {
+            // Pinned first, because that is what pinning means: the CLI
+            // injects these into every session regardless of what else it
+            // retrieves (shared/retrieval.ts, "always-inject").
+            if !truths.isEmpty {
+                Section {
+                    ForEach(truths) { truth in
+                        TruthRow(truth: truth)
+                    }
+                } header: {
+                    Label("Pinned truths", systemImage: "pin.fill")
+                } footer: {
+                    Text("Always injected, never decayed. Pin one from your computer: phren pin \(project) \"…\"")
+                }
+            }
             ForEach(groupedByDate, id: \.date) { group in
                 Section(group.date) {
                     ForEach(group.items) { finding in
@@ -224,7 +242,7 @@ struct FindingsTab: View {
             ArchiveFooter(storeId: storeId, project: project)
         }
         .overlay {
-            if findings.isEmpty && !hasArchive {
+            if isEmpty {
                 PhrenEmptyState(title: "No findings", message: emptyMessage)
             }
         }
@@ -265,6 +283,10 @@ struct FindingsTab: View {
             || (model.coldSummary(storeId: storeId, project: project)?.topicCount ?? 0) > 0
     }
 
+    /// The empty state only means "empty" when there is nothing else on the
+    /// screen — pinned truths and an archive row both count.
+    private var isEmpty: Bool { findings.isEmpty && truths.isEmpty && !hasArchive }
+
     private var emptyMessage: String {
         isReadOnly
             ? "\(project) is phren's cross-project tier — the consolidate skill writes it from your computer."
@@ -276,6 +298,27 @@ struct FindingsTab: View {
             project: project,
             match: finding.stableId.map { "fid:\($0)" } ?? finding.text
         ), in: storeId)
+    }
+}
+
+/// A pinned truth. Read-only with no affordances at all: `truths.md` is not
+/// in `LocalStore.isWritablePath`, and pinning is a `phren pin` on a computer,
+/// so offering an edit here would only be offering a refusal.
+private struct TruthRow: View {
+    let truth: Truth
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(truth.text)
+                .font(.callout)
+                .textSelection(.enabled)
+            if let added = truth.addedDate {
+                Text("pinned \(added)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

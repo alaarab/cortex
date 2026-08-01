@@ -146,6 +146,44 @@ final class StoreAndSearchTests: XCTestCase {
         XCTAssertEqual(sha, "sha1")
     }
 
+    /// `truths.md` has been downloaded since the first release and parsed into
+    /// nothing. Shape is `upsertCanonical`'s (learning.ts:269).
+    func testTruthsAreParsedAndSearchable() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("phren-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try LocalStore(rootDirectory: dir, owner: "o", repo: "r", branch: "main")
+
+        try await store.write("myproj/truths.md", content: """
+        # myproj Truths
+
+        ## Truths
+
+        - Postgres is the only datastore; no Redis _(added 2026-07-30)_
+        - Every deploy goes through the staging gate _(added 2026-01-04)_
+        - A truth someone hand-wrote without the added stamp
+        """, blobSha: "sha1")
+
+        let snapshot = await store.snapshot()
+        let truths = try XCTUnwrap(snapshot.truths["myproj"])
+        XCTAssertEqual(truths.count, 3)
+        XCTAssertEqual(truths[0].text, "Postgres is the only datastore; no Redis")
+        XCTAssertEqual(truths[0].addedDate, "2026-07-30")
+        // The stamp is phren's bookkeeping, not part of the pinned text.
+        XCTAssertFalse(truths[0].text.contains("added"))
+        XCTAssertNil(truths[2].addedDate)
+        XCTAssertEqual(truths[2].text, "A truth someone hand-wrote without the added stamp")
+
+        // Truths are the *most* live knowledge in a store, so unlike archived
+        // findings they belong in the index.
+        let index = SearchIndex(snapshot: snapshot)
+        let hits = index.search("postgres")
+        XCTAssertEqual(hits.first?.kind, .truth)
+        XCTAssertEqual(hits.first?.date, "2026-07-30")
+        XCTAssertTrue(index.search("staging gate", kind: .truth).count == 1)
+        XCTAssertTrue(index.search("staging gate", kind: .finding).isEmpty)
+    }
+
     func testSearchIndex() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("phren-test-\(UUID().uuidString)")

@@ -250,6 +250,12 @@ final class AppModel {
         snapshot(for: storeId).notes[project] ?? []
     }
 
+    /// Pinned truths (`truths.md`) — phren's always-injected, never-decaying
+    /// memory for this project.
+    func truths(storeId: String, project: String) -> [Truth] {
+        snapshot(for: storeId).truths[project] ?? []
+    }
+
     func summary(storeId: String, project: String) -> String? {
         snapshot(for: storeId).summaries[project]
     }

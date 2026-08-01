@@ -130,6 +130,26 @@ public struct ProjectQueueItem: Codable, Equatable, Identifiable, Sendable {
     public var id: String { "\(project)/\(item.id)/\(item.line)" }
 }
 
+/// A pinned truth from a project's `truths.md`: high-confidence memory the
+/// CLI always injects and never decays (tools/memory.ts:52 `get_truths`).
+///
+/// The CLI has no struct for this — `get_truths` returns bare strings — so
+/// this is the app's shape rather than a transcription. `text` is the pinned
+/// memory with phren's own `_(added …)_` bookkeeping lifted out into
+/// `addedDate`; see ``TruthsFile``.
+public struct Truth: Codable, Equatable, Identifiable, Sendable {
+    public var text: String
+    public var addedDate: String?
+    /// Content-addressed: `truths.md` carries no stable ids, and the text is
+    /// what `upsertCanonical` dedups on anyway.
+    public var id: String { text }
+
+    public init(text: String, addedDate: String?) {
+        self.text = text
+        self.addedDate = addedDate
+    }
+}
+
 /// Mirrors `NoteItem` (packages/cli/src/data/notes.ts).
 public struct Note: Codable, Equatable, Identifiable, Sendable {
     /// `nid:xxxxxxxx`

@@ -50,7 +50,7 @@ struct SearchView: View {
                 }
                 .overlay {
                     if query.isEmpty {
-                        PhrenEmptyState(title: "Search your memory", message: "Findings, notes, tasks, and summaries — all searched on-device.")
+                        PhrenEmptyState(title: "Search your memory", message: "Findings, truths, notes, tasks, and summaries — all searched on-device. Archived findings are excluded, the same way the CLI leaves them out of its own index.")
                     } else if results.isEmpty {
                         ContentUnavailableView.search(text: query)
                     }
@@ -96,6 +96,7 @@ struct SearchView: View {
         case .note: return PhrenTheme.cyan
         case .task: return PhrenTheme.green
         case .summary: return PhrenTheme.textMuted
+        case .truth: return PhrenTheme.accent
         }
     }
 }

@@ -267,6 +267,9 @@ public actor LocalStore {
         public var notes: [String: [Note]]
         public var reviewQueue: [ProjectQueueItem]
         public var summaries: [String: String]
+        /// project → its pinned truths (`truths.md`). Downloaded since the
+        /// first release; parsed into something as of this one.
+        public var truths: [String: [Truth]] = [:]
         /// project → the date of its last consolidation, from the
         /// `<!-- consolidated: … -->` stamp in its FINDINGS.md. Present means
         /// findings have been moved to the cold tier; absent means the project
@@ -283,6 +286,7 @@ public actor LocalStore {
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
         var summaries: [String: String] = [:]
+        var truths: [String: [Truth]] = [:]
         var consolidated: [String: String] = [:]
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
@@ -311,6 +315,8 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
+                case "truths.md":
+                    truths[project] = TruthsFile(content: content).truths
                 default:
                     break
                 }
@@ -341,7 +347,7 @@ public actor LocalStore {
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
-            consolidated: consolidated
+            truths: truths, consolidated: consolidated
         )
     }
 
