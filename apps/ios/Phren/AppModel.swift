@@ -131,6 +131,14 @@ final class AppModel {
     /// Global store filter (store id) applied by list screens when set.
     var storeFilter: String?
     var lastActionError: String?
+    /// On-device data that couldn't be read (and was set aside) or couldn't be
+    /// written. Newest last. Readable by the Settings health section; the
+    /// newest one also lands in `lastActionError`, because a user whose
+    /// unsynced work was quarantined must not have to go looking for that.
+    private(set) var storageIssues: [StorageIssue] = []
+    /// The issue already shown, so a ~7s refresh can't keep re-raising a
+    /// banner the user dismissed.
+    private var lastSurfacedIssueId: UUID?
     /// Bound to `MainTabView`'s `TabView` selection — set from a widget deep
     /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
     var selectedTab: AppTab = .projects
@@ -150,6 +158,11 @@ final class AppModel {
 
     private static let storesDefaultsKey = "phren.stores"
     private static let legacyRepoDefaultsKey = "phren.selected-repo"
+    /// The registry's on-disk shape. Version 1 is a bare `[StoreDescriptor]`
+    /// array — what shipped builds wrote — which `VersionedList` still reads.
+    private typealias StoreRegistry = VersionedList<StoreDescriptor>
+    /// What the user calls this list when it goes wrong.
+    private static let storeRegistryDocumentName = "store settings"
 
     var storeDescriptors: [StoreDescriptor] { storeContexts.map(\.descriptor) }
     var hasMultipleStores: Bool { storeContexts.count > 1 }
@@ -333,14 +346,18 @@ final class AppModel {
     /// yet but still needs to know which stores exist and which are writable.
     static func storedDescriptors() -> [StoreDescriptor] {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: storesDefaultsKey),
-           let list = try? JSONDecoder().decode([StoreDescriptor].self, from: data) {
-            return list
+        // A registry that can't be decoded is set aside rather than replaced,
+        // so a user thrown back to the repo picker at least hears why.
+        if let list = PersistedState.load(StoreRegistry.self, fromDefaults: defaults,
+                                          key: storesDefaultsKey,
+                                          document: storeRegistryDocumentName).value {
+            return list.items
         }
         // Migrate the legacy single-store key: same owner/name/branch JSON
         // shape; canPush defaults true via StoreDescriptor's decoder.
-        if let data = defaults.data(forKey: legacyRepoDefaultsKey),
-           let legacy = try? JSONDecoder().decode(StoreDescriptor.self, from: data) {
+        if let legacy = PersistedState.load(StoreDescriptor.self, fromDefaults: defaults,
+                                            key: legacyRepoDefaultsKey,
+                                            document: storeRegistryDocumentName).value {
             persist([legacy])
             defaults.removeObject(forKey: legacyRepoDefaultsKey)
             return [legacy]
@@ -349,9 +366,8 @@ final class AppModel {
     }
 
     private static func persist(_ descriptors: [StoreDescriptor]) {
-        if let data = try? JSONEncoder().encode(descriptors) {
-            UserDefaults.standard.set(data, forKey: storesDefaultsKey)
-        }
+        PersistedState.save(StoreRegistry(items: descriptors), toDefaults: .standard,
+                            key: storesDefaultsKey, document: storeRegistryDocumentName)
     }
 
     func enterForeground() async {
@@ -417,6 +433,11 @@ final class AppModel {
         storeFilter = nil
         searchIndex = SearchIndex()
         syncStatus = SyncEngine.Status()
+        // Sign-out deleted the local copies, quarantined ones included, so
+        // stop promising the user they're still recoverable on the device.
+        StorageIssueLog.shared.removeAll()
+        storageIssues = []
+        lastSurfacedIssueId = nil
         phase = .signedOut
     }
 
@@ -506,6 +527,7 @@ final class AppModel {
             (store: $0.id, snapshot: $0.snapshot)
         })
         syncStatus = aggregateStatus()
+        collectStorageIssues()
         await refreshStoresManifest()
         // Store health (syncStatus) and the review/task data the widget
         // needs both settle right here — the same generation, every ~7s
@@ -515,6 +537,20 @@ final class AppModel {
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
+    }
+
+    /// Drains the process-wide persistence log into the model.
+    ///
+    /// One source, not a union of the per-store arrays: the capture surfaces
+    /// write from App Intents that can run with no model at all, so
+    /// `StorageIssueLog` is the only place that sees everything — and it
+    /// already holds what `LocalStore` and `SyncEngine` recorded too.
+    private func collectStorageIssues() {
+        let issues = StorageIssueLog.shared.issues
+        guard let latest = issues.last, latest.id != lastSurfacedIssueId else { return }
+        storageIssues = issues
+        lastSurfacedIssueId = latest.id
+        lastActionError = latest.userMessage
     }
 
     private func aggregateStatus() -> SyncEngine.Status {

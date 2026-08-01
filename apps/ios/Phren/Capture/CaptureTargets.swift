@@ -1,4 +1,41 @@
 import Foundation
+import PhrenKit
+
+/// A remembered (store, project) pair, as it sits in `UserDefaults`.
+///
+/// One type for both of the settings below because their stored shape is
+/// byte-identical — and keeping it that way means one place to obey the
+/// contract on `VersionedDocument`. Store-qualified on purpose: see
+/// `QuickCaptureDefault`.
+private struct CaptureTargetRef: Codable, VersionedDocument {
+    /// Still 1: the shape shipped builds wrote (no `schemaVersion` key) is
+    /// version 1, and adding the key is additive in both directions.
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = CaptureTargetRef.currentSchemaVersion
+    let storeId: String
+    let project: String
+
+    init(storeId: String, project: String) {
+        self.storeId = storeId
+        self.project = project
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, storeId, project
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? Self.initialSchemaVersion
+        storeId = try container.decode(String.self, forKey: .storeId)
+        project = try container.decode(String.self, forKey: .project)
+    }
+}
+
+/// What the user calls these settings when one of them goes wrong.
+private let captureSettingsDocumentName = "quick capture settings"
 
 /// Where a capture goes when the user didn't name a project.
 ///
@@ -15,11 +52,6 @@ import Foundation
 /// project called `alphalens`, so a default that remembered only the name would
 /// silently start resolving to the wrong store the day a second one is added.
 enum QuickCaptureDefault {
-    private struct Stored: Codable {
-        let storeId: String
-        let project: String
-    }
-
     private static let key = "phren.capture.defaultTarget"
 
     /// The (store, project) the user chose, or nil for "Always ask".
@@ -29,15 +61,17 @@ enum QuickCaptureDefault {
     /// against the live writable set and ask rather than substitute
     /// (`PhrenCapture.resolveTarget`).
     static func load() -> (storeId: String, project: String)? {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let value = try? JSONDecoder().decode(Stored.self, from: data) else { return nil }
+        // An unreadable value is set aside, not overwritten, and falls back to
+        // "Always ask" — the safe direction: capture asks instead of guessing.
+        guard let value = PersistedState.load(CaptureTargetRef.self, fromDefaults: .standard,
+                                              key: key, document: captureSettingsDocumentName).value
+        else { return nil }
         return (value.storeId, value.project)
     }
 
     static func save(storeId: String, project: String) {
-        let value = Stored(storeId: storeId, project: project)
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        PersistedState.save(CaptureTargetRef(storeId: storeId, project: project),
+                            toDefaults: .standard, key: key, document: captureSettingsDocumentName)
     }
 
     /// Back to "Always ask".
@@ -72,22 +106,17 @@ enum QuickCaptureDefault {
 /// must never inherit a destination the user can't see, which is exactly how
 /// captures used to vanish into a project nobody chose.
 enum VoiceCaptureLastTarget {
-    private struct Stored: Codable {
-        let storeId: String
-        let project: String
-    }
-
     private static let key = "phren.voiceCapture.lastTarget"
 
     static func load() -> (storeId: String, project: String)? {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let value = try? JSONDecoder().decode(Stored.self, from: data) else { return nil }
+        guard let value = PersistedState.load(CaptureTargetRef.self, fromDefaults: .standard,
+                                              key: key, document: captureSettingsDocumentName).value
+        else { return nil }
         return (value.storeId, value.project)
     }
 
     static func save(storeId: String, project: String) {
-        let value = Stored(storeId: storeId, project: project)
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        PersistedState.save(CaptureTargetRef(storeId: storeId, project: project),
+                            toDefaults: .standard, key: key, document: captureSettingsDocumentName)
     }
 }

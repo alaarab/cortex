@@ -4,6 +4,10 @@ import PhrenKit
 /// One capture, as the user would describe it: "the thing I said, and where it
 /// went". Kept so "where did that go?" has an answer inside the app instead of
 /// requiring a search through nine projects on GitHub.
+///
+/// **Persisted** inside `CaptureLog`'s `VersionedList`. See the contract on
+/// `VersionedDocument` before adding a field or an enum case here — a new
+/// `Kind` or `Source` case makes the whole log unreadable to older builds.
 struct CaptureLogEntry: Codable, Identifiable, Hashable {
     enum Kind: String, Codable {
         case note
@@ -54,11 +58,18 @@ enum CaptureLog {
     static let snippetLength = 80
 
     private static let key = "phren.capture.log"
+    /// What the user calls this list when it goes wrong.
+    private static let documentName = "recent captures"
+
+    /// Version 1 on disk is a bare `[CaptureLogEntry]` array — what shipped
+    /// builds wrote — and `VersionedList` still reads it. Anything it cannot
+    /// read is set aside under a sibling key rather than overwritten, so even
+    /// this deliberately lossy list never disappears without a word.
+    private typealias LogFile = VersionedList<CaptureLogEntry>
 
     static func entries() -> [CaptureLogEntry] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let entries = try? JSONDecoder().decode([CaptureLogEntry].self, from: data) else { return [] }
-        return entries
+        PersistedState.load(LogFile.self, fromDefaults: .standard, key: key,
+                            document: documentName).value?.items ?? []
     }
 
     /// Appends a capture that has actually been accepted by a store. Callers
@@ -81,8 +92,8 @@ enum CaptureLog {
             source: source
         )
         let trimmed = Array(([entry] + entries()).prefix(limit))
-        guard let data = try? JSONEncoder().encode(trimmed) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        PersistedState.save(LogFile(items: trimmed), toDefaults: .standard, key: key,
+                            document: documentName)
     }
 
     static func clear() {
