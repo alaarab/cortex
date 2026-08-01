@@ -27,6 +27,18 @@ struct PhrenApp: App {
                     @unknown default: break
                     }
                 }
+                // Widget taps (`widgetURL`/`Link` on `phren://…`) land here
+                // directly — no CFBundleURLTypes registration needed, that's
+                // only required for *other* apps to open the scheme via
+                // `UIApplication.open`. Just select the matching tab.
+                .onOpenURL { url in
+                    guard url.scheme == "phren" else { return }
+                    switch url.host {
+                    case "review": model.selectedTab = .review
+                    case "tasks": model.selectedTab = .tasks
+                    default: break
+                    }
+                }
         }
     }
 
@@ -73,18 +85,24 @@ struct MainTabView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TabView {
+        @Bindable var model = model
+        TabView(selection: $model.selectedTab) {
             ProjectsView()
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
+                .tag(AppTab.projects)
             ReviewView()
                 .tabItem { Label("Review", systemImage: "checkmark.seal") }
                 .badge(model.totalReviewCount)
+                .tag(AppTab.review)
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
+                .tag(AppTab.tasks)
             SearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(AppTab.search)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppTab.settings)
         }
     }
 }
