@@ -60,7 +60,9 @@ struct ArchiveFooter: View {
     private func headline(_ summary: ColdSummary) -> String {
         let topics = "\(summary.topicCount) topic\(summary.topicCount == 1 ? "" : "s")"
         let scope = summary.findingCount.map { "\($0) finding\($0 == 1 ? "" : "s") in \(topics)" } ?? topics
-        guard let consolidatedDate else { return "Archived — \(scope)" }
+        // An archive with no stamp is a store consolidated by a CLI old enough
+        // not to have written one — still real, just undated.
+        guard let consolidatedDate else { return "Archived findings — \(scope)" }
         return "Archived \(consolidatedDate) — \(scope)"
     }
 }
