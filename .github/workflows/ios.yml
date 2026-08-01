@@ -1,15 +1,32 @@
 name: iOS
 
+# PhrenKit's markdown parsers are line-by-line transcriptions of the CLI's
+# TypeScript, verified against fixtures the CLI generates (see
+# apps/ios/README.md "The format contract"). A change to either side of that
+# contract must run this suite — otherwise a TS format change silently
+# desyncs the Swift port and nothing fails until a user's file is mangled.
 on:
   push:
     branches: [main, "claude/**"]
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
+      - "packages/cli/src/content/**"
+      - "packages/cli/src/data/**"
+      - "packages/cli/src/finding/**"
+      - "packages/cli/src/governance/policy.ts"
+      - "packages/cli/src/core/**"
+      - "packages/cli/src/task/**"
   pull_request:
     paths:
       - "apps/ios/**"
       - ".github/workflows/ios.yml"
+      - "packages/cli/src/content/**"
+      - "packages/cli/src/data/**"
+      - "packages/cli/src/finding/**"
+      - "packages/cli/src/governance/policy.ts"
+      - "packages/cli/src/core/**"
+      - "packages/cli/src/task/**"
   workflow_dispatch:
 
 jobs:
