@@ -43,7 +43,7 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
             TypewriterFindingCard()
                 .padding(.top, 4)
-            Text("Sign in with GitHub to open your phren store.")
+            Text("Connect a GitHub token to open your phren store. It's stored only in this device's Keychain.")
                 .font(.footnote)
                 .foregroundStyle(PhrenTheme.textMuted)
                 .multilineTextAlignment(.center)
@@ -58,19 +58,23 @@ struct WelcomeView: View {
                     .foregroundStyle(.red)
             }
 
-            Button {
-                Task { await startDeviceFlow() }
-            } label: {
-                Label("Sign in with GitHub", systemImage: "person.badge.key")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(polling)
+            VStack(spacing: 12) {
+                Button {
+                    showPATSheet = true
+                } label: {
+                    Label("Connect with a GitHub token", systemImage: "key.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
 
-            Button("Use a personal access token instead") {
-                showPATSheet = true
+                if DeviceFlowAuth.isConfigured {
+                    Button("Sign in with GitHub instead") {
+                        Task { await startDeviceFlow() }
+                    }
+                    .font(.footnote)
+                    .disabled(polling)
+                }
             }
-            .font(.footnote)
             .padding(.bottom)
         }
         .padding()
@@ -83,6 +87,10 @@ struct WelcomeView: View {
 
     private func startDeviceFlow() async {
         authError = nil
+        guard DeviceFlowAuth.isConfigured else {
+            authError = "GitHub sign-in isn't set up yet — use a token instead."
+            return
+        }
         let auth = DeviceFlowAuth()
         do {
             let code = try await auth.requestCode()
@@ -150,13 +158,14 @@ struct PATSignInSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
                     SecureField("github_pat_… or ghp_…", text: $token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
                     Text("Personal access token")
                 } footer: {
-                    Text("Create a fine-grained token with **Contents: Read and write** and **Metadata: Read** on your phren store repository. The token is stored only in this device's Keychain.")
+                    Text("Create a fine-grained token with **Contents: Read and write** and **Metadata: Read** on your phren store repository. The token is stored only in this device's Keychain. Under Repository access, select your store repository — a token that can't see it will show only your public repos.")
                 }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
@@ -185,7 +194,7 @@ struct PATSignInSheet: View {
             try await model.signIn(token: token, kind: .pat)
             dismiss()
         } catch {
-            self.error = "Token rejected: \(error.localizedDescription)"
+            self.error = "GitHub rejected that token. Check you pasted all of it and that it hasn't expired."
         }
     }
 }
@@ -225,6 +234,7 @@ struct RepoPickerList: View {
     @State private var repos: [GitHubRepo] = []
     @State private var phrenStoreNames: Set<String> = []
     @State private var loading = true
+    @State private var loadError: String?
     @State private var error: String?
     @State private var manualEntry = ""
 
@@ -244,6 +254,13 @@ struct RepoPickerList: View {
         repos.filter { !phrenStoreNames.contains($0.fullName) }
     }
 
+    /// True once repos have loaded and every one of them is public — a token
+    /// scoped away from a private store repo still lists successfully, it
+    /// just silently omits the repo the user actually needs.
+    private var onlyPublicReposListed: Bool {
+        !loading && loadError == nil && !repos.isEmpty && repos.allSatisfy { !$0.isPrivate }
+    }
+
     var body: some View {
         List {
             if !likelyStores.isEmpty {
@@ -253,12 +270,25 @@ struct RepoPickerList: View {
                     }
                 }
             }
-            Section(likelyStores.isEmpty ? "Your repositories" : "Other repositories") {
+            Section {
                 if loading {
                     HStack { ProgressView(); Text("Loading repositories…") }
+                } else if let loadError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(loadError).foregroundStyle(.red).font(.footnote)
+                        Button("Try again") {
+                            Task { await load() }
+                        }
+                    }
                 }
                 ForEach(otherRepos) { repo in
                     repoRow(repo, isStore: false)
+                }
+            } header: {
+                Text(likelyStores.isEmpty ? "Your repositories" : "Other repositories")
+            } footer: {
+                if onlyPublicReposListed {
+                    Text("Only public repositories are listed. If your phren store repo is private, your token doesn't have access to it yet — add the repo under Repository access on GitHub, then pull to refresh.")
                 }
             }
             Section {
@@ -318,6 +348,7 @@ struct RepoPickerList: View {
 
     private func load() async {
         loading = true
+        loadError = nil
         defer { loading = false }
         do {
             repos = try await model.client.listRepos()
@@ -329,18 +360,27 @@ struct RepoPickerList: View {
                 }
             }
         } catch {
-            self.error = error.localizedDescription
+            loadError = error.localizedDescription
         }
     }
 
     private func openManual() async {
         let parts = manualEntry.trimmingCharacters(in: .whitespaces).split(separator: "/")
         guard parts.count == 2 else { return }
+        let owner = String(parts[0])
+        let name = String(parts[1])
         do {
-            let repo = try await model.client.repo(owner: String(parts[0]), name: String(parts[1]))
+            let repo = try await model.client.repo(owner: owner, name: name)
             onSelect(repo)
         } catch {
-            self.error = "Couldn't open \(manualEntry): \(error.localizedDescription)"
+            // TODO: match GitHubError.http(status: 404, _) directly once typed
+            // error context lands (in progress elsewhere) — string matching
+            // on the rendered description is a stopgap.
+            if error.localizedDescription.contains("404") {
+                self.error = "Can't see \(owner)/\(name). GitHub returns 'not found' for private repositories your token can't read. Give the token access under Repository access on GitHub (Contents: Read and write, Metadata: Read), then try again."
+            } else {
+                self.error = "Couldn't open \(manualEntry): \(error.localizedDescription)"
+            }
         }
     }
 }

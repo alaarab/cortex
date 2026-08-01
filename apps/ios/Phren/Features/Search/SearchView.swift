@@ -17,29 +17,34 @@ struct SearchView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 LiveStatusBar()
+                ActionErrorBanner()
                 List {
                     if !query.isEmpty {
                         ForEach(results) { result in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(result.text)
-                                    .font(.callout)
-                                    .lineLimit(4)
-                                HStack(spacing: 6) {
-                                    TagChip(text: result.project, role: .project)
-                                    if model.hasMultipleStores, !result.store.isEmpty {
-                                        TagChip(text: model.storeName(for: result.store), role: .store)
-                                    }
-                                    TagChip(text: result.kind.rawValue, color: kindColor(result.kind))
-                                    if let tag = result.typeTag {
-                                        TagChip(text: tag, role: .type)
-                                    }
-                                    Spacer()
-                                    if let date = result.date {
-                                        Text(date).font(.caption2).foregroundStyle(.tertiary)
+                            NavigationLink {
+                                ProjectDetailView(storeId: result.store, project: result.project)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(result.text)
+                                        .font(.callout)
+                                        .lineLimit(4)
+                                    HStack(spacing: 6) {
+                                        TagChip(text: result.project, role: .project)
+                                        if model.hasMultipleStores, !result.store.isEmpty {
+                                            TagChip(text: model.storeName(for: result.store), role: .store)
+                                        }
+                                        TagChip(text: result.kind.rawValue, color: kindColor(result.kind))
+                                        if let tag = result.typeTag {
+                                            TagChip(text: tag, role: .type)
+                                        }
+                                        Spacer()
+                                        if let date = result.date {
+                                            Text(date).font(.caption2).foregroundStyle(.tertiary)
+                                        }
                                     }
                                 }
+                                .padding(.vertical, 2)
                             }
-                            .padding(.vertical, 2)
                         }
                     }
                 }

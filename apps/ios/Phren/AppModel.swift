@@ -6,20 +6,32 @@ import PhrenKit
 /// context's snapshot is replaced on refresh.
 @Observable @MainActor
 final class StoreContext: Identifiable {
-    let descriptor: StoreDescriptor
+    private(set) var descriptor: StoreDescriptor
     let store: LocalStore
     let engine: SyncEngine
     var snapshot: LocalStore.Snapshot = .empty
     var status = SyncEngine.Status()
 
     // nonisolated: witnesses the nonisolated Identifiable requirement without
-    // a MainActor hop (descriptor is an immutable Sendable let).
-    nonisolated var id: String { descriptor.id }
+    // a MainActor hop. Captured once at init rather than derived from
+    // `descriptor` — owner/name (and hence id) never change after a store is
+    // added, only `canPush` does, so this stays safe without requiring
+    // descriptor to be immutable.
+    nonisolated let id: String
 
     init(descriptor: StoreDescriptor, store: LocalStore, engine: SyncEngine) {
         self.descriptor = descriptor
         self.store = store
         self.engine = engine
+        self.id = descriptor.id
+    }
+
+    /// Best-effort refresh of push permission from a re-fetched repo — called
+    /// from bootstrap/pullToRefresh. `canPush` is otherwise captured once at
+    /// addStore time and never updated even if the token's access changes
+    /// (StoreDescriptor.swift's doc comment promises this "correction").
+    func updateCanPush(_ canPush: Bool) {
+        descriptor.canPush = canPush
     }
 }
 
@@ -168,12 +180,16 @@ final class AppModel {
             phase = .pickingRepo
             return
         }
-        phase = .ready
         for descriptor in descriptors {
             await openContext(descriptor)
         }
+        // openContext can fail (LocalStore init) for every descriptor — never
+        // strand the user in an empty tab view with no way back. Mirrors the
+        // same guard in addStore().
+        phase = storeContexts.isEmpty ? .pickingRepo : .ready
         // Render the cached copy instantly; the pull refreshes it right after.
         await refresh()
+        await refreshStorePermissions()
         await pullAllAndGoLive()
     }
 
@@ -371,7 +387,28 @@ final class AppModel {
 
     func pullToRefresh() async {
         await pullAll()
+        await refreshStorePermissions()
         await refresh()
+    }
+
+    /// Re-fetches each store's repo to pick up push-permission changes (e.g.
+    /// the user broadened a fine-grained token's access after adding a store
+    /// read-only). Best-effort: a failed fetch just leaves canPush as-is.
+    private func refreshStorePermissions() async {
+        var changed = false
+        for context in storeContexts {
+            guard let repo = try? await client.repo(owner: context.descriptor.owner, name: context.descriptor.name) else {
+                continue
+            }
+            let canPush = repo.permissions?.push ?? true
+            if canPush != context.descriptor.canPush {
+                context.updateCanPush(canPush)
+                changed = true
+            }
+        }
+        if changed {
+            persistDescriptors(storeDescriptors)
+        }
     }
 
     // MARK: - Mutations
