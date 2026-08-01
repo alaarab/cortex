@@ -70,6 +70,13 @@ private struct DismissAttemptDetector: UIViewControllerRepresentable {
 /// text is currently there, edits and all), pick the destination project,
 /// and save as a note via `model.perform(.addNote(...))`.
 struct VoiceCaptureView: View {
+    /// What the dictated text becomes on save. Notes carry a timestamp and
+    /// land in notes/YYYY-MM-DD.md; tasks append to the project's queue.
+    enum CaptureKind: String, CaseIterable {
+        case note = "Note"
+        case task = "Task"
+    }
+
     /// Every writable (store, project) pair the note could be filed under.
     let targets: [VoiceCaptureTarget]
     /// Pins the destination when opened from a project's own Notes tab.
@@ -90,6 +97,7 @@ struct VoiceCaptureView: View {
     @State private var pulse = false
     @State private var confirmDiscard = false
     @State private var saving = false
+    @State private var kind: CaptureKind = .note
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -108,6 +116,10 @@ struct VoiceCaptureView: View {
                     )
                 } else {
                     VStack(spacing: 20) {
+                        Picker("Save as", selection: $kind) {
+                            ForEach(CaptureKind.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .pickerStyle(.segmented)
                         micArea
                         editorSection
                         destinationFooter
@@ -117,7 +129,7 @@ struct VoiceCaptureView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .phrenScreen()
-            .navigationTitle("Dictate a note")
+            .navigationTitle(kind == .note ? "Dictate a note" : "Dictate a task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -141,7 +153,7 @@ struct VoiceCaptureView: View {
         .background(DismissAttemptDetector { confirmDiscard = true })
         .interactiveDismissDisabled(hasUnsavedText)
         .confirmationDialog(
-            "Discard this note?",
+            kind == .note ? "Discard this note?" : "Discard this task?",
             isPresented: $confirmDiscard,
             titleVisibility: .visible
         ) {
@@ -381,13 +393,18 @@ struct VoiceCaptureView: View {
 
         saving = true
         VoiceCaptureLastTarget.save(storeId: target.storeId, project: target.project)
-        let timestamp = model.nowNoteTimestamp()
+
+        let op: PendingOp
+        switch kind {
+        case .note:
+            let timestamp = model.nowNoteTimestamp()
+            op = .addNote(project: target.project, date: timestamp.date, time: timestamp.time, text: value)
+        case .task:
+            op = .addTask(project: target.project, text: value)
+        }
 
         Task { @MainActor in
-            await model.perform(
-                .addNote(project: target.project, date: timestamp.date, time: timestamp.time, text: value),
-                in: target.storeId
-            )
+            await model.perform(op, in: target.storeId)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
         }
