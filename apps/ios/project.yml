@@ -56,7 +56,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -65,6 +65,13 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Phren records audio only while you dictate a note."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Phren transcribes your dictation into a note on this device when possible."
+        # Export compliance: the app only ever speaks HTTPS to the GitHub REST
+        # API (via URLSession/TLS, the OS-provided stack) and stores its token
+        # in the system Keychain — both exempt from import/export reporting.
+        # Without this key, App Store Connect stops every build on upload to
+        # ask; setting it to NO answers that question at build time and skips
+        # the prompt.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: true
@@ -95,7 +102,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios.widgets
         PRODUCT_NAME: PhrenWidgets
-        MARKETING_VERSION: "0.1.0"
+        # Keep in lockstep with the Phren target above — App Store Connect
+        # rejects an upload where the extension's version doesn't match its
+        # containing app's.
+        MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
