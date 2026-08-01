@@ -25,6 +25,7 @@ const notes = await import(path.join(dist, "data/notes.js"));
 const tasks = await import(path.join(dist, "data/tasks.js"));
 const learning = await import(path.join(dist, "content/learning.js"));
 const policy = await import(path.join(dist, "governance/policy.js"));
+const journal = await import(path.join(dist, "finding/journal.js"));
 
 const store = fs.mkdtempSync(path.join(os.tmpdir(), "phren-fixtures-"));
 const project = "myproj";
@@ -73,6 +74,38 @@ snapshot("findings-after-remove.md", `${project}/FINDINGS.md`);
 
 const parsedFindings = must(access.readFindings(store, project), "read findings");
 writeJson("findings-parsed.json", parsedFindings.data);
+
+// --- team store journal -----------------------------------------------------
+
+// A store with `role: team` never line-splices FINDINGS.md on an add — the
+// finding goes to an append-only `journal/YYYY-MM-DD-<actor>.md` instead
+// (tools/finding.ts:186 → finding/journal.ts:150). `appendTeamJournal` stamps
+// `new Date()` itself and takes no date argument, so the clock is frozen
+// around these calls to keep the fixture stable across regenerations.
+const journalDate = "2026-07-28";
+const RealDate = Date;
+globalThis.Date = class FrozenDate extends RealDate {
+  constructor(...args) {
+    super(...(args.length > 0 ? args : [`${journalDate}T09:15:00.000Z`]));
+  }
+};
+must(journal.appendTeamJournal(store, project,
+  "[decision] Team stores journal their findings instead of splicing FINDINGS.md",
+  "tester", "test-machine"), "journal entry 1");
+must(journal.appendTeamJournal(store, project,
+  "Second entry of the day appends to the same actor file",
+  "tester", "test-machine"), "journal entry 2");
+// A second actor on the same day gets its own file — that is the whole point
+// of the layout, and it is what makes concurrent writers merge cleanly.
+// No machine here, so buildSourceComment drops the machine token entirely.
+must(journal.appendTeamJournal(store, project,
+  "Entry written by a different actor on the same day",
+  "other-actor", undefined), "journal entry 3");
+globalThis.Date = RealDate;
+
+snapshot(`journal-${journalDate}-tester.md`, `${project}/journal/${journalDate}-tester.md`);
+snapshot(`journal-${journalDate}-other-actor.md`, `${project}/journal/${journalDate}-other-actor.md`);
+writeJson("journal-parsed.json", journal.readTeamJournalEntries(store, project));
 
 // --- review.md --------------------------------------------------------------
 

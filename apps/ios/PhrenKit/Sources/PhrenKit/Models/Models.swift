@@ -101,6 +101,23 @@ public struct Finding: Codable, Equatable, Identifiable, Sendable {
 
     /// Raw markdown line this finding was parsed from (mutation key).
     public var rawLine: String
+
+    /// The `journal/YYYY-MM-DD-<actor>.md` this entry came from, or nil for
+    /// the `FINDINGS.md` bullets that make up every other finding.
+    ///
+    /// The one field here with no counterpart in `FindingItem`: the CLI keeps
+    /// a journal entry's file/date/actor in the separate tuple
+    /// `readTeamJournalEntries` returns (journal.ts:178) and never merges the
+    /// two shapes. The app does merge them — one Findings list, whatever the
+    /// store's role — so it has to carry the provenance the CLI keeps
+    /// alongside. It is also the read-only flag: the CLI's `edit_finding` and
+    /// `remove_finding` splice `FINDINGS.md` in every store, journal or not,
+    /// so an edit offered here could only ever fail.
+    public var journalFile: String?
+
+    /// Append-only by construction: nothing on either side rewrites a journal
+    /// line in place.
+    public var isJournalEntry: Bool { journalFile != nil }
 }
 
 /// Mirrors `QueueItem` (packages/cli/src/data/access.ts).

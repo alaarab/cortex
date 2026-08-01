@@ -24,14 +24,28 @@ public actor SyncEngine {
     }
 
     /// Identity stamped into `<!-- source: -->` comments on findings written
-    /// from this device.
+    /// from this device, plus how this store wants those findings recorded.
     public struct WriteContext: Sendable {
+        /// Mirrors the CLI's `getCurrentActor()` (machine-identity.ts:41) —
+        /// the *person*, which on the phone is the GitHub login.
         public var actor: String?
+        /// Mirrors `getMachineName()` — the host, i.e. the device name.
         public var machine: String?
+        /// True when this store has `role: team`, in which case a finding-add
+        /// appends to `journal/YYYY-MM-DD-<actor>.md` and leaves `FINDINGS.md`
+        /// alone, exactly as `handleAddFinding` does (tools/finding.ts:186).
+        ///
+        /// Store-level rather than project-level on purpose. The app always
+        /// addresses a *(store, project)* pair, which is the CLI's
+        /// store-qualified form (`work-shared/arc`), and for that form
+        /// `resolveStoreForProject` takes the role straight off the store
+        /// (tools/types.ts:105) without consulting any `projects:` claim list.
+        public var usesTeamJournal: Bool
 
-        public init(actor: String? = nil, machine: String? = nil) {
+        public init(actor: String? = nil, machine: String? = nil, usesTeamJournal: Bool = false) {
             self.actor = actor
             self.machine = machine
+            self.usesTeamJournal = usesTeamJournal
         }
     }
 
@@ -640,12 +654,51 @@ public actor SyncEngine {
         return await store.read(path)
     }
 
+    /// The journal file today's adds belong in, for this store's actor.
+    /// Separate from `PendingOp.primaryPath`, which still names `FINDINGS.md`:
+    /// that property is *persisted* inside `pending-ops.json`, and teaching it
+    /// about journals would mean changing a queue schema every shipped build
+    /// has to keep reading. It costs nothing to leave alone — it is used as a
+    /// coalescing key and as a writability probe, and `isWritablePath` gates
+    /// `<project>/journal/…` on the very same ``LocalStore/isProjectDirName``
+    /// as `<project>/FINDINGS.md`, so the two answer identically. The bytes
+    /// pushed come from `QueuedOp.paths`, which records what was really
+    /// edited.
+    private func journalTarget(project: String) -> (path: String, file: JournalFile) {
+        let actor = JournalFile.sanitizeActor(writeContext.actor)
+        // journal.ts:153 — `new Date().toISOString().slice(0, 10)`, i.e. UTC.
+        let date = String(FindingsFile.isoTimestamp(Date()).prefix(10))
+        return (JournalFile.path(project: project, date: date, actor: actor),
+                JournalFile(date: date, actor: actor))
+    }
+
+    /// Appends one finding to this store's journal instead of splicing
+    /// `FINDINGS.md` — the app's half of tools/finding.ts:186.
+    ///
+    /// A journal file that exists on GitHub but hasn't been pulled yet reads
+    /// as absent here, so this would write a fresh heading and PUT without a
+    /// sha. GitHub rejects that with the same 422 as any stale write, which
+    /// the flush already recovers from by refetching and re-applying the group
+    /// onto the real file — the append lands, once.
+    private func journalEdit(project: String, text: String, type: String?,
+                             overlay: [String: String?]) async throws -> FileEdit {
+        let finding = try JournalFile.preparedFinding(text, type: type.flatMap(FindingType.init(rawValue:)))
+        let target = journalTarget(project: project)
+        var file = JournalFile(date: target.file.date, actor: target.file.actor,
+                               content: await read(target.path, overlay: overlay))
+        file.append(finding, machine: writeContext.machine)
+        return FileEdit(path: target.path, content: file.content)
+    }
+
     /// Maps a domain op to concrete file edits against current local content.
     /// Each case mirrors the CLI handler documented on the file types.
     private func computeEdits(_ op: PendingOp, overlay: [String: String?] = [:]) async throws -> [FileEdit] {
         let project = op.project
         switch op {
         case .addFinding(_, let text, let type):
+            if writeContext.usesTeamJournal {
+                return [try await journalEdit(project: project, text: text, type: type, overlay: overlay)]
+            }
             var file = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             var provenance = FindingProvenance(source: "human", tool: "phren-ios")
             provenance.machine = writeContext.machine
@@ -728,6 +781,15 @@ public actor SyncEngine {
             }
             guard !note.promoted else {
                 throw PhrenKitError.validation("Note nid:\(stableId) has already been promoted.")
+            }
+            // A promotion *is* a finding-add, so it takes the same route: in a
+            // team store the finding half lands in the journal and the note is
+            // marked promoted either way.
+            if writeContext.usesTeamJournal {
+                let journal = try await journalEdit(project: project, text: note.text,
+                                                    type: findingType, overlay: overlay)
+                try notesFile.markPromoted(stableId: stableId)
+                return [journal, FileEdit(path: notePath, content: notesFile.render())]
             }
             var findings = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             var provenance = FindingProvenance(source: "human", tool: "phren-ios")

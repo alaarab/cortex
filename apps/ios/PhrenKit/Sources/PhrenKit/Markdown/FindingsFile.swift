@@ -67,7 +67,8 @@ public struct FindingsFile: Sendable {
                     scope: nil, machine: nil, actor: nil, supersededBy: nil,
                     supersedes: nil, contradicts: nil, status: .active,
                     statusUpdated: nil, statusReason: nil, statusRef: nil,
-                    archived: inArchiveBlock, typeTag: tag, rawLine: line
+                    archived: inArchiveBlock, typeTag: tag, rawLine: line,
+                    journalFile: nil
                 ))
                 index += 1
                 continue
@@ -120,7 +121,8 @@ public struct FindingsFile: Sendable {
                 statusRef: lifecycle.statusRef,
                 archived: inArchiveBlock,
                 typeTag: typeTag,
-                rawLine: line
+                rawLine: line,
+                journalFile: nil
             ))
             if citation != nil { i += 1 }
             index += 1
