@@ -58,14 +58,9 @@ public actor GitHubClient {
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw GitHubError.invalidResponse }
 
-        if http.statusCode == 403 || http.statusCode == 429 {
-            let remaining = http.value(forHTTPHeaderField: "x-ratelimit-remaining")
-            if remaining == "0" {
-                let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset")
-                    .flatMap(TimeInterval.init)
-                    .map { Date(timeIntervalSince1970: $0) }
-                throw GitHubError.rateLimited(resetAt: reset)
-            }
+        if http.statusCode == 403 || http.statusCode == 429,
+           let throttled = Self.rateLimitError(http, data: data) {
+            throw throttled
         }
         if let etagKey, let etag = http.value(forHTTPHeaderField: "Etag") {
             etags[etagKey] = etag
@@ -73,16 +68,55 @@ public actor GitHubClient {
         return (data, http)
     }
 
+    /// GitHub throttles in three shapes, and only one of them zeroes the
+    /// remaining counter:
+    ///
+    /// - primary limit: 403/429 with `x-ratelimit-remaining: 0`
+    /// - secondary ("abuse") limit: 403/429 with a **non-zero** remaining, a
+    ///   `retry-after` header and a "secondary rate limit" message
+    /// - 429 without either header
+    ///
+    /// `x-ratelimit-reset` rides *every* response, so it is read for timing
+    /// but never used as the signal — treating its presence as throttling
+    /// would relabel every permissions 403 as a rate limit.
+    static func rateLimitError(_ http: HTTPURLResponse, data: Data) -> GitHubError? {
+        let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset")
+            .flatMap(TimeInterval.init)
+            .map { Date(timeIntervalSince1970: $0) }
+        let retryAfter = http.value(forHTTPHeaderField: "retry-after").flatMap(TimeInterval.init)
+
+        if http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0" {
+            return .rateLimited(resetAt: reset, retryAfter: retryAfter)
+        }
+        if let retryAfter {
+            // The reset header describes the hourly window, not this backoff.
+            return .rateLimited(resetAt: Date().addingTimeInterval(retryAfter), retryAfter: retryAfter)
+        }
+        let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
+        let lowered = (message ?? "").lowercased()
+        if lowered.contains("secondary rate limit") || lowered.contains("abuse detection") {
+            return .rateLimited(resetAt: reset, retryAfter: nil)
+        }
+        if http.statusCode == 429 {
+            return .rateLimited(resetAt: reset, retryAfter: nil)
+        }
+        return nil
+    }
+
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
         let (data, http) = try await request(path)
-        try Self.ensureOK(http, data: data)
+        try Self.ensureOK(http, data: data, path: path)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    static func ensureOK(_ http: HTTPURLResponse, data: Data) throws {
+    /// `method`/`path` are carried into the error so `errorDescription` can
+    /// explain a 403/404 as the token-scope problem it usually is.
+    static func ensureOK(_ http: HTTPURLResponse, data: Data,
+                         method: String = "GET", path: String? = nil) throws {
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
-            throw GitHubError.http(status: http.statusCode, message: message ?? "request failed")
+            throw GitHubError.http(status: http.statusCode, message: message ?? "request failed",
+                                   method: method, path: path)
         }
     }
 
@@ -119,9 +153,10 @@ public actor GitHubClient {
     /// matches (HTTP 304) — nothing changed, and the poll was free.
     public func headSha(owner: String, repo: String, branch: String) async throws -> String? {
         let key = "ref:\(owner)/\(repo)/\(branch)"
-        let (data, http) = try await request("repos/\(owner)/\(repo)/git/ref/heads/\(branch)", etagKey: key)
+        let path = "repos/\(owner)/\(repo)/git/ref/heads/\(branch)"
+        let (data, http) = try await request(path, etagKey: key)
         if http.statusCode == 304 { return nil }
-        try Self.ensureOK(http, data: data)
+        try Self.ensureOK(http, data: data, path: path)
         return try JSONDecoder().decode(GitRef.self, from: data).object.sha
     }
 
@@ -150,11 +185,12 @@ public actor GitHubClient {
         ]
         if let sha { payload["sha"] = sha }
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let (data, http) = try await request("repos/\(owner)/\(repo)/contents/\(path)", method: "PUT", body: body)
+        let endpoint = "repos/\(owner)/\(repo)/contents/\(path)"
+        let (data, http) = try await request(endpoint, method: "PUT", body: body)
         if http.statusCode == 409 || http.statusCode == 422 {
             throw GitHubError.shaConflict(path: path)
         }
-        try Self.ensureOK(http, data: data)
+        try Self.ensureOK(http, data: data, method: "PUT", path: endpoint)
         return try JSONDecoder().decode(ContentsPutResponse.self, from: data)
     }
 
@@ -162,10 +198,11 @@ public actor GitHubClient {
                            message: String, sha: String) async throws {
         let payload: [String: Any] = ["message": message, "sha": sha, "branch": branch]
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let (data, http) = try await request("repos/\(owner)/\(repo)/contents/\(path)", method: "DELETE", body: body)
+        let endpoint = "repos/\(owner)/\(repo)/contents/\(path)"
+        let (data, http) = try await request(endpoint, method: "DELETE", body: body)
         if http.statusCode == 409 || http.statusCode == 422 {
             throw GitHubError.shaConflict(path: path)
         }
-        try Self.ensureOK(http, data: data)
+        try Self.ensureOK(http, data: data, method: "DELETE", path: endpoint)
     }
 }
