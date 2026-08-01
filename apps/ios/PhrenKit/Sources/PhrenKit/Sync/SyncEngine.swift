@@ -249,6 +249,12 @@ public actor SyncEngine {
 
     public func failedOps() -> [QueuedOp] { queue.failed }
 
+    /// Ops applied locally but not yet pushed. `status.pendingCount` says how
+    /// many there are; this says *which*, so a surface that recorded a write
+    /// (the capture log) can tell one that has shipped from one still waiting
+    /// on the next flush.
+    public func pendingOps() -> [QueuedOp] { queue.pending }
+
     private func scheduleFlush() {
         guard autoFlush, flushTask == nil else { return }
         flushTask = Task { [weak self] in

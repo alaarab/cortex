@@ -13,28 +13,6 @@ struct VoiceCaptureTarget: Identifiable, Hashable {
     var id: String { "\(storeId)|\(project)" }
 }
 
-/// Remembers the last (store, project) a voice note was filed under, so the
-/// global quick-capture entry point (Projects tab toolbar) can default to
-/// "wherever I put the last one" instead of an arbitrary first project.
-/// Deliberately outside AppModel — this is a capture-sheet convenience, not
-/// app state other screens need.
-enum VoiceCaptureLastTarget {
-    private struct Stored: Codable { let storeId: String; let project: String }
-    private static let key = "phren.voiceCapture.lastTarget"
-
-    static func load() -> (storeId: String, project: String)? {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let value = try? JSONDecoder().decode(Stored.self, from: data) else { return nil }
-        return (value.storeId, value.project)
-    }
-
-    static func save(storeId: String, project: String) {
-        let value = Stored(storeId: storeId, project: project)
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        UserDefaults.standard.set(data, forKey: key)
-    }
-}
-
 /// Bridges UIKit's "attempted interactive dismiss while disabled" delegate
 /// callback into SwiftUI. `.interactiveDismissDisabled(true)` alone just
 /// blocks the swipe silently — this makes the swipe attempt actionable so we
@@ -304,12 +282,25 @@ struct VoiceCaptureView: View {
     @ViewBuilder
     private var destinationFooter: some View {
         if targets.count > 1 {
-            Picker("Project", selection: $selectedTarget) {
-                ForEach(targets) { target in
-                    Text(targetLabel(target)).tag(Optional(target))
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("Project", selection: $selectedTarget) {
+                    // A real, visible "nothing picked yet" row: with several
+                    // projects, a preselected one the user didn't choose is
+                    // how a capture lands somewhere nobody can name later.
+                    Text("Choose a project…").tag(VoiceCaptureTarget?.none)
+                    ForEach(targets) { target in
+                        Text(targetLabel(target)).tag(Optional(target))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if selectedTarget == nil {
+                    Text("Pick where this goes — phren won't choose for you. Set a default in Settings → Quick capture.")
+                        .font(.footnote)
+                        .foregroundStyle(PhrenTheme.textMuted)
                 }
             }
-            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if let only = targets.first {
             Text("Saving to \(targetLabel(only))")
                 .font(.footnote)
@@ -359,12 +350,22 @@ struct VoiceCaptureView: View {
         return (base.hasSuffix(" ") || base.hasSuffix("\n")) ? base + addition : base + " " + addition
     }
 
+    /// Same precedence the App Intents path uses, plus the one tier a visible
+    /// sheet can safely add: the configured default, then the last project
+    /// anything was captured into — and then *nothing*. With several writable
+    /// projects the sheet opens unset rather than pointing at whichever one
+    /// sorts first; the only case that preselects on its own is a single
+    /// writable project, where the footer names it in place of the picker.
     private static func defaultTarget(in targets: [VoiceCaptureTarget]) -> VoiceCaptureTarget? {
+        if let preferred = QuickCaptureDefault.load(),
+           let match = targets.first(where: { $0.storeId == preferred.storeId && $0.project == preferred.project }) {
+            return match
+        }
         if let last = VoiceCaptureLastTarget.load(),
            let match = targets.first(where: { $0.storeId == last.storeId && $0.project == last.project }) {
             return match
         }
-        return targets.first
+        return targets.count == 1 ? targets.first : nil
     }
 
     // MARK: - Dismiss / save
@@ -392,7 +393,6 @@ struct VoiceCaptureView: View {
         guard !value.isEmpty else { return }
 
         saving = true
-        VoiceCaptureLastTarget.save(storeId: target.storeId, project: target.project)
 
         let op: PendingOp
         switch kind {
@@ -405,7 +405,21 @@ struct VoiceCaptureView: View {
 
         Task { @MainActor in
             await model.perform(op, in: target.storeId)
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            // `perform` clears lastActionError on success and parks the reason
+            // there otherwise — the banner behind this sheet shows it. Only a
+            // write that was actually accepted gets remembered or logged.
+            let accepted = model.lastActionError == nil
+            if accepted {
+                VoiceCaptureLastTarget.save(storeId: target.storeId, project: target.project)
+                CaptureLog.record(
+                    kind: kind == .note ? .note : .task,
+                    storeId: target.storeId,
+                    project: target.project,
+                    text: value,
+                    source: .app
+                )
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(accepted ? .success : .error)
             dismiss()
         }
     }

@@ -84,16 +84,27 @@ struct ProjectEntityQuery: EntityStringQuery {
 
         let ranked = targets.compactMap { target -> (rank: Int, target: PhrenCaptureTarget)? in
             let name = Self.normalized(target.project)
+            // With more than one store attached the project name alone can
+            // name two different places, so the store has to be matchable too
+            // — "alphalens in work-shared" must be able to pick the one the
+            // speaker meant instead of leaving both equally likely.
+            if target.qualified {
+                let store = Self.normalized(target.storeName)
+                if needle == name + store { return (0, target) }
+                if !store.isEmpty, needle.contains(name), needle.contains(store) { return (1, target) }
+            }
             if name == needle { return (0, target) }
-            if name.hasPrefix(needle) { return (1, target) }
-            if name.contains(needle) { return (2, target) }
+            if name.hasPrefix(needle) { return (2, target) }
+            if name.contains(needle) { return (3, target) }
             // The other direction: Siri often hands over a fragment with a
             // stray word attached ("alpha lens project").
-            if name.count >= 3, needle.contains(name) { return (3, target) }
+            if name.count >= 3, needle.contains(name) { return (4, target) }
             return nil
         }
+        // Ties break on the store too, so two same-named projects in different
+        // stores come back in a stable order rather than an arbitrary one.
         return ranked
-            .sorted { ($0.rank, $0.target.project) < ($1.rank, $1.target.project) }
+            .sorted { ($0.rank, $0.target.project, $0.target.storeName) < ($1.rank, $1.target.project, $1.target.storeName) }
             .map { ProjectEntity(target: $0.target) }
     }
 

@@ -1,4 +1,5 @@
 import AppIntents
+import SwiftUI
 import PhrenKit
 
 /// "Hey Siri, add a note to phren" — the hands-free twin of the voice capture
@@ -21,6 +22,8 @@ struct AddPhrenNoteIntent: AppIntent {
     @Parameter(title: "Note", requestValueDialog: "What should the note say?")
     var text: String
 
+    /// See `AddPhrenTaskIntent.project` — optional so a configured default can
+    /// answer it, never guessed when there isn't one.
     @Parameter(title: "Project", requestValueDialog: "Which project?")
     var project: ProjectEntity?
 
@@ -29,18 +32,27 @@ struct AddPhrenNoteIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
             throw $text.needsValueError("What should the note say?")
         }
-        let target = try await PhrenCapture.resolveTarget(project)
+        let target: PhrenCaptureTarget
+        switch try await PhrenCapture.resolveTarget(project) {
+        case .resolved(let resolved):
+            target = resolved
+        case .ask(let reason):
+            throw $project.needsValueError(IntentDialog(reason.prompt))
+        }
         // Same UTC day/time stamping the notes file expects from any writer.
         let stamp = AppModel.nowNoteTimestamp()
         try await PhrenCapture.capture(
             .addNote(project: target.project, date: stamp.date, time: stamp.time, text: value),
             to: target
         )
-        return .result(dialog: "Added to \(target.spokenName).")
+        return .result(
+            dialog: "Added to \(target.spokenName).",
+            view: CaptureSnippetView(kind: "Note", text: value, destination: target.displayName)
+        )
     }
 }

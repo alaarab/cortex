@@ -80,9 +80,10 @@ struct ProjectsView: View {
                         }
                     }
                 }
-                // Global quick capture: dictate a note without opening a
-                // project first. Hidden (not just disabled) when no store is
-                // writable — mirrors TasksView's addTargets-gated + button.
+                // Global quick capture: dictate a note or a task without
+                // opening a project first. Hidden (not just disabled) when no
+                // store is writable — mirrors TasksView's addTargets-gated
+                // + button.
                 if !voiceCaptureTargets.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -90,7 +91,10 @@ struct ProjectsView: View {
                         } label: {
                             Image(systemName: "mic.fill")
                         }
-                        .accessibilityLabel("Dictate a note")
+                        // The sheet captures either kind, and asks where it
+                        // goes — the label has to say so, since VoiceOver
+                        // users get no other preview of what the button does.
+                        .accessibilityLabel("Dictate a note or task")
                     }
                 }
             }
@@ -437,7 +441,7 @@ struct NotesTab: View {
                     } label: {
                         Image(systemName: "mic.fill")
                     }
-                    .accessibilityLabel("Dictate a note")
+                    .accessibilityLabel("Dictate a note or task")
                 }
             }
             ToolbarItem(placement: .primaryAction) {

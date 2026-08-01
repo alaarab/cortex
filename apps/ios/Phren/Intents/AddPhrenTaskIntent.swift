@@ -1,4 +1,5 @@
 import AppIntents
+import SwiftUI
 import PhrenKit
 
 /// "Hey Siri, add a task to phren" — dictate it, done. No app, no screen.
@@ -30,6 +31,12 @@ struct AddPhrenTaskIntent: AppIntent {
     @Parameter(title: "Task", requestValueDialog: "What's the task?")
     var text: String
 
+    /// Optional so a configured default (Settings → Quick capture) can skip
+    /// the question entirely — but never guessed when it's absent: `perform`
+    /// throws `needsValueError` instead, which makes Siri ask out loud and the
+    /// Shortcuts app show its project picker mid-run, then re-runs `perform`
+    /// with the answer. Nothing is written before the destination is known, so
+    /// that second run is not a retry of a partial capture.
     @Parameter(title: "Project", requestValueDialog: "Which project?")
     var project: ProjectEntity?
 
@@ -38,15 +45,24 @@ struct AddPhrenTaskIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
             // Dictation heard nothing usable — ask again rather than filing
             // an empty task.
             throw $text.needsValueError("What's the task?")
         }
-        let target = try await PhrenCapture.resolveTarget(project)
+        let target: PhrenCaptureTarget
+        switch try await PhrenCapture.resolveTarget(project) {
+        case .resolved(let resolved):
+            target = resolved
+        case .ask(let reason):
+            throw $project.needsValueError(IntentDialog(reason.prompt))
+        }
         try await PhrenCapture.capture(.addTask(project: target.project, text: value), to: target)
-        return .result(dialog: "Added to \(target.spokenName).")
+        return .result(
+            dialog: "Added to \(target.spokenName).",
+            view: CaptureSnippetView(kind: "Task", text: value, destination: target.displayName)
+        )
     }
 }

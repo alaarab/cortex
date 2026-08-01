@@ -56,6 +56,35 @@ enum PhrenCaptureError: LocalizedError, CustomLocalizedStringResourceConvertible
     var errorDescription: String? { String(localized: localizedStringResource) }
 }
 
+/// The outcome of deciding where a capture goes. `ask` is a first-class
+/// result, not a failure: "I will not choose for you" is the correct answer
+/// whenever the user hasn't said and hasn't configured a default.
+enum PhrenCaptureResolution {
+    case resolved(PhrenCaptureTarget)
+    case ask(PhrenCaptureAskReason)
+}
+
+/// Why the capture path is declining to pick a destination. Each case is
+/// phrased as the sentence Siri speaks / the Shortcuts app shows above the
+/// project picker, so the user is never asked a bare question they can't place.
+enum PhrenCaptureAskReason {
+    /// No default is configured — the state a new install ships in.
+    case noDefault
+    /// A default was configured but its project isn't in an attached, writable
+    /// store any more. Never substituted for silently: a same-named project in
+    /// a different store is a *different* project.
+    case defaultUnavailable(String)
+
+    var prompt: LocalizedStringResource {
+        switch self {
+        case .noDefault:
+            return "Which project?"
+        case .defaultUnavailable(let name):
+            return "Your default capture project \(name) isn't available any more. Which project?"
+        }
+    }
+}
+
 /// The capture path shared by every App Intent: find the writable
 /// (store, project) pairs, pick one, and get an op into the store.
 ///
@@ -142,10 +171,20 @@ enum PhrenCapture {
 
     // MARK: - Resolution
 
-    /// Resolves the destination for a capture: the project the user named, or
-    /// the last one anything was captured into (shared with the in-app voice
-    /// sheet via `VoiceCaptureLastTarget`), or the first writable project.
-    static func resolveTarget(_ entity: ProjectEntity?) async throws -> PhrenCaptureTarget {
+    /// Decides where a capture goes, in this order and no other:
+    ///
+    /// 1. **The project the user named.** Matched store-qualified — a saved
+    ///    shortcut points at one specific (store, project), not at a name.
+    /// 2. **Nothing writable at all** → a specific error, since asking would
+    ///    offer an empty list.
+    /// 3. **The default the user set** in Settings → Quick capture, *if* it is
+    ///    still an attached, writable project.
+    /// 4. **Otherwise: ask.** Both when no default is configured and when the
+    ///    configured one has gone away. There is deliberately no fallback tier
+    ///    below this — no "last used", no first-in-sort-order. A capture whose
+    ///    destination nobody chose is how a task ends up in a project the user
+    ///    can't name afterwards, which is the whole bug this path had.
+    static func resolveTarget(_ entity: ProjectEntity?) async throws -> PhrenCaptureResolution {
         let available = await targets()
         guard !available.isEmpty else {
             let descriptors = AppModel.storedDescriptors()
@@ -160,13 +199,20 @@ enum PhrenCapture {
             }) else {
                 throw PhrenCaptureError.unknownProject(entity.project)
             }
-            return match
+            return .resolved(match)
         }
-        if let last = VoiceCaptureLastTarget.load(),
-           let match = available.first(where: { $0.storeId == last.storeId && $0.project == last.project }) {
-            return match
+        guard let preferred = QuickCaptureDefault.load() else {
+            return .ask(.noDefault)
         }
-        return available[0]
+        guard let match = available.first(where: {
+            $0.storeId == preferred.storeId && $0.project == preferred.project
+        }) else {
+            // The store was removed, or the project was deleted on another
+            // machine. Say so — an unexplained question after months of the
+            // same answer is its own kind of silent failure.
+            return .ask(.defaultUnavailable(preferred.project))
+        }
+        return .resolved(match)
     }
 
     // MARK: - Execution
@@ -193,6 +239,18 @@ enum PhrenCapture {
         // Keep the in-app capture sheet defaulting to wherever the last
         // capture went, whichever surface made it.
         VoiceCaptureLastTarget.save(storeId: target.storeId, project: target.project)
+        // A capture made with the phone in a pocket leaves no trace on screen;
+        // the log is where "where did that go?" gets answered later.
+        switch op {
+        case .addNote(_, _, _, let text):
+            CaptureLog.record(kind: .note, storeId: target.storeId, project: target.project,
+                              text: text, source: .siri)
+        case .addTask(_, let text):
+            CaptureLog.record(kind: .task, storeId: target.storeId, project: target.project,
+                              text: text, source: .siri)
+        default:
+            break
+        }
     }
 
     private static func captureOffline(_ op: PendingOp, to target: PhrenCaptureTarget) async throws {

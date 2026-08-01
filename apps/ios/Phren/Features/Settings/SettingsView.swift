@@ -7,6 +7,16 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showAddStore = false
     @State private var removingStore: StoreDescriptor?
+    /// The same writable (store, project) list the App Intents resolve
+    /// against — read through `PhrenCapture` rather than rebuilt from
+    /// `mergedProjects` so the picker can't offer a destination capture
+    /// wouldn't accept (and isn't narrowed by the global store filter).
+    @State private var captureTargets: [PhrenCaptureTarget] = []
+    /// `nil` = "Always ask". Mirrors `QuickCaptureDefault`, held in state so
+    /// the picker has something to bind to.
+    @State private var captureDefaultId: String?
+    @State private var captureLog: [CaptureLogEntry] = []
+    @State private var captureQueue = CaptureQueueState()
     /// Drives the health cards' relative "synced Xm ago" text and staleness
     /// check. A 30s tick is plenty for a 10-minute staleness threshold —
     /// unlike LiveStatusBar this doesn't need per-second precision.
@@ -26,6 +36,7 @@ struct SettingsView: View {
                         StoreHealthCard(
                             context: context,
                             claims: model.claimedElsewhere(storeId: context.id),
+                            queuedCaptures: queuedCaptureCount(storeId: context.id),
                             now: now,
                             onTapFailedOps: {
                                 withAnimation { proxy.scrollTo(Self.needsAttentionAnchor, anchor: .top) }
@@ -40,6 +51,9 @@ struct SettingsView: View {
                 } footer: {
                     Text("A store card turns amber when a sync has failed or gone quiet for more than 10 minutes while the app is open.")
                 }
+
+                quickCaptureSection
+                recentCapturesSection
 
                 Section("Account") {
                     if let user = model.user {
@@ -140,11 +154,21 @@ struct SettingsView: View {
             }
             .phrenScreen()
             .navigationTitle("Settings")
-            .task { failedOps = await model.failedOps() }
+            .task {
+                failedOps = await model.failedOps()
+                await reloadCaptureState()
+            }
+            // Re-reads the log and the queue when anything enters or leaves
+            // the pending queue — which is what a Siri capture landing while
+            // this screen is open, or a flush finishing, looks like from here.
+            .onChange(of: model.syncStatus.pendingCount) {
+                Task { await reloadCaptureState() }
+            }
             .onReceive(healthTicker) { now = $0 }
             .refreshable {
                 await model.pullToRefresh()
                 failedOps = await model.failedOps()
+                await reloadCaptureState()
             }
             .sheet(isPresented: $showAddStore) {
                 NavigationStack {
@@ -189,6 +213,196 @@ struct SettingsView: View {
             }
             }
             }
+        }
+    }
+
+    // MARK: - Quick capture
+
+    /// The one place a capture destination is ever chosen without the user
+    /// present. "Always ask" is the shipping default and stays a first-class
+    /// option: with nine projects attached, a destination the user never
+    /// picked is exactly how a capture disappears.
+    @ViewBuilder
+    private var quickCaptureSection: some View {
+        Section {
+            Picker("Default project", selection: captureDefaultBinding) {
+                Text("Always ask").tag(String?.none)
+                // Keeps a broken default visible (and selected) instead of
+                // rendering an empty row that looks like "Always ask".
+                if let unavailable = unavailableDefault {
+                    Text("\(unavailable.label) — unavailable").tag(String?.some(unavailable.id))
+                }
+                ForEach(captureTargets, id: \.entityId) { target in
+                    Text(target.displayName).tag(String?.some(target.entityId))
+                }
+            }
+            .disabled(captureTargets.isEmpty && unavailableDefault == nil)
+        } header: {
+            Text("Quick capture")
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                if let unavailable = unavailableDefault {
+                    Text("'\(unavailable.label)' isn't in an attached, writable store any more — captures ask where to go until you pick a new default.")
+                        .foregroundStyle(PhrenTheme.warning)
+                }
+                Text("Where a capture goes when you don't name a project: 'Hey Siri, add a task to phren', a Shortcuts tile, or the mic button. With 'Always ask', Siri and Shortcuts ask every time — nothing is ever filed somewhere you didn't choose.")
+            }
+        }
+    }
+
+    /// Writes straight through to `QuickCaptureDefault` so the setting is
+    /// durable the moment it's picked — the App Intents read it from there,
+    /// possibly in a process this view never shares.
+    private var captureDefaultBinding: Binding<String?> {
+        Binding(
+            get: { captureDefaultId },
+            set: { newValue in
+                captureDefaultId = newValue
+                guard let newValue, let parsed = QuickCaptureDefault.parse(entityId: newValue) else {
+                    QuickCaptureDefault.clear()
+                    return
+                }
+                QuickCaptureDefault.save(storeId: parsed.storeId, project: parsed.project)
+            }
+        )
+    }
+
+    /// The configured default when it no longer resolves to a writable
+    /// project. Always store-qualified: when the store itself is what went
+    /// away, its name is the whole explanation.
+    private var unavailableDefault: (id: String, label: String)? {
+        guard let id = captureDefaultId,
+              !captureTargets.contains(where: { $0.entityId == id }),
+              let parsed = QuickCaptureDefault.parse(entityId: id) else { return nil }
+        return (id, "\(parsed.project) · \(model.storeName(for: parsed.storeId))")
+    }
+
+    // MARK: - Recent captures
+
+    /// "Where did that go?", answered without leaving the app. Every capture
+    /// this device made, in order, with its destination and whether it has
+    /// actually left the phone yet.
+    @ViewBuilder
+    private var recentCapturesSection: some View {
+        if !captureLog.isEmpty {
+            Section {
+                ForEach(captureLog) { entry in
+                    let row = CaptureLogRow(
+                        entry: entry,
+                        destination: destinationLabel(entry),
+                        state: captureQueue.state(of: entry),
+                        missing: !projectExists(entry),
+                        now: now
+                    )
+                    // A capture whose project is still here is worth a tap;
+                    // one whose project has gone is still worth showing, with
+                    // the destination it had.
+                    if projectExists(entry) {
+                        NavigationLink {
+                            ProjectDetailView(storeId: entry.storeId, project: entry.project)
+                        } label: {
+                            row
+                        }
+                    } else {
+                        row
+                    }
+                }
+                Button("Clear list") {
+                    CaptureLog.clear()
+                    captureLog = []
+                }
+            } header: {
+                Text("Recent captures")
+            } footer: {
+                Text("The last \(CaptureLog.limit) notes and tasks captured on this device, newest first. Tap one to open the project it went to. Clearing the list doesn't remove anything from your store.")
+            }
+        }
+    }
+
+    private func destinationLabel(_ entry: CaptureLogEntry) -> String {
+        model.hasMultipleStores ? "\(entry.project) · \(model.storeName(for: entry.storeId))" : entry.project
+    }
+
+    private func projectExists(_ entry: CaptureLogEntry) -> Bool {
+        model.storeContexts.first { $0.id == entry.storeId }?
+            .snapshot.projects.contains { $0.name == entry.project } ?? false
+    }
+
+    /// Captures still sitting in this store's pending queue — the ones a Siri
+    /// capture made with the app closed produces, and the reason the health
+    /// card's pending count isn't always something the user did on screen.
+    private func queuedCaptureCount(storeId: String) -> Int {
+        captureLog.filter { $0.storeId == storeId && captureQueue.state(of: $0) == .queued }.count
+    }
+
+    private func reloadCaptureState() async {
+        captureTargets = await PhrenCapture.targets()
+        captureDefaultId = QuickCaptureDefault.load().map {
+            QuickCaptureDefault.entityId(storeId: $0.storeId, project: $0.project)
+        }
+        captureLog = CaptureLog.entries()
+        captureQueue = await CaptureQueueState.sample(from: model)
+    }
+}
+
+/// One line of the capture receipt drawer: what was said, where it went, when,
+/// and whether it has left the device yet.
+private struct CaptureLogRow: View {
+    let entry: CaptureLogEntry
+    let destination: String
+    let state: CaptureSyncState
+    /// The destination project isn't in an attached store any more (removed
+    /// store, or deleted elsewhere) — the row still names where it went.
+    let missing: Bool
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.snippet)
+                .font(.callout)
+                .foregroundStyle(PhrenTheme.text)
+                .lineLimit(2)
+
+            HStack(spacing: 6) {
+                Image(systemName: entry.kind.systemImage)
+                Text(destination)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                if missing {
+                    Text("(not in an attached store)")
+                        .foregroundStyle(PhrenTheme.warning)
+                }
+                Spacer(minLength: 6)
+                Text(relativeTime)
+            }
+            .font(.caption)
+            .foregroundStyle(PhrenTheme.textMuted)
+
+            HStack(spacing: 6) {
+                Label(state.label, systemImage: state.systemImage)
+                    .foregroundStyle(stateColor)
+                Text("·")
+                Text(entry.source.label)
+            }
+            .font(.caption2)
+            .foregroundStyle(PhrenTheme.textDim)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.kind.label): \(entry.snippet). Saved to \(destination), \(relativeTime), \(state.label).")
+    }
+
+    private var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: entry.at, relativeTo: now)
+    }
+
+    private var stateColor: Color {
+        switch state {
+        case .synced: return PhrenTheme.textDim
+        case .queued: return PhrenTheme.amber
+        case .failed: return PhrenTheme.danger
         }
     }
 }
@@ -239,6 +453,11 @@ private struct StoreHealthCard: View {
     /// Per-claimant counts from `AppModel.claimedElsewhere` — projects
     /// physically in this store that `stores.yaml` says belong elsewhere.
     let claims: [(name: String, count: Int)]
+    /// How many of the pending ops are captures this device made by voice or
+    /// from a shortcut. A Siri capture with the app closed queues exactly like
+    /// an in-app edit, so without naming it the count reads as "phren has
+    /// unsent work" with no hint of what.
+    let queuedCaptures: Int
     let now: Date
     let onTapFailedOps: () -> Void
 
@@ -299,6 +518,12 @@ private struct StoreHealthCard: View {
             }
             .font(.caption)
 
+            if queuedCaptures > 0 {
+                Label(queuedCaptureText, systemImage: "mic")
+                    .font(.caption)
+                    .foregroundStyle(PhrenTheme.amber)
+            }
+
             if let error = context.status.lastError {
                 Text(error)
                     .font(.caption)
@@ -319,6 +544,12 @@ private struct StoreHealthCard: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var queuedCaptureText: String {
+        queuedCaptures == 1
+            ? "1 of those is a capture waiting to sync — see Recent captures"
+            : "\(queuedCaptures) of those are captures waiting to sync — see Recent captures"
     }
 
     private func claimText(_ claim: (name: String, count: Int)) -> String {

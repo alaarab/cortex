@@ -610,6 +610,19 @@ final class AppModel {
         return result
     }
 
+    /// Every op still waiting to be pushed, store-qualified. Backs the capture
+    /// log's per-row "synced / waiting to sync" indicator — a capture is still
+    /// on the device exactly as long as its op is in one of these queues.
+    func pendingOps() async -> [(storeId: String, op: PendingOp)] {
+        var result: [(storeId: String, op: PendingOp)] = []
+        for context in storeContexts {
+            for queued in await context.engine.pendingOps() {
+                result.append((storeId: context.id, op: queued.op))
+            }
+        }
+        return result
+    }
+
     /// Current time formatted as the note heading time (HH:MM:SS UTC —
     /// matching `now.toISOString().slice(11,19)` in notes.ts:181). Static so
     /// the App Intents capture path, which may have no model at all, stamps
