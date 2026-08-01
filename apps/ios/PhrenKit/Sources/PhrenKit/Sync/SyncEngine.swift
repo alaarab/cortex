@@ -4,8 +4,10 @@ import Foundation
 ///
 /// Reads: cheap ref poll (ETag'd, 304s are rate-limit-free) → recursive tree →
 /// changed blobs only. Writes: offline-first — every mutation applies to the
-/// local cache immediately, queues a domain op, and flushes FIFO; a sha
-/// conflict triggers refetch → re-apply → retry (bounded), then surfaces.
+/// local cache immediately, queues a domain op, and flushes FIFO with
+/// consecutive same-file ops coalesced into one commit; a sha conflict
+/// triggers refetch → re-apply the whole group → retry (bounded), then parks
+/// the ops individually.
 ///
 /// Live mode: while the app is foregrounded the engine polls continuously so
 /// findings/tasks pushed by an agent on another machine appear within seconds.
@@ -36,7 +38,7 @@ public actor SyncEngine {
     public static let livePollInterval: TimeInterval = 7
     private static let maxWriteAttempts = 3
 
-    private let client: GitHubClient
+    private let client: any GitHubAPI
     private let store: LocalStore
     private let queueURL: URL
     private var queue: PendingOpsQueue
@@ -46,12 +48,15 @@ public actor SyncEngine {
     private var flushTask: Task<Void, Never>?
     private var pullTask: Task<Void, Never>?
     private var pullGeneration = 0
+    /// Tests drive `flushNow()` by hand so a background flush can't push the
+    /// first op of a batch before the rest are queued. Always on in the app.
+    private var autoFlush = true
 
     /// Fires after any content change (remote pull or local apply) and on
     /// status transitions — the app re-reads the snapshot and re-renders.
     private var onUpdate: (@Sendable () -> Void)?
 
-    public init(client: GitHubClient, store: LocalStore, stateDirectory: URL) {
+    public init(client: any GitHubAPI, store: LocalStore, stateDirectory: URL) {
         self.client = client
         self.store = store
         self.queueURL = stateDirectory.appendingPathComponent("pending-ops.json")
@@ -196,8 +201,11 @@ public actor SyncEngine {
     public func enqueue(_ op: PendingOp) async throws {
         // Local apply first — a domain error (empty text, secret, ambiguous
         // match) surfaces to the user immediately and nothing is queued.
-        try await applyLocally(op)
-        queue.pending.append(QueuedOp(op: op))
+        let applied = try await applyLocally(op)
+        var queued = QueuedOp(op: op)
+        queued.paths = applied.paths
+        queued.deletedShas = applied.deletedShas.isEmpty ? nil : applied.deletedShas
+        queue.pending.append(queued)
         queue.save(to: queueURL)
         setStatus { _ in }
         scheduleFlush()
@@ -220,7 +228,7 @@ public actor SyncEngine {
     public func failedOps() -> [QueuedOp] { queue.failed }
 
     private func scheduleFlush() {
-        guard flushTask == nil else { return }
+        guard autoFlush, flushTask == nil else { return }
         flushTask = Task { [weak self] in
             await self?.flush()
             await self?.clearFlushTask()
@@ -229,35 +237,257 @@ public actor SyncEngine {
 
     private func clearFlushTask() {
         flushTask = nil
+        // An op enqueued in the window between `flush` returning and this
+        // running would otherwise sit until the next poll.
+        if !queue.pending.isEmpty { scheduleFlush() }
     }
 
-    /// FIFO flush: push each op's file edits with sha optimistic concurrency.
+    /// Runs a flush pass to completion, awaiting one already in flight.
+    func flushNow() async {
+        if let inFlight = flushTask { await inFlight.value }
+        await flush()
+    }
+
+    func setAutoFlush(_ enabled: Bool) {
+        autoFlush = enabled
+    }
+
+    // MARK: - Flush (coalesced writes)
+
+    /// FIFO flush with op coalescing: consecutive queued ops that write the
+    /// same file ride ONE Contents PUT — one commit — instead of one commit
+    /// each. Batch-approving 40 review items is a single commit to review.md
+    /// rather than 40 sequential ones racing the ~7s live poll.
+    ///
+    /// Grouping never reorders. A group is always a contiguous prefix of the
+    /// queue, so ops on different files still land in the order they were made.
     private func flush() async {
-        while var queued = queue.pending.first {
-            do {
-                try await push(queued.op)
-                queue.pending.removeFirst()
+        while true {
+            let group = nextGroup()
+            guard !group.isEmpty else { return }
+
+            var plan = GroupPlan(ops: group)
+            var parked: [(op: QueuedOp, error: String)] = []
+            var transient: Error?
+            var attempt = 0
+
+            attempts: while !plan.paths.isEmpty {
+                attempt += 1
+                do {
+                    try await write(plan)
+                    break attempts
+                } catch let error as GitHubError where error.isShaConflict {
+                    guard attempt < Self.maxWriteAttempts else {
+                        // Re-applying never converged — park each op so
+                        // "Needs attention" keeps per-item granularity.
+                        parked.append(contentsOf: plan.ops.map {
+                            (op: $0, error: error.localizedDescription)
+                        })
+                        plan = .empty
+                        break attempts
+                    }
+                    // Remote changed underneath the group: refresh and replay
+                    // the whole group onto the new content.
+                    await forgetCachedShas(plan.paths)
+                    await pull(force: true)
+                    let retry = await reapply(plan.ops)
+                    plan = retry.plan
+                    parked.append(contentsOf: retry.parked)
+                    recordReapply(plan.ops)
+                } catch let error as PhrenKitError {
+                    // Domain failure the group can never resolve (a
+                    // non-writable path) — park the ops for the user.
+                    parked.append(contentsOf: plan.ops.map {
+                        (op: $0, error: error.localizedDescription)
+                    })
+                    plan = .empty
+                    break attempts
+                } catch {
+                    transient = error
+                    break attempts
+                }
+            }
+
+            if let transient {
+                // Network/API failure — keep the group queued and stop; the
+                // next sync trigger retries.
+                for index in queue.pending.indices where index < group.count {
+                    queue.pending[index].attempts += 1
+                    queue.pending[index].lastError = transient.localizedDescription
+                }
                 queue.save(to: queueURL)
-                setStatus { _ in }
-            } catch let error as PhrenKitError {
-                // Domain failure after a remote change — the op can never
-                // succeed; park it for the user.
-                queued.lastError = error.localizedDescription
-                queue.pending.removeFirst()
-                queue.failed.append(queued)
-                queue.save(to: queueURL)
-                setStatus { _ in }
-            } catch {
-                // Network/API failure — keep the op queued and stop; the next
-                // sync trigger retries.
-                queued.attempts += 1
-                queued.lastError = error.localizedDescription
-                queue.pending[0] = queued
-                queue.save(to: queueURL)
-                setStatus { $0.lastError = error.localizedDescription }
+                setStatus { $0.lastError = transient.localizedDescription }
                 return
             }
+
+            dropLeading(group)
+            for entry in parked {
+                var failed = entry.op
+                failed.lastError = entry.error
+                queue.failed.append(failed)
+            }
+            queue.save(to: queueURL)
+            setStatus { _ in }
         }
+    }
+
+    /// Longest prefix of the pending queue whose ops all write the same file.
+    private func nextGroup() -> [QueuedOp] {
+        guard let first = queue.pending.first else { return [] }
+        var group: [QueuedOp] = []
+        for queued in queue.pending {
+            guard queued.op.primaryPath == first.op.primaryPath else { break }
+            group.append(queued)
+        }
+        return group
+    }
+
+    /// Removes the flushed group from the head of the queue. Ids are checked
+    /// because `enqueue`/`retryFailed` can append (never prepend) while a
+    /// flush awaits a request.
+    private func dropLeading(_ group: [QueuedOp]) {
+        for queued in group {
+            guard queue.pending.first?.id == queued.id else { return }
+            queue.pending.removeFirst()
+        }
+    }
+
+    /// Drops the cached blob shas of the group's files so the conflict pull
+    /// really re-downloads them. The local copies already carry the group's
+    /// optimistic edits while still tagged with the sha they were pulled at,
+    /// and the pull's sha comparison alone would skip them — the re-apply
+    /// would then replay ops onto content that already has them.
+    private func forgetCachedShas(_ paths: [String]) async {
+        try? await store.updateManifest { manifest in
+            for path in paths { manifest.blobShas.removeValue(forKey: path) }
+        }
+    }
+
+    /// Persists the paths a re-apply produced back onto the queued ops, so a
+    /// later flush of the same group (after a transient failure) pushes what
+    /// the replay actually wrote rather than what the original apply did.
+    private func recordReapply(_ ops: [QueuedOp]) {
+        for updated in ops {
+            guard let index = queue.pending.firstIndex(where: { $0.id == updated.id }) else { continue }
+            queue.pending[index].paths = updated.paths
+            queue.pending[index].deletedShas = updated.deletedShas
+        }
+    }
+
+    /// The write plan for one coalesced group: the files to push, the shas of
+    /// files the group deleted, and the ops the commit message counts.
+    private struct GroupPlan {
+        var ops: [QueuedOp]
+        var paths: [String]
+        var deletedShas: [String: String]
+
+        static let empty = GroupPlan(ops: [], paths: [], deletedShas: [:])
+
+        init(ops: [QueuedOp], paths: [String], deletedShas: [String: String]) {
+            self.ops = ops
+            self.paths = paths
+            self.deletedShas = deletedShas
+        }
+
+        init(ops: [QueuedOp]) {
+            var seen = Set<String>()
+            var paths: [String] = []
+            var deleted: [String: String] = [:]
+            for queued in ops {
+                for path in queued.editedPaths where seen.insert(path).inserted {
+                    paths.append(path)
+                }
+                for (path, sha) in queued.deletedShas ?? [:] { deleted[path] = sha }
+            }
+            // The group's own file goes last. If a secondary write (the
+            // FINDINGS.md mirror of a reject/edit) conflicts, the primary file
+            // is then still untouched remotely, so the refetch → re-apply
+            // round can still find the queue lines the ops address.
+            if let primary = ops.first?.op.primaryPath, let index = paths.firstIndex(of: primary) {
+                paths.append(paths.remove(at: index))
+            }
+            self.init(ops: ops, paths: paths, deletedShas: deleted)
+        }
+    }
+
+    /// One PUT (or DELETE) per file the group touched, all carrying the same
+    /// commit message. The bytes pushed are what the ops already produced in
+    /// the local cache — they were applied in FIFO order as they were made, so
+    /// the file on disk *is* the batch result, serialized once.
+    private func write(_ plan: GroupPlan) async throws {
+        let manifest = await store.currentManifest
+        let message = PendingOp.commitMessage(for: plan.ops.map(\.op))
+        for path in plan.paths {
+            guard LocalStore.isWritablePath(path) else {
+                throw PhrenKitError.validation("Refusing to write non-writable path \(path).")
+            }
+            if let content = await store.read(path) {
+                let response = try await client.putFile(
+                    owner: manifest.owner, repo: manifest.repo, path: path,
+                    branch: manifest.branch, content: Data(content.utf8),
+                    message: message, sha: await store.blobSha(for: path)
+                )
+                try await store.write(path, content: content, blobSha: response.content?.sha)
+            } else if let sha = await store.blobSha(for: path) ?? plan.deletedShas[path] {
+                try await client.deleteFile(
+                    owner: manifest.owner, repo: manifest.repo, path: path,
+                    branch: manifest.branch, message: message, sha: sha
+                )
+                try await store.delete(path)
+            }
+        }
+    }
+
+    /// Refetch → re-apply: replays every op of a conflicted group against the
+    /// freshly pulled content, in queue order, so the batch lands on top of
+    /// whatever changed remotely (ops are fid/text-addressed, so replaying is
+    /// natural). Ops whose target vanished in that remote change can never
+    /// succeed — they come back for individual parking while the rest of the
+    /// group proceeds.
+    private func reapply(_ ops: [QueuedOp]) async -> (plan: GroupPlan, parked: [(op: QueuedOp, error: String)]) {
+        var overlay: [String: String?] = [:]
+        var order: [String] = []
+        var applied: [QueuedOp] = []
+        var parked: [(op: QueuedOp, error: String)] = []
+
+        for queued in ops {
+            do {
+                let edits = try await computeEdits(queued.op, overlay: overlay)
+                for edit in edits {
+                    if overlay.updateValue(edit.content, forKey: edit.path) == nil {
+                        order.append(edit.path)
+                    }
+                }
+                var updated = queued
+                updated.paths = edits.map(\.path)
+                updated.deletedShas = nil
+                applied.append(updated)
+            } catch {
+                parked.append((op: queued, error: error.localizedDescription))
+            }
+        }
+
+        // Materialize the batch so the UI keeps showing the user's edits on
+        // top of the content the forced pull just brought down.
+        var deleted: [String: String] = [:]
+        for path in order {
+            guard let content = overlay[path] else { continue }
+            if let content {
+                try? await store.write(path, content: content, blobSha: nil)
+            } else {
+                if let sha = await store.blobSha(for: path) { deleted[path] = sha }
+                try? await store.delete(path)
+            }
+        }
+        notify()
+
+        for index in applied.indices {
+            let shas = applied[index].paths?.compactMap { path in
+                deleted[path].map { (path, $0) }
+            } ?? []
+            applied[index].deletedShas = shas.isEmpty ? nil : Dictionary(uniqueKeysWithValues: shas)
+        }
+        return (GroupPlan(ops: applied), parked)
     }
 
     // MARK: - Op application
@@ -268,63 +498,40 @@ public actor SyncEngine {
         let content: String?
     }
 
-    /// Applies the op to local cached content only (optimistic UI).
-    private func applyLocally(_ op: PendingOp) async throws {
+    /// Applies the op to local cached content only (optimistic UI), reporting
+    /// the files it touched so the flush knows exactly what to push.
+    @discardableResult
+    private func applyLocally(_ op: PendingOp) async throws -> (paths: [String], deletedShas: [String: String]) {
+        var paths: [String] = []
+        var deletedShas: [String: String] = [:]
         for edit in try await computeEdits(op) {
+            paths.append(edit.path)
             if let content = edit.content {
                 try await store.write(edit.path, content: content, blobSha: nil)
             } else {
+                // Capture the sha first: `delete` drops the manifest entry.
+                if let sha = await store.blobSha(for: edit.path) { deletedShas[edit.path] = sha }
                 try await store.delete(edit.path)
             }
         }
         notify()
+        return (paths, deletedShas)
     }
 
-    /// Pushes the op: recompute the edits against current local content and
-    /// PUT each file; on sha conflict, pull fresh content and re-apply the
-    /// domain op (ops are fid/text-addressed so reapplication is natural).
-    private func push(_ op: PendingOp) async throws {
-        var attempt = 0
-        while true {
-            attempt += 1
-            do {
-                let manifest = await store.currentManifest
-                for edit in try await computeEdits(op) {
-                    guard LocalStore.isWritablePath(edit.path) else {
-                        throw PhrenKitError.validation("Refusing to write non-writable path \(edit.path).")
-                    }
-                    let sha = await store.blobSha(for: edit.path)
-                    if let content = edit.content {
-                        let response = try await client.putFile(
-                            owner: manifest.owner, repo: manifest.repo, path: edit.path,
-                            branch: manifest.branch, content: Data(content.utf8),
-                            message: op.commitMessage, sha: sha
-                        )
-                        try await store.write(edit.path, content: content, blobSha: response.content?.sha)
-                    } else if let sha {
-                        try await client.deleteFile(
-                            owner: manifest.owner, repo: manifest.repo, path: edit.path,
-                            branch: manifest.branch, message: op.commitMessage, sha: sha
-                        )
-                        try await store.delete(edit.path)
-                    }
-                }
-                return
-            } catch let error as GitHubError {
-                guard case .shaConflict = error, attempt < Self.maxWriteAttempts else { throw error }
-                // Remote changed underneath us: refresh and re-apply.
-                await pull(force: true)
-            }
-        }
+    /// Current content for a path, honoring edits an earlier op in the same
+    /// coalesced group already made but that are not on disk yet.
+    private func read(_ path: String, overlay: [String: String?]) async -> String? {
+        if let pending = overlay[path] { return pending }
+        return await store.read(path)
     }
 
     /// Maps a domain op to concrete file edits against current local content.
     /// Each case mirrors the CLI handler documented on the file types.
-    private func computeEdits(_ op: PendingOp) async throws -> [FileEdit] {
+    private func computeEdits(_ op: PendingOp, overlay: [String: String?] = [:]) async throws -> [FileEdit] {
         let project = op.project
         switch op {
         case .addFinding(_, let text, let type):
-            var file = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+            var file = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             var provenance = FindingProvenance(source: "human", tool: "phren-ios")
             provenance.machine = writeContext.machine
             provenance.actor = writeContext.actor
@@ -335,29 +542,29 @@ public actor SyncEngine {
             return [FileEdit(path: "\(project)/FINDINGS.md", content: file.content)]
 
         case .editFinding(_, let match, let newText):
-            var file = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+            var file = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             try file.edit(project: project, oldText: match, newText: newText)
             return [FileEdit(path: "\(project)/FINDINGS.md", content: file.content)]
 
         case .removeFinding(_, let match):
-            var file = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+            var file = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             try file.remove(project: project, match: match)
             return [FileEdit(path: "\(project)/FINDINGS.md", content: file.content)]
 
         case .approveQueue(_, let line):
-            var file = ReviewFile(content: await store.read("\(project)/review.md") ?? "")
+            var file = ReviewFile(content: await read("\(project)/review.md", overlay: overlay) ?? "")
             try file.approve(lineText: line)
             return [FileEdit(path: "\(project)/review.md", content: file.content)]
 
         case .rejectQueue(_, let line):
             // access.ts:709 — remove the queue line AND the finding; a
             // missing finding is tolerated.
-            var review = ReviewFile(content: await store.read("\(project)/review.md") ?? "")
+            var review = ReviewFile(content: await read("\(project)/review.md", overlay: overlay) ?? "")
             try review.reject(lineText: line)
             var edits = [FileEdit(path: "\(project)/review.md", content: review.content)]
             let needle = ReviewFile.findingsTextFor(lineText: line)
             if !needle.isEmpty {
-                var findings = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+                var findings = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
                 if (try? findings.remove(project: project, match: needle)) != nil {
                     edits.append(FileEdit(path: "\(project)/FINDINGS.md", content: findings.content))
                 }
@@ -366,12 +573,12 @@ public actor SyncEngine {
 
         case .editQueue(_, let line, let newText):
             // access.ts:728 — rewrite the queue line, tolerantly edit the finding.
-            var review = ReviewFile(content: await store.read("\(project)/review.md") ?? "")
+            var review = ReviewFile(content: await read("\(project)/review.md", overlay: overlay) ?? "")
             let oldNeedle = ReviewFile.findingsTextFor(lineText: line)
             let trimmed = try review.edit(lineText: line, newText: newText)
             var edits = [FileEdit(path: "\(project)/review.md", content: review.content)]
             if !oldNeedle.isEmpty {
-                var findings = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+                var findings = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
                 if (try? findings.edit(project: project, oldText: oldNeedle, newText: trimmed)) != nil {
                     edits.append(FileEdit(path: "\(project)/FINDINGS.md", content: findings.content))
                 }
@@ -380,19 +587,19 @@ public actor SyncEngine {
 
         case .addNote(_, let date, let time, let text):
             let path = "\(project)/notes/\(date).md"
-            var file = NotesFile(project: project, date: date, content: await store.read(path))
+            var file = NotesFile(project: project, date: date, content: await read(path, overlay: overlay))
             try file.add(text: text, time: time)
             return [FileEdit(path: path, content: file.render())]
 
         case .editNote(_, let date, let stableId, let text):
             let path = "\(project)/notes/\(date).md"
-            var file = NotesFile(project: project, date: date, content: await store.read(path))
+            var file = NotesFile(project: project, date: date, content: await read(path, overlay: overlay))
             try file.edit(stableId: stableId, text: text)
             return [FileEdit(path: path, content: file.render())]
 
         case .removeNote(_, let date, let stableId):
             let path = "\(project)/notes/\(date).md"
-            var file = NotesFile(project: project, date: date, content: await store.read(path))
+            var file = NotesFile(project: project, date: date, content: await read(path, overlay: overlay))
             try file.remove(stableId: stableId)
             // render() returns nil when the last note was removed → delete file.
             return [FileEdit(path: path, content: file.render())]
@@ -400,14 +607,14 @@ public actor SyncEngine {
         case .promoteNote(_, let date, let stableId, let findingType):
             // core/note.ts:13 — refuse if promoted; add finding; mark note.
             let notePath = "\(project)/notes/\(date).md"
-            var notesFile = NotesFile(project: project, date: date, content: await store.read(notePath))
+            var notesFile = NotesFile(project: project, date: date, content: await read(notePath, overlay: overlay))
             guard let note = notesFile.notes.first(where: { $0.stableId == stableId }) else {
                 throw PhrenKitError.notFound("No note matching \"nid:\(stableId)\" was found.")
             }
             guard !note.promoted else {
                 throw PhrenKitError.validation("Note nid:\(stableId) has already been promoted.")
             }
-            var findings = FindingsFile(content: await store.read("\(project)/FINDINGS.md") ?? "")
+            var findings = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
             var provenance = FindingProvenance(source: "human", tool: "phren-ios")
             provenance.machine = writeContext.machine
             provenance.actor = writeContext.actor
@@ -422,22 +629,22 @@ public actor SyncEngine {
             ]
 
         case .addTask(_, let text):
-            var file = TasksFile(project: project, content: await store.read("\(project)/tasks.md"))
+            var file = TasksFile(project: project, content: await read("\(project)/tasks.md", overlay: overlay))
             try file.add(text)
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
 
         case .completeTask(_, let match):
-            var file = TasksFile(project: project, content: await store.read("\(project)/tasks.md"))
+            var file = TasksFile(project: project, content: await read("\(project)/tasks.md", overlay: overlay))
             try file.complete(match)
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
 
         case .removeTask(_, let match):
-            var file = TasksFile(project: project, content: await store.read("\(project)/tasks.md"))
+            var file = TasksFile(project: project, content: await read("\(project)/tasks.md", overlay: overlay))
             try file.remove(match)
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
 
         case .updateTask(_, let match, let text, let priority, let section):
-            var file = TasksFile(project: project, content: await store.read("\(project)/tasks.md"))
+            var file = TasksFile(project: project, content: await read("\(project)/tasks.md", overlay: overlay))
             try file.update(match, updates: .init(
                 text: text,
                 priority: priority.flatMap(PhrenTask.Priority.init(rawValue:)),

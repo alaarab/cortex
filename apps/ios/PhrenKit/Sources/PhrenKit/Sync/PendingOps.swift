@@ -31,18 +31,64 @@ public enum PendingOp: Codable, Equatable, Sendable {
         }
     }
 
+    /// The `(kind)` token of the commit message — the session-stop hook's
+    /// vocabulary (cli/session-stop.ts:354-378).
+    public var commitKind: String {
+        switch self {
+        case .addFinding, .editFinding, .removeFinding: return "findings"
+        case .approveQueue, .rejectQueue, .editQueue: return "update"
+        case .addNote, .editNote, .removeNote, .promoteNote: return "update"
+        case .addTask, .completeTask, .removeTask, .updateTask: return "task"
+        }
+    }
+
     /// Commit-message summary following the session-stop hook convention
     /// (`phren: <project>(findings)` — cli/session-stop.ts:354-378), suffixed
     /// with the app as the writing tool.
     public var commitMessage: String {
-        let kind: String
+        "phren: \(project)(\(commitKind)) via ios"
+    }
+
+    /// Commit summary for a coalesced group of ops sharing one commit. A
+    /// single op keeps the plain shape; a batch appends its size, so a
+    /// 12-item approve reads `phren: myproj(update x12) via ios`.
+    public static func commitMessage(for ops: [PendingOp]) -> String {
+        guard let first = ops.first else { return "phren: sync via ios" }
+        guard ops.count > 1 else { return first.commitMessage }
+        return "phren: \(first.project)(\(first.commitKind) x\(ops.count)) via ios"
+    }
+
+    /// The document this op owns — the coalescing key. Ops that also touch a
+    /// second file (reject/edit mirror into FINDINGS.md, promote writes both)
+    /// still group by the file their domain operation addresses. The project
+    /// is part of the path, so two projects' review.md files never coalesce.
+    public var primaryPath: String {
         switch self {
-        case .addFinding, .editFinding, .removeFinding: kind = "findings"
-        case .approveQueue, .rejectQueue, .editQueue: kind = "update"
-        case .addNote, .editNote, .removeNote, .promoteNote: kind = "update"
-        case .addTask, .completeTask, .removeTask, .updateTask: kind = "task"
+        case .addFinding, .editFinding, .removeFinding:
+            return "\(project)/FINDINGS.md"
+        case .approveQueue, .rejectQueue, .editQueue:
+            return "\(project)/review.md"
+        case .addNote(_, let date, _, _), .editNote(_, let date, _, _),
+             .removeNote(_, let date, _), .promoteNote(_, let date, _, _):
+            return "\(project)/notes/\(date).md"
+        case .addTask, .completeTask, .removeTask, .updateTask:
+            return "\(project)/tasks.md"
         }
-        return "phren: \(project)(\(kind)) via ios"
+    }
+
+    /// Every file the op can write, in the order `SyncEngine.computeEdits`
+    /// emits them. Only a fallback: the engine records the paths an op
+    /// actually edited when it applies it, and queue entries written by an
+    /// older build have none.
+    public var editablePaths: [String] {
+        switch self {
+        case .rejectQueue, .editQueue:
+            return [primaryPath, "\(project)/FINDINGS.md"]
+        case .promoteNote:
+            return ["\(project)/FINDINGS.md", primaryPath]
+        default:
+            return [primaryPath]
+        }
     }
 
     /// A short human label for the pending/failed ops UI.
@@ -72,12 +118,27 @@ public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
     public let queuedAt: Date
     public var attempts: Int
     public var lastError: String?
+    /// Repo paths this op actually edited when it was applied to the local
+    /// cache, in edit order. The flush pushes exactly these files, so a
+    /// tolerated no-op (a reject whose finding was already gone) never sends
+    /// an unchanged file. Nil for entries persisted before this was recorded —
+    /// `editedPaths` then falls back to the op's static shape.
+    public var paths: [String]?
+    /// Blob SHAs of files the op deleted locally, captured before the delete:
+    /// `LocalStore.delete` drops the manifest entry, so the remote DELETE
+    /// would otherwise have no sha to send.
+    public var deletedShas: [String: String]?
 
     public init(op: PendingOp) {
         self.id = UUID()
         self.op = op
         self.queuedAt = Date()
         self.attempts = 0
+    }
+
+    /// Files the flush must push for this op.
+    public var editedPaths: [String] {
+        paths ?? op.editablePaths
     }
 }
 

@@ -108,6 +108,13 @@ public enum GitHubError: Error, LocalizedError, Sendable {
     case invalidResponse
     case treeTruncated
 
+    /// True for the 409/422 optimistic-concurrency failure the sync engine
+    /// recovers from by refetching and re-applying.
+    public var isShaConflict: Bool {
+        if case .shaConflict = self { return true }
+        return false
+    }
+
     public var errorDescription: String? {
         switch self {
         case .http(let status, let message):
