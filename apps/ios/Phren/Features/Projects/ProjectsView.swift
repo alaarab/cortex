@@ -24,6 +24,9 @@ struct ProjectsView: View {
                                 if model.hasMultipleStores {
                                     TagChip(text: item.storeName, role: .store)
                                 }
+                                if let claimant = model.claimingStoreName(for: item) {
+                                    ClaimBadge(storeName: claimant)
+                                }
                             }
                             HStack(spacing: 10) {
                                 Label("\(item.project.findingCount)", systemImage: "lightbulb")
@@ -72,6 +75,26 @@ struct ProjectsView: View {
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
         }
+    }
+}
+
+/// Warns that `stores.yaml` claims this project for a different, non-primary
+/// store than the one it's physically sitting in — e.g. an employer's
+/// projects that leaked into a personal repo (see AppModel.claimingStoreName).
+/// A local view rather than an addition to Components.swift's `TagChip`:
+/// this branch owns ProjectsView.swift's row content only, not the shared
+/// component file, and `TagChip` has no icon slot anyway.
+private struct ClaimBadge: View {
+    let storeName: String
+
+    var body: some View {
+        Label(storeName, systemImage: "person.2")
+            .font(.caption2.monospaced().weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(PhrenTheme.warning.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(PhrenTheme.warning.opacity(0.45), lineWidth: 1))
+            .foregroundStyle(PhrenTheme.warning)
     }
 }
 
