@@ -19,6 +19,7 @@ apps/ios/
   Phren/                 # SwiftUI app target
     AppModel.swift       # root state: auth, store, snapshot, sync status
     WidgetBridge.swift   # writes the JSON snapshot the widgets read
+    Intents/             # App Intents: "Hey Siri, add a task to phren"
     Onboarding/          # welcome → sign-in → repo picker → initial sync
     Features/            # Projects, Review, Tasks, Search, Settings tabs
   PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
@@ -148,6 +149,59 @@ The App Group only needs to be provisioned with an actual Apple Developer
 account for a **signed** build to a device or for the app and widget to
 actually share data; an unsigned `xcodebuild build` (e.g. CI) builds and
 embeds the extension fine regardless.
+
+## Siri, Shortcuts, and the Action Button
+
+"Hey Siri, add a task to phren" — from a locked phone, mid-walk, without a
+screen. Two App Intents (`Phren/Intents/`) back it:
+
+| Intent | Phrases (every one must contain the app name) |
+| --- | --- |
+| `AddPhrenTaskIntent` | "Add a task to phren", "Add a phren task", "New phren task", "Queue a task in phren", "Add a task to `<project>` in phren" |
+| `AddPhrenNoteIntent` | "Add a note to phren", "Add a phren note", "New phren note", "Capture a thought in phren", "Add a note to `<project>` in phren" |
+
+Siri collects the text itself (`requestValueDialog`: "What's the task?" /
+"What should the note say?") and confirms with "Added to `<project>`." Both
+appear in the Shortcuts app as **Add Task** / **Add Note** under Capture, so
+binding one to the Action Button needs nothing beyond the app being installed.
+
+**Where it lands.** Naming a project is optional; without one the capture goes
+to the last project anything was captured into — the same
+`VoiceCaptureLastTarget` the in-app voice sheet defaults to, written by both
+surfaces — falling back to the first writable project.
+
+**Hearing the name.** Dictation has no entry for "phren" and reliably hears
+"friend" or "fren", so `INAlternativeAppNames` in the app's Info.plist
+registers both (plus a "fren" pronunciation hint). Project names get the same
+treatment in reverse: `ProjectEntityQuery` strips everything but letters and
+digits from both the spoken fragment and the slug, so "alpha lens" matches
+`alphalens`. Every candidate that survives is returned, best match first —
+when "alpha lens" could equally be `alpha-lens-website`, Siri asks instead of
+guessing. A single candidate resolves silently.
+
+**How it runs.** `openAppWhenRun` is false: intents execute inside the app's
+own process, which the system launches in the background if it isn't already
+running. That gives two worlds, and the capture path handles both:
+
+- **App alive** — `AppModel.current` (a weak static hook set in the model's
+  init) has open store contexts, so the op goes through the normal
+  `AppModel.enqueue`: local cache, pending queue, sync engine, and widget
+  snapshot all see it exactly as they would from a tap.
+- **Cold background launch** — the App struct is constructed, but `bootstrap()`
+  never runs (it's driven by a `.task` on a view, and no scene connects), so
+  there are no store contexts. The capture path then opens the target store's
+  `LocalStore` itself and hands it to a `SyncEngine` wired to a client that
+  refuses every request. `enqueue` still does its usual apply-locally +
+  append-to-`pending-ops.json` — the queue file is never written by anything
+  but PhrenKit's own code — while the flush it schedules fails instantly and
+  leaves the op queued for the next foreground sync.
+
+Capture never requires the network and never reads the Keychain, which is what
+lets `authenticationPolicy = .alwaysAllowed` be safe enough to accept: someone
+holding a locked phone can dictate a task into the queue, but nothing is read
+back, nothing is deleted, and the GitHub token is never touched. The local
+files are protected until the first unlock after boot, so a capture attempted
+before the phone has ever been unlocked will fail.
 
 ## Multiple stores
 
