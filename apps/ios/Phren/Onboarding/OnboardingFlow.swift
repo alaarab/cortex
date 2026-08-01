@@ -233,7 +233,14 @@ struct RepoPickerList: View {
     @Environment(AppModel.self) private var model
     @State private var repos: [GitHubRepo] = []
     @State private var phrenStoreNames: Set<String> = []
+    /// Repos the token can list (via `listAllRepos`) but that answered
+    /// 401/403 probing for `phren.root.yaml` — a fine-grained token can have
+    /// enough scope to list a repo's metadata but not its contents. Counted
+    /// rather than silently folded into "not a store" so a scope problem
+    /// never looks identical to "you just haven't set one up".
+    @State private var noAccessCount = 0
     @State private var loading = true
+    @State private var probing = false
     @State private var loadError: String?
     @State private var error: String?
     @State private var manualEntry = ""
@@ -261,12 +268,33 @@ struct RepoPickerList: View {
         !loading && loadError == nil && !repos.isEmpty && repos.allSatisfy { !$0.isPrivate }
     }
 
+    /// The `.noAccess` count phrased as a footer message, or nil once there's
+    /// nothing to report — mirrors `onlyPublicReposListed`'s "describe the
+    /// scope gap, don't just hide the repo" approach for the other shape a
+    /// token-scope mismatch takes (visible in the list, unreadable at the
+    /// contents endpoint).
+    private var noAccessMessage: String? {
+        guard noAccessCount > 0 else { return nil }
+        let subject = noAccessCount == 1 ? "1 repository answers" : "\(noAccessCount) repositories answer"
+        let pronoun = noAccessCount == 1 ? "it" : "them"
+        return "\(subject) a permissions error checking for phren.root.yaml — your token can list \(pronoun) but not read contents. Add Contents: Read and write under Repository access on GitHub, then pull to refresh."
+    }
+
     var body: some View {
         List {
-            if !likelyStores.isEmpty {
-                Section("Phren stores") {
-                    ForEach(likelyStores) { repo in
-                        repoRow(repo, isStore: true)
+            if !likelyStores.isEmpty || probing {
+                Section {
+                    if likelyStores.isEmpty {
+                        HStack { ProgressView().controlSize(.small); Text("Checking your repositories for phren stores…") }
+                    } else {
+                        ForEach(likelyStores) { repo in
+                            repoRow(repo, isStore: true)
+                        }
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text("Phren stores")
+                        if probing { ProgressView().controlSize(.mini) }
                     }
                 }
             }
@@ -287,7 +315,9 @@ struct RepoPickerList: View {
             } header: {
                 Text(likelyStores.isEmpty ? "Your repositories" : "Other repositories")
             } footer: {
-                if onlyPublicReposListed {
+                if let noAccessMessage {
+                    Text(noAccessMessage)
+                } else if onlyPublicReposListed {
                     Text("Only public repositories are listed. If your phren store repo is private, your token doesn't have access to it yet — add the repo under Repository access on GitHub, then pull to refresh.")
                 }
             }
@@ -346,21 +376,62 @@ struct RepoPickerList: View {
         .disabled(alreadyAdded)
     }
 
+    /// Fetches every page of repos (bounded at 5 — accounts with hundreds of
+    /// repos used to keep their store off the picker entirely when only page
+    /// 1 was fetched), then probes all of them for `phren.root.yaml`.
+    ///
+    /// The list renders as soon as `repos` is set — `loading` flips to
+    /// `false` before probing starts, not after — and the "Phren stores"
+    /// section fills in as probes complete, so a large account never blocks
+    /// the whole picker on one request at a time the way `.prefix(10)` did.
     private func load() async {
         loading = true
         loadError = nil
-        defer { loading = false }
+        phrenStoreNames = []
+        noAccessCount = 0
         do {
-            repos = try await model.client.listRepos()
-            // Probe the most recently pushed repos for phren.root.yaml —
-            // repo search is heavily rate-limited, direct probes are not.
-            for repo in repos.prefix(10) {
-                if await model.client.isPhrenStore(owner: repo.owner.login, name: repo.name) {
-                    phrenStoreNames.insert(repo.fullName)
-                }
-            }
+            repos = try await model.client.listAllRepos(maxPages: 5)
         } catch {
             loadError = error.localizedDescription
+            loading = false
+            return
+        }
+        loading = false
+        probing = true
+        await probeAll(repos)
+        probing = false
+    }
+
+    /// Bounded-concurrency probe (~8 in flight) over every listed repo. Each
+    /// candidate already came from `listAllRepos`, so `probeStore(_:)`'s
+    /// visible-by-construction overload is used — a 404 there is unambiguous
+    /// ("no manifest"), so it costs exactly one request per repo, not two.
+    private func probeAll(_ candidates: [GitHubRepo]) async {
+        let maxConcurrent = 8
+        var pending = candidates[...]
+
+        await withTaskGroup(of: (String, GitHubClient.StoreProbe).self) { group in
+            func addNext() {
+                guard let repo = pending.popFirst() else { return }
+                group.addTask {
+                    (repo.fullName, await model.client.probeStore(repo))
+                }
+            }
+            for _ in 0..<maxConcurrent { addNext() }
+            while let (fullName, probe) = await group.next() {
+                switch probe {
+                case .isStore:
+                    phrenStoreNames.insert(fullName)
+                case .noAccess:
+                    // Visible in the list, but the token can't read its
+                    // contents — a scope gap, not "not a store". Counted so
+                    // the footer can say so instead of dropping the repo.
+                    noAccessCount += 1
+                case .notStore, .error:
+                    break
+                }
+                addNext()
+            }
         }
     }
 

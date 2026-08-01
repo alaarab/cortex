@@ -7,12 +7,40 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showAddStore = false
     @State private var removingStore: StoreDescriptor?
+    /// Drives the health cards' relative "synced Xm ago" text and staleness
+    /// check. A 30s tick is plenty for a 10-minute staleness threshold —
+    /// unlike LiveStatusBar this doesn't need per-second precision.
+    @State private var now = Date()
+    private let healthTicker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+
+    private static let needsAttentionAnchor = "needs-attention"
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 ActionErrorBanner()
+                ScrollViewReader { proxy in
                 Form {
+                Section {
+                    ForEach(model.storeContexts) { context in
+                        StoreHealthCard(
+                            context: context,
+                            claims: model.claimedElsewhere(storeId: context.id),
+                            now: now,
+                            onTapFailedOps: {
+                                withAnimation { proxy.scrollTo(Self.needsAttentionAnchor, anchor: .top) }
+                            }
+                        )
+                    }
+                    ForEach(Array(model.duplicateProjectGroups.enumerated()), id: \.offset) { _, group in
+                        DuplicateProjectHintRow(names: group)
+                    }
+                } header: {
+                    Text("Store health")
+                } footer: {
+                    Text("A store card turns amber when a sync has failed or gone quiet for more than 10 minutes while the app is open.")
+                }
+
                 Section("Account") {
                     if let user = model.user {
                         LabeledContent("GitHub", value: "@\(user.login)")
@@ -102,6 +130,7 @@ struct SettingsView: View {
                     } footer: {
                         Text("These changes couldn't be applied — usually because the item changed on another machine. Retry or discard them.")
                     }
+                    .id(Self.needsAttentionAnchor)
                 }
 
                 Section("About") {
@@ -112,6 +141,7 @@ struct SettingsView: View {
             .phrenScreen()
             .navigationTitle("Settings")
             .task { failedOps = await model.failedOps() }
+            .onReceive(healthTicker) { now = $0 }
             .refreshable {
                 await model.pullToRefresh()
                 failedOps = await model.failedOps()
@@ -158,6 +188,7 @@ struct SettingsView: View {
                 }
             }
             }
+            }
         }
     }
 }
@@ -193,5 +224,131 @@ struct StoreRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Glanceable per-store diagnostics: the whole point of the "your store had
+/// silently leaked projects / silently stopped syncing for two months" story
+/// is that nothing surfaced it until someone went looking. This card is the
+/// surface — it renders in the warning color the moment any of its signals
+/// (failed ops, a sync gone quiet, a read-only token, or a stores.yaml claim)
+/// needs a look, rather than waiting for the user to dig into "Stores" or
+/// "Needs attention" separately.
+private struct StoreHealthCard: View {
+    let context: StoreContext
+    /// Per-claimant counts from `AppModel.claimedElsewhere` — projects
+    /// physically in this store that `stores.yaml` says belong elsewhere.
+    let claims: [(name: String, count: Int)]
+    let now: Date
+    let onTapFailedOps: () -> Void
+
+    /// "No successful sync in > 10 minutes" only means something while the
+    /// store is actively polling — a deliberately paused store isn't stale,
+    /// it's just off.
+    private var isStale: Bool {
+        guard context.status.isLive, let last = context.status.lastSyncedAt else { return false }
+        return now.timeIntervalSince(last) > 600
+    }
+
+    private var isWarning: Bool {
+        context.status.failedCount > 0 || isStale || context.status.lastError != nil
+    }
+
+    private var indicatorColor: Color {
+        if isWarning { return PhrenTheme.warning }
+        return context.status.isLive ? PhrenTheme.success : PhrenTheme.textDim
+    }
+
+    private var lastSyncText: String {
+        guard let last = context.status.lastSyncedAt else { return "not synced yet" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return "synced \(formatter.localizedString(for: last, relativeTo: now))"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 8, height: 8)
+                Text(context.descriptor.displayName)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Text(context.status.isLive ? "live" : "paused")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(context.status.isLive ? PhrenTheme.cyan : PhrenTheme.textDim)
+            }
+
+            Text(lastSyncText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 14) {
+                if context.status.pendingCount > 0 {
+                    Label("\(context.status.pendingCount) pending", systemImage: "arrow.up.circle")
+                        .foregroundStyle(PhrenTheme.amber)
+                }
+                if context.status.failedCount > 0 {
+                    Button(action: onTapFailedOps) {
+                        Label("\(context.status.failedCount) failed", systemImage: "exclamationmark.triangle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(PhrenTheme.danger)
+                }
+            }
+            .font(.caption)
+
+            if let error = context.status.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(PhrenTheme.danger)
+                    .lineLimit(2)
+            }
+
+            if !context.descriptor.canPush {
+                Label("Read-only — your token can't push to this repo", systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(PhrenTheme.amber)
+            }
+
+            ForEach(claims, id: \.name) { claim in
+                Label(claimText(claim), systemImage: "person.2")
+                    .font(.caption)
+                    .foregroundStyle(PhrenTheme.amber)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func claimText(_ claim: (name: String, count: Int)) -> String {
+        let plural = claim.count == 1 ? "project" : "projects"
+        let verb = claim.count == 1 ? "is" : "are"
+        let pronoun = claim.count == 1 ? "it" : "they"
+        return "\(claim.count) \(plural) in this store \(verb) claimed by '\(claim.name)' — \(pronoun) may belong in that store."
+    }
+}
+
+/// Awareness-only nudge for near-duplicate project names (Task: canonical-key
+/// normalization) — e.g. `max4liveplugins` vs `max4live-plugins` sitting side
+/// by side unnoticed. No merge/rename action: this only names the pattern.
+private struct DuplicateProjectHintRow: View {
+    let names: [String]
+
+    var body: some View {
+        Label(sentence, systemImage: "doc.on.doc")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var sentence: String {
+        let joined: String
+        switch names.count {
+        case 0: joined = ""
+        case 1: joined = names[0]
+        case 2: joined = "\(names[0]) and \(names[1])"
+        default: joined = names.dropLast().joined(separator: ", ") + ", and \(names.last!)"
+        }
+        return "\(joined) look like the same project."
     }
 }

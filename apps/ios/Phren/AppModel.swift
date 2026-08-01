@@ -86,6 +86,17 @@ final class AppModel {
     var storeFilter: String?
     var lastActionError: String?
 
+    /// Parsed `stores.yaml`, read from the primary store's local cache (see
+    /// `refreshStoresManifest`). Powers the claim-awareness badges in
+    /// Projects and the health-section summary in Settings.
+    private(set) var storesManifest = StoresManifest()
+    /// Last raw content parsed into `storesManifest`, so a refresh only
+    /// re-parses when the file actually changed — which, since `stores.yaml`
+    /// is a synced root path (LocalStore.isSyncedPath), only happens when the
+    /// store's ref sha moves. This is what keys the re-parse to the ref sha
+    /// without fetching the file separately on every ~7s poll.
+    private var lastStoresYAMLRaw: String?
+
     let client = GitHubClient()
 
     private static let storesDefaultsKey = "phren.stores"
@@ -101,6 +112,14 @@ final class AppModel {
     func canPush(storeId: String) -> Bool {
         storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? true
     }
+
+    /// The store treated as "primary" for `stores.yaml` sourcing: the first
+    /// one added. The app has no per-store equivalent of the registry's own
+    /// `role: primary` (that's a property of entries *inside* stores.yaml,
+    /// not of the app's GitHub-repo store list) — first-added is the closest
+    /// stand-in, and matches how a single pre-existing store migrates in as
+    /// the sole (and therefore first) entry.
+    private var primaryStoreContext: StoreContext? { storeContexts.first }
 
     // MARK: - Merged accessors
 
@@ -156,6 +175,69 @@ final class AppModel {
 
     var totalReviewCount: Int {
         storeContexts.reduce(0) { $0 + $1.snapshot.reviewQueue.count }
+    }
+
+    // MARK: - stores.yaml claim awareness
+
+    /// The claiming store's display name, if `stores.yaml` says this project
+    /// belongs elsewhere — surfaced as a warning chip on its Projects row.
+    func claimingStoreName(for item: StoreProject) -> String? {
+        let physicalName = storeContexts.first { $0.id == item.storeId }?.descriptor.displayName
+        return storesManifest.claimingEntry(for: item.project.name, physicalStoreName: physicalName)?.name
+    }
+
+    /// Per-claimant counts of this store's projects that `stores.yaml` says
+    /// belong to a different store — one row per claimant in the Settings
+    /// health card ("3 projects in this store are claimed by 'work-shared'").
+    func claimedElsewhere(storeId: String) -> [(name: String, count: Int)] {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else { return [] }
+        var counts: [String: Int] = [:]
+        for project in context.snapshot.projects {
+            if let entry = storesManifest.claimingEntry(for: project.name, physicalStoreName: context.descriptor.displayName) {
+                counts[entry.name, default: 0] += 1
+            }
+        }
+        return counts.sorted { $0.key < $1.key }.map { (name: $0.key, count: $0.value) }
+    }
+
+    /// Groups of distinct project names (across every attached store) that
+    /// normalize to the same canonical key — a subtle nudge for
+    /// `max4liveplugins` vs `max4live-plugins`-style near-duplicates that
+    /// nobody notices because nothing ever puts them side by side.
+    var duplicateProjectGroups: [[String]] {
+        let names = Set(storeContexts.flatMap { $0.snapshot.projects.map(\.name) })
+        var byKey: [String: [String]] = [:]
+        for name in names {
+            byKey[Self.canonicalProjectKey(name), default: []].append(name)
+        }
+        return byKey.values
+            .filter { $0.count > 1 }
+            .map { $0.sorted() }
+            .sorted { $0[0] < $1[0] }
+    }
+
+    private static func canonicalProjectKey(_ name: String) -> String {
+        name.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
+    }
+
+    /// Re-parses `stores.yaml` from the primary store's local cache when its
+    /// content has changed since the last refresh. `LocalStore` already
+    /// mirrors `stores.yaml` as part of the normal recursive-tree sync
+    /// (`LocalStore.isSyncedPath`), so this is a local file read, not a
+    /// network call — the file's content (and hence the raw-content equality
+    /// check below) only changes when the store's ref sha moves, which is
+    /// exactly the "once per sync generation, keyed on the ref sha" the file
+    /// needs to respect the live ~7s poll.
+    private func refreshStoresManifest() async {
+        guard let primary = primaryStoreContext else {
+            storesManifest = .empty
+            lastStoresYAMLRaw = nil
+            return
+        }
+        let raw = await primary.store.read("stores.yaml")
+        guard raw != lastStoresYAMLRaw else { return }
+        lastStoresYAMLRaw = raw
+        storesManifest = raw.map(StoresManifest.parse) ?? .empty
     }
 
     // MARK: - Lifecycle
@@ -368,6 +450,7 @@ final class AppModel {
             (store: $0.id, snapshot: $0.snapshot)
         })
         syncStatus = aggregateStatus()
+        await refreshStoresManifest()
     }
 
     private func aggregateStatus() -> SyncEngine.Status {
