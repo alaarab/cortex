@@ -57,18 +57,45 @@ public enum PendingOp: Codable, Equatable, Sendable {
     }
 
     /// Commit summary for a coalesced group of ops sharing one commit. A
-    /// single op keeps the plain shape; a batch appends its size, so a
-    /// 12-item approve reads `phren: myproj(update x12) via ios`.
+    /// single op keeps the plain shape; a batch aggregates per project (in
+    /// first-seen order) with per-kind counts, matching the session-stop
+    /// hook's multi-project shape: a 12-item approve reads
+    /// `phren: myproj(update x12) via ios`, and a cross-project batch reads
+    /// `phren: proja(update x3) projb(update x2,task) via ios`.
     public static func commitMessage(for ops: [PendingOp]) -> String {
         guard let first = ops.first else { return "phren: sync via ios" }
         guard ops.count > 1 else { return first.commitMessage }
-        return "phren: \(first.project)(\(first.commitKind) x\(ops.count)) via ios"
+
+        var projectOrder: [String] = []
+        var kindOrder: [String: [String]] = [:]
+        var counts: [String: [String: Int]] = [:]
+        for op in ops {
+            if counts[op.project] == nil {
+                projectOrder.append(op.project)
+                kindOrder[op.project] = []
+                counts[op.project] = [:]
+            }
+            if counts[op.project]?[op.commitKind] == nil {
+                kindOrder[op.project]?.append(op.commitKind)
+            }
+            counts[op.project]?[op.commitKind, default: 0] += 1
+        }
+
+        let segments = projectOrder.map { project -> String in
+            let kinds = (kindOrder[project] ?? []).map { kind -> String in
+                let count = counts[project]?[kind] ?? 0
+                return count > 1 ? "\(kind) x\(count)" : kind
+            }
+            return "\(project)(\(kinds.joined(separator: ",")))"
+        }
+        return "phren: \(segments.joined(separator: " ")) via ios"
     }
 
-    /// The document this op owns — the coalescing key. Ops that also touch a
-    /// second file (reject/edit mirror into FINDINGS.md, promote writes both)
-    /// still group by the file their domain operation addresses. The project
-    /// is part of the path, so two projects' review.md files never coalesce.
+    /// The document this op owns. Ops that also touch a second file
+    /// (reject/edit mirror into FINDINGS.md, promote writes both) are still
+    /// identified by the file their domain operation addresses. The flush
+    /// plan uses this to write secondary files before primaries; it is also
+    /// the writability probe for `enqueue`.
     public var primaryPath: String {
         switch self {
         case .addFinding, .editFinding, .removeFinding:
