@@ -398,35 +398,53 @@ public actor SyncEngine {
 
             attempts: while !plan.paths.isEmpty {
                 attempt += 1
+                var landed: [String] = []
                 do {
                     try await write(plan)
                     break attempts
-                } catch let error as GitHubError where error.isShaConflict {
-                    guard attempt < Self.maxWriteAttempts else {
-                        // Re-applying never converged — park each op so
-                        // "Needs attention" keeps per-item granularity.
+                } catch let failure as PartialWriteFailure {
+                    landed = failure.succeeded
+                    // Files this attempt already committed are done. Retire
+                    // them and every op they complete, so recovery only ever
+                    // reasons about work that is genuinely still outstanding —
+                    // re-applying a landed op throws "not found" and would park
+                    // it forever, with no retry able to clear it.
+                    plan = plan.retiring(paths: landed)
+                    if plan.paths.isEmpty && plan.ops.isEmpty { break attempts }
+
+                    switch failure.underlying {
+                    case let error as GitHubError where error.isShaConflict:
+                        guard attempt < Self.maxWriteAttempts else {
+                            // Re-applying never converged — park each op so
+                            // "Needs attention" keeps per-item granularity.
+                            parked.append(contentsOf: plan.ops.map {
+                                (op: $0, error: error.localizedDescription)
+                            })
+                            plan = .empty
+                            break attempts
+                        }
+                        // Remote changed underneath the group: refresh and
+                        // replay the outstanding ops onto the new content. Only
+                        // the paths that did NOT land forget their sha; the
+                        // ones that did are current and must stay cached.
+                        await forgetCachedShas(plan.paths)
+                        await pull(force: true)
+                        let retry = await reapply(plan.ops)
+                        plan = retry.plan
+                        parked.append(contentsOf: retry.parked)
+                        recordReapply(plan.ops)
+                    case let error as PhrenKitError:
+                        // Domain failure the group can never resolve (a
+                        // non-writable path) — park the ops for the user.
                         parked.append(contentsOf: plan.ops.map {
                             (op: $0, error: error.localizedDescription)
                         })
                         plan = .empty
                         break attempts
+                    default:
+                        transient = failure.underlying
+                        break attempts
                     }
-                    // Remote changed underneath the group: refresh and replay
-                    // the whole group onto the new content.
-                    await forgetCachedShas(plan.paths)
-                    await pull(force: true)
-                    let retry = await reapply(plan.ops)
-                    plan = retry.plan
-                    parked.append(contentsOf: retry.parked)
-                    recordReapply(plan.ops)
-                } catch let error as PhrenKitError {
-                    // Domain failure the group can never resolve (a
-                    // non-writable path) — park the ops for the user.
-                    parked.append(contentsOf: plan.ops.map {
-                        (op: $0, error: error.localizedDescription)
-                    })
-                    plan = .empty
-                    break attempts
                 } catch {
                     transient = error
                     break attempts
@@ -508,6 +526,23 @@ public actor SyncEngine {
 
         static let empty = GroupPlan(ops: [], paths: [], deletedShas: [:])
 
+        /// The plan minus files an attempt already committed, and minus every
+        /// op those files fully completed. Recovery must never re-apply or
+        /// park work that is already on the remote: replaying a landed
+        /// `approve` throws "queue item not found", which parks it in "Needs
+        /// attention" where no retry can ever clear it.
+        func retiring(paths landed: [String]) -> GroupPlan {
+            guard !landed.isEmpty else { return self }
+            let done = Set(landed)
+            var remainingDeleted = deletedShas
+            for path in landed { remainingDeleted.removeValue(forKey: path) }
+            return GroupPlan(
+                ops: ops.filter { !$0.editedPaths.allSatisfy(done.contains) },
+                paths: paths.filter { !done.contains($0) },
+                deletedShas: remainingDeleted
+            )
+        }
+
         init(ops: [QueuedOp], paths: [String], deletedShas: [String: String]) {
             self.ops = ops
             self.paths = paths
@@ -524,13 +559,23 @@ public actor SyncEngine {
                 }
                 for (path, sha) in queued.deletedShas ?? [:] { deleted[path] = sha }
             }
-            // The ops' own files go last (in first-seen order). If a
-            // secondary write (the FINDINGS.md mirror of a reject/edit)
-            // conflicts, the primary files are then still untouched remotely,
-            // so the refetch → re-apply round can still find the queue lines
-            // the ops address.
-            let primaries = Set(ops.map(\.op.primaryPath))
-            paths = paths.filter { !primaries.contains($0) } + paths.filter { primaries.contains($0) }
+            // Secondary files first, the ops' own files last. If a secondary
+            // write (the FINDINGS.md mirror of a reject/edit) conflicts, the
+            // primary file is then still untouched remotely, so the refetch →
+            // re-apply round can still find the queue lines the ops address.
+            //
+            // Classify by "is a secondary for SOME op", not by "is a primary
+            // for some op": across a whole-queue plan one file is routinely
+            // both — `reject` mirrors into FINDINGS.md while `addFinding` owns
+            // it — and treating that as a primary put review.md first, exactly
+            // inverting the property this ordering exists to guarantee.
+            var secondaries = Set<String>()
+            for queued in ops {
+                for path in queued.editedPaths where path != queued.op.primaryPath {
+                    secondaries.insert(path)
+                }
+            }
+            paths = paths.filter { secondaries.contains($0) } + paths.filter { !secondaries.contains($0) }
             self.init(ops: ops, paths: paths, deletedShas: deleted)
         }
     }
@@ -539,34 +584,51 @@ public actor SyncEngine {
     /// commit message. The bytes pushed are what the ops already produced in
     /// the local cache — they were applied in FIFO order as they were made, so
     /// the file on disk *is* the batch result, serialized once.
+    ///
+    /// A plan now spans every file the queue touches, so a failure partway
+    /// through leaves earlier files already committed. The error carries which
+    /// paths landed: recovery must not re-apply, re-park, or forget the sha of
+    /// work that is already on the remote.
+    private struct PartialWriteFailure: Error {
+        let underlying: Error
+        let succeeded: [String]
+    }
+
     private func write(_ plan: GroupPlan) async throws {
         let manifest = await store.currentManifest
         let message = PendingOp.commitMessage(for: plan.ops.map(\.op))
+        var succeeded: [String] = []
         for path in plan.paths {
-            guard LocalStore.isWritablePath(path) else {
-                throw PhrenKitError.validation("Refusing to write non-writable path \(path).")
-            }
-            if let content = await store.read(path) {
-                // Ops land in the local cache at enqueue time, so an earlier
-                // flush (or an interleaved enqueue during one) may already
-                // have pushed these exact bytes. GitHub's Contents API records
-                // an empty commit for a byte-identical PUT — skip it instead.
-                if let known = await store.blobSha(for: path), known == GitBlob.sha(of: content) {
-                    continue
+            do {
+                guard LocalStore.isWritablePath(path) else {
+                    throw PhrenKitError.validation("Refusing to write non-writable path \(path).")
                 }
-                let response = try await client.putFile(
-                    owner: manifest.owner, repo: manifest.repo, path: path,
-                    branch: manifest.branch, content: Data(content.utf8),
-                    message: message, sha: await store.blobSha(for: path)
-                )
-                try await store.write(path, content: content, blobSha: response.content?.sha)
-            } else if let sha = await store.blobSha(for: path) ?? plan.deletedShas[path] {
-                try await client.deleteFile(
-                    owner: manifest.owner, repo: manifest.repo, path: path,
-                    branch: manifest.branch, message: message, sha: sha
-                )
-                try await store.delete(path)
+                if let content = await store.read(path) {
+                    // Ops land in the local cache at enqueue time, so an earlier
+                    // flush (or an interleaved enqueue during one) may already
+                    // have pushed these exact bytes. GitHub's Contents API records
+                    // an empty commit for a byte-identical PUT — skip it instead.
+                    if let known = await store.blobSha(for: path), known == GitBlob.sha(of: content) {
+                        succeeded.append(path)
+                        continue
+                    }
+                    let response = try await client.putFile(
+                        owner: manifest.owner, repo: manifest.repo, path: path,
+                        branch: manifest.branch, content: Data(content.utf8),
+                        message: message, sha: await store.blobSha(for: path)
+                    )
+                    try await store.write(path, content: content, blobSha: response.content?.sha)
+                } else if let sha = await store.blobSha(for: path) ?? plan.deletedShas[path] {
+                    try await client.deleteFile(
+                        owner: manifest.owner, repo: manifest.repo, path: path,
+                        branch: manifest.branch, message: message, sha: sha
+                    )
+                    try await store.delete(path)
+                }
+            } catch {
+                throw PartialWriteFailure(underlying: error, succeeded: succeeded)
             }
+            succeeded.append(path)
         }
     }
 

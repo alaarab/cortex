@@ -409,6 +409,87 @@ final class SyncEngineCoalescingTests: XCTestCase {
         XCTAssertEqual(afterRetry.count, 2, "a no-op retry must not manufacture a commit")
     }
 
+    /// A file that is one op's SECONDARY and another op's PRIMARY must still be
+    /// written first. `reject` mirrors into FINDINGS.md while `addFinding` owns
+    /// it; classifying by "is a primary for some op" put review.md first, which
+    /// inverts the recovery property — a conflict on FINDINGS.md would then
+    /// replay a reject whose queue line had already been removed remotely.
+    func testAFileThatIsBothSecondaryAndPrimaryIsStillWrittenFirst() async throws {
+        let findingsSeed = """
+        # myproj Findings
+
+        ## 2026-07-26
+
+        - [2026-07-26] First queued finding
+
+        """
+        let (engine, client) = try await makeEngine(local: [
+            "myproj/review.md": Self.reviewSeed,
+            "myproj/FINDINGS.md": findingsSeed,
+        ])
+
+        // reject → [review.md, FINDINGS.md]; addFinding → [FINDINGS.md].
+        try await engine.enqueue(.rejectQueue(project: "myproj", line: Self.firstLine))
+        try await engine.enqueue(.addFinding(project: "myproj", text: "A brand new finding", type: nil))
+        await engine.flushNow()
+
+        let paths = await client.writes.map(\.path)
+        let findingsIdx = try XCTUnwrap(paths.firstIndex(of: "myproj/FINDINGS.md"))
+        let reviewIdx = try XCTUnwrap(paths.firstIndex(of: "myproj/review.md"))
+        XCTAssertLessThan(findingsIdx, reviewIdx,
+                          "the secondary mirror must be pushed before the queue file that addresses it")
+    }
+
+    /// Partial success inside one multi-path plan: file A's PUT lands, file B's
+    /// 409s. A's ops are already on the remote — they must NOT be parked, and a
+    /// user must never be left with "Needs attention" entries that no retry can
+    /// clear. (Before whole-queue plans, a plan had one path and this shape was
+    /// structurally impossible.)
+    func testPartialSuccessThenConflictDoesNotParkTheOpsThatLanded() async throws {
+        let (engine, client) = try await makeEngine(
+            local: [
+                "myproj/review.md": Self.reviewSeed,
+                "other/review.md": Self.reviewSeed,
+            ],
+            // The remote must exist: the conflict path force-pulls, and a
+            // forced pull against an empty remote would erase the local cache
+            // and make the failure a different bug than the one under test.
+            remote: [
+                "myproj/review.md": Self.reviewSeed,
+                "other/review.md": Self.reviewRemote,
+            ]
+        )
+        // myproj is written first (first-seen order); fail only the second file.
+        await client.failNextPut(on: ["other/review.md"])
+
+        try await engine.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
+        try await engine.enqueue(.approveQueue(project: "other", line: Self.firstLine))
+        await engine.flushNow()
+
+        let failed = await engine.failedOps()
+        XCTAssertFalse(
+            failed.contains { $0.op == .approveQueue(project: "myproj", line: Self.firstLine) },
+            "the op whose file was pushed successfully must not land in Needs attention"
+        )
+
+        // Whatever parked must be clearable — a retry that can never succeed is
+        // a dead end for the user.
+        if !failed.isEmpty {
+            await engine.retryFailed()
+            await engine.flushNow()
+            let stillFailed = await engine.failedOps()
+            XCTAssertTrue(stillFailed.isEmpty, "retryFailed must be able to drain parked ops, not re-park them forever")
+        }
+
+        // Both approvals must be reflected on the remote.
+        let myprojRemote = await client.remoteContent("myproj/review.md")
+        let otherRemote = await client.remoteContent("other/review.md")
+        let myproj = try XCTUnwrap(myprojRemote)
+        let other = try XCTUnwrap(otherRemote)
+        XCTAssertFalse(myproj.contains("First queued finding"))
+        XCTAssertFalse(other.contains("First queued finding"))
+    }
+
     func testUnresolvedConflictParksEachOpIndividually() async throws {
         let (engine, client) = try await makeEngine(
             local: ["myproj/review.md": Self.reviewSeed],
