@@ -105,6 +105,16 @@ struct ProjectsView: View {
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
+            // Archive destinations are registered here, at the stack root,
+            // rather than on the pushed views that link to them — a
+            // .navigationDestination declared on an already-pushed view
+            // resolves a tap twice and stacks duplicates behind you.
+            .navigationDestination(for: ArchiveRoute.self) { route in
+                ArchiveBrowserView(storeId: route.storeId, project: route.project)
+            }
+            .navigationDestination(for: ArchiveTopicRoute.self) { route in
+                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            }
             .sheet(isPresented: $showVoiceCapture) {
                 VoiceCaptureView(targets: voiceCaptureTargets)
             }

@@ -7,6 +7,27 @@ import PhrenKit
 /// `<!-- consolidated: … -->` stamp the CLI leaves in the project's own
 /// FINDINGS.md, the topic count and byte total from the catalogue the
 /// recursive tree paid for. Nothing here triggers a fetch — tapping it does.
+/// Route value for the archive browser.
+///
+/// The whole archive chain pushes by value and registers its destinations at
+/// the NavigationStack root (ProjectsView). Mixing the closure form
+/// `NavigationLink { destination }` with value links plus
+/// `.navigationDestination(for:)` in one stack makes SwiftUI resolve a tap
+/// twice — the observed symptom was a tap that appeared to do nothing, left
+/// you on the topic list, and stacked duplicate pages behind you.
+struct ArchiveRoute: Hashable {
+    let storeId: String
+    let project: String
+}
+
+/// A topic plus the store it came from. `ColdDocRef` deliberately carries no
+/// store id — it is built from one store's tree — so the route supplies it,
+/// which also lets the destination live at the stack root.
+struct ArchiveTopicRoute: Hashable {
+    let storeId: String
+    let topic: ColdDocRef
+}
+
 struct ArchiveFooter: View {
     let storeId: String
     let project: String
@@ -24,9 +45,7 @@ struct ArchiveFooter: View {
     var body: some View {
         if let summary, summary.topicCount > 0 {
             Section {
-                NavigationLink {
-                    ArchiveBrowserView(storeId: storeId, project: project)
-                } label: {
+                NavigationLink(value: ArchiveRoute(storeId: storeId, project: project)) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(headline(summary)).font(.subheadline.weight(.semibold))
@@ -83,7 +102,7 @@ struct ArchiveBrowserView: View {
         List {
             Section {
                 ForEach(topics) { topic in
-                    NavigationLink(value: topic) {
+                    NavigationLink(value: ArchiveTopicRoute(storeId: storeId, topic: topic)) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(topic.displayName).font(.headline)
                             Text(subtitle(for: topic))
@@ -108,9 +127,9 @@ struct ArchiveBrowserView: View {
         .phrenScreen()
         .navigationTitle("Archive")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: ColdDocRef.self) { topic in
-            ArchiveTopicView(storeId: storeId, topic: topic)
-        }
+        // No .navigationDestination here — it lives at the stack root in
+        // ProjectsView. Registering it on a pushed view is what made a single
+        // tap resolve twice.
         .task {
             topics = await model.coldTopics(storeId: storeId, project: project)
             loaded = true
