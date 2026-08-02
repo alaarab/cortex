@@ -28,17 +28,19 @@ actor FakeGitHubClient: GitHubAPI {
         for path in remote.keys.sorted() {
             revision += 1
             files[path] = remote[path] ?? ""
-            shas[path] = "blob-\(revision)"
+            shas[path] = GitBlob.sha(of: remote[path] ?? "")
             head = "head-\(revision)"
         }
     }
 
-    /// Publishes remote content, minting a new blob sha + head so a forced
-    /// pull sees a change.
+    /// Publishes remote content, minting a new head so a forced pull sees a
+    /// change. Blob shas are content-addressed exactly like the real API, so
+    /// the engine's "these bytes are already on the remote" check behaves as
+    /// it does against GitHub.
     func setRemote(_ path: String, _ content: String) {
         revision += 1
         files[path] = content
-        shas[path] = "blob-\(revision)"
+        shas[path] = GitBlob.sha(of: content)
         head = "head-\(revision)"
     }
 
@@ -220,7 +222,7 @@ final class SyncEngineCoalescingTests: XCTestCase {
         XCTAssertTrue(failed.isEmpty, "an op applied locally must still push, not park")
     }
 
-    func testOpsOnDifferentFilesAreNotGrouped() async throws {
+    func testOpsOnDifferentFilesShareOneFlushPlan() async throws {
         let (engine, client) = try await makeEngine(local: [
             "myproj/review.md": Self.reviewSeed,
             "myproj/tasks.md": Self.tasksSeed,
@@ -232,33 +234,53 @@ final class SyncEngineCoalescingTests: XCTestCase {
 
         let writes = await client.writes
         XCTAssertEqual(writes.map(\.path), ["myproj/review.md", "myproj/tasks.md"])
+        // One plan, one message: both files carry the whole batch's summary.
         XCTAssertEqual(writes.map(\.message), [
-            "phren: myproj(update) via ios",
-            "phren: myproj(task) via ios",
+            "phren: myproj(update,task) via ios",
+            "phren: myproj(update,task) via ios",
         ])
     }
 
-    func testDifferentProjectsSameFileNameAreNotGrouped() async throws {
+    /// The regression behind the 41-commit burst of 2026-08-01: a batch
+    /// approve spanning several projects interleaves their review.md ops, and
+    /// the old contiguous-prefix grouping split at every project switch — one
+    /// commit per run, most of them empty re-PUTs of bytes an earlier run had
+    /// already pushed. The whole queue must flush as one plan: one commit per
+    /// distinct file, every op counted once.
+    func testCrossProjectBatchApproveIsOneCommitPerFile() async throws {
         let (engine, client) = try await makeEngine(local: [
             "myproj/review.md": Self.reviewSeed,
             "other/review.md": Self.reviewSeed,
         ])
 
+        // Interleaved, as a store-wide triage session produces them.
         try await engine.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
         try await engine.enqueue(.approveQueue(project: "other", line: Self.firstLine))
+        try await engine.enqueue(.approveQueue(project: "myproj", line: Self.secondLine))
+        try await engine.enqueue(.approveQueue(project: "other", line: Self.secondLine))
         await engine.flushNow()
 
         let writes = await client.writes
-        XCTAssertEqual(writes.map(\.path), ["myproj/review.md", "other/review.md"])
+        XCTAssertEqual(writes.map(\.path), ["myproj/review.md", "other/review.md"],
+                       "four interleaved approves across two projects must be exactly two commits")
         XCTAssertEqual(writes.map(\.message), [
-            "phren: myproj(update) via ios",
-            "phren: other(update) via ios",
+            "phren: myproj(update x2) other(update x2) via ios",
+            "phren: myproj(update x2) other(update x2) via ios",
         ])
+        for write in writes {
+            XCTAssertFalse(write.content.contains("First queued finding"))
+            XCTAssertFalse(write.content.contains("Second queued finding"))
+            XCTAssertTrue(write.content.contains("Third queued finding"))
+        }
+
+        let status = await engine.currentStatus()
+        XCTAssertEqual(status.pendingCount, 0)
+        XCTAssertEqual(status.failedCount, 0)
     }
 
-    /// Coalescing must never reorder: interleaved files split into contiguous
-    /// groups, so review → tasks → review stays review → tasks → review.
-    func testGroupingPreservesFifoOrderAcrossFiles() async throws {
+    /// Interleaving files never loses edits: each file is serialized once,
+    /// carrying every op that touched it, in FIFO order.
+    func testInterleavedFilesFlushEachFileOnceWithAllEdits() async throws {
         let (engine, client) = try await makeEngine(local: [
             "myproj/review.md": Self.reviewSeed,
             "myproj/tasks.md": Self.tasksSeed,
@@ -271,16 +293,49 @@ final class SyncEngineCoalescingTests: XCTestCase {
         await engine.flushNow()
 
         let writes = await client.writes
-        XCTAssertEqual(writes.map(\.path),
-                       ["myproj/review.md", "myproj/tasks.md", "myproj/review.md"])
+        XCTAssertEqual(writes.map(\.path), ["myproj/review.md", "myproj/tasks.md"],
+                       "review → tasks → review coalesces to one write per file")
         XCTAssertEqual(writes.map(\.message), [
-            "phren: myproj(update x2) via ios",
-            "phren: myproj(task) via ios",
-            "phren: myproj(update) via ios",
+            "phren: myproj(update x3,task) via ios",
+            "phren: myproj(update x3,task) via ios",
         ])
-        // The second review.md commit builds on the first, not on the seed.
-        XCTAssertFalse(writes[2].content.contains("First queued finding"))
-        XCTAssertFalse(writes[2].content.contains("Third queued finding"))
+        // The single review.md write carries all three approves.
+        XCTAssertFalse(writes[0].content.contains("First queued finding"))
+        XCTAssertFalse(writes[0].content.contains("Second queued finding"))
+        XCTAssertFalse(writes[0].content.contains("Third queued finding"))
+    }
+
+    /// Replaying an op whose bytes the remote already has (an idempotent
+    /// retry after a crash between the PUT landing and the queue persisting,
+    /// or an op enqueued mid-flush whose edit rode the previous push) must
+    /// not PUT byte-identical content — GitHub records that as an empty
+    /// commit rather than rejecting it.
+    func testFlushSkipsBytesTheRemoteAlreadyHas() async throws {
+        // First engine: produce the post-approve bytes the "remote" will hold.
+        let (first, firstClient) = try await makeEngine(local: ["myproj/review.md": Self.reviewSeed])
+        try await first.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
+        await first.flushNow()
+        let firstWrites = await firstClient.writes
+        let pushed = try XCTUnwrap(firstWrites.last?.content)
+
+        // Second engine: cache already holds those bytes with their true
+        // content-addressed sha — the state right after that PUT succeeded.
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let store = try LocalStore(rootDirectory: directory, owner: "o", repo: "r", branch: "main")
+        try await store.write("myproj/review.md", content: Self.reviewSeed, blobSha: GitBlob.sha(of: pushed))
+        let client = FakeGitHubClient(remote: ["myproj/review.md": pushed])
+        let engine = SyncEngine(client: client, store: store, stateDirectory: directory)
+        await engine.setAutoFlush(false)
+
+        try await engine.enqueue(.approveQueue(project: "myproj", line: Self.firstLine))
+        await engine.flushNow()
+
+        let writes = await client.writes
+        XCTAssertTrue(writes.isEmpty, "byte-identical content must not be re-PUT as an empty commit")
+        let status = await engine.currentStatus()
+        XCTAssertEqual(status.pendingCount, 0, "the skipped op still drains from the queue")
+        XCTAssertEqual(status.failedCount, 0)
     }
 
     // MARK: - Conflict recovery
@@ -398,5 +453,18 @@ final class SyncEngineCoalescingTests: XCTestCase {
                        "phren: myproj(update x2) via ios")
         XCTAssertEqual(PendingOp.commitMessage(for: Array(repeating: complete, count: 12)),
                        "phren: myproj(task x12) via ios")
+
+        // Mixed kinds aggregate per project; projects keep first-seen order.
+        XCTAssertEqual(PendingOp.commitMessage(for: [approve, complete, complete]),
+                       "phren: myproj(update,task x2) via ios")
+        let otherApprove = PendingOp.approveQueue(project: "other", line: "- y")
+        XCTAssertEqual(PendingOp.commitMessage(for: [approve, otherApprove, approve]),
+                       "phren: myproj(update x2) other(update) via ios")
+    }
+
+    func testGitBlobShaMatchesGitObjectIdentity() {
+        // Vectors from `git hash-object`: the empty blob and "hello\n".
+        XCTAssertEqual(GitBlob.sha(of: ""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+        XCTAssertEqual(GitBlob.sha(of: "hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a")
     }
 }

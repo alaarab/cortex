@@ -377,13 +377,15 @@ public actor SyncEngine {
 
     // MARK: - Flush (coalesced writes)
 
-    /// FIFO flush with op coalescing: consecutive queued ops that write the
-    /// same file ride ONE Contents PUT — one commit — instead of one commit
-    /// each. Batch-approving 40 review items is a single commit to review.md
-    /// rather than 40 sequential ones racing the ~7s live poll.
+    /// FIFO flush with op coalescing: everything pending rides one write plan,
+    /// ONE Contents PUT per distinct file — one commit per file — instead of
+    /// one commit per op. Batch-approving 40 review items across three
+    /// projects is three commits (one per review.md), not 40 sequential ones
+    /// racing the ~7s live poll.
     ///
-    /// Grouping never reorders. A group is always a contiguous prefix of the
-    /// queue, so ops on different files still land in the order they were made.
+    /// Collapsing the whole queue is safe because ops were already applied to
+    /// the local cache in FIFO order at enqueue time: per file, the cache
+    /// holds the batch result, and the plan serializes each file exactly once.
     private func flush() async {
         while true {
             let group = nextGroup()
@@ -454,15 +456,15 @@ public actor SyncEngine {
         }
     }
 
-    /// Longest prefix of the pending queue whose ops all write the same file.
+    /// The entire pending queue, flushed as one plan. Grouping used to stop at
+    /// the first op whose `primaryPath` differed, which shattered a
+    /// multi-project batch approve into one commit per project *run* — and
+    /// every group after the first re-PUT bytes the first push already
+    /// carried, which GitHub records as empty commits. Ops apply to the local
+    /// cache in FIFO order at enqueue time, so per file the cache already *is*
+    /// the batch result and one plan can serialize every touched file once.
     private func nextGroup() -> [QueuedOp] {
-        guard let first = queue.pending.first else { return [] }
-        var group: [QueuedOp] = []
-        for queued in queue.pending {
-            guard queued.op.primaryPath == first.op.primaryPath else { break }
-            group.append(queued)
-        }
-        return group
+        queue.pending
     }
 
     /// Removes the flushed group from the head of the queue. Ids are checked
@@ -522,13 +524,13 @@ public actor SyncEngine {
                 }
                 for (path, sha) in queued.deletedShas ?? [:] { deleted[path] = sha }
             }
-            // The group's own file goes last. If a secondary write (the
-            // FINDINGS.md mirror of a reject/edit) conflicts, the primary file
-            // is then still untouched remotely, so the refetch → re-apply
-            // round can still find the queue lines the ops address.
-            if let primary = ops.first?.op.primaryPath, let index = paths.firstIndex(of: primary) {
-                paths.append(paths.remove(at: index))
-            }
+            // The ops' own files go last (in first-seen order). If a
+            // secondary write (the FINDINGS.md mirror of a reject/edit)
+            // conflicts, the primary files are then still untouched remotely,
+            // so the refetch → re-apply round can still find the queue lines
+            // the ops address.
+            let primaries = Set(ops.map(\.op.primaryPath))
+            paths = paths.filter { !primaries.contains($0) } + paths.filter { primaries.contains($0) }
             self.init(ops: ops, paths: paths, deletedShas: deleted)
         }
     }
@@ -545,6 +547,13 @@ public actor SyncEngine {
                 throw PhrenKitError.validation("Refusing to write non-writable path \(path).")
             }
             if let content = await store.read(path) {
+                // Ops land in the local cache at enqueue time, so an earlier
+                // flush (or an interleaved enqueue during one) may already
+                // have pushed these exact bytes. GitHub's Contents API records
+                // an empty commit for a byte-identical PUT — skip it instead.
+                if let known = await store.blobSha(for: path), known == GitBlob.sha(of: content) {
+                    continue
+                }
                 let response = try await client.putFile(
                     owner: manifest.owner, repo: manifest.repo, path: path,
                     branch: manifest.branch, content: Data(content.utf8),
