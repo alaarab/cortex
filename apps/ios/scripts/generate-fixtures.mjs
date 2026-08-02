@@ -118,8 +118,17 @@ fs.mkdirSync(path.join(store, project), { recursive: true });
 // A root manifest so path helpers treat this directory as a store root.
 fs.writeFileSync(path.join(store, "phren.root.yaml"), "installMode: shared\nsyncMode: workspace-git\n");
 
-fs.rmSync(fixturesDir, { recursive: true, force: true });
+// Wipe every fixture this script owns so stale/renamed files don't linger —
+// but `swift-writes/` is the *other* direction's committed corpus
+// (SwiftWritesFixturesTests.swift, Task 2 bidirectional conformance): it is
+// regenerated only by `PHREN_REGENERATE_SWIFT_FIXTURES=1 swift test`, never
+// by this script, so it must survive the wipe untouched.
+const PRESERVE_ON_WIPE = new Set(["swift-writes"]);
 fs.mkdirSync(fixturesDir, { recursive: true });
+for (const entry of fs.readdirSync(fixturesDir)) {
+  if (PRESERVE_ON_WIPE.has(entry)) continue;
+  fs.rmSync(path.join(fixturesDir, entry), { recursive: true, force: true });
+}
 
 function must(result, label) {
   if (result && result.ok === false) {
@@ -225,7 +234,28 @@ writeJson("review-parsed.json", queue.data);
 
 // Approve the first item, snapshot; then reject the second (which also
 // touches FINDINGS.md — tolerated there since these entries aren't in it).
-must(access.approveQueueItem(store, project, queue.data[0].line), "approve queue item");
+//
+// Approving a candidate that isn't already in FINDINGS.md promotes it there
+// via the same addFindingToFile this script calls directly elsewhere
+// (access.ts:906) — but access.ts isn't this script's to change, so that
+// internal call never sees this script's now/idSource overrides and would
+// otherwise stamp a real fid/timestamp into FINDINGS.md. Nothing here reads
+// review-after-approve.md's *content* back out of FINDINGS.md, so this was
+// invisible until fixtures further below started re-snapshotting the whole
+// file — frozen the same way as every other not-this-script's-file source
+// of nondeterminism above.
+//
+// Two ids, not one: addFindingToFile unconditionally prepares a "new file"
+// bullet first (learning.ts:365) even when the file already exists (as it
+// does here) and only uses that result if it didn't — so every call against
+// an existing file consumes one randomBytes call that is thrown away before
+// the one that is actually kept. Every other call in this script survives
+// that unscathed because its idSource is a constant-returning closure, not
+// this global queue; this is the one call with no override at all.
+withFrozenDate("2026-07-26T13:00:00.000Z", () => {
+  withFixedIds(["0000c001", "0000c001"], () =>
+    must(access.approveQueueItem(store, project, queue.data[0].line), "approve queue item"));
+});
 snapshot("review-after-approve.md", `${project}/review.md`);
 
 must(access.rejectQueueItem(store, project, queue.data[1].line), "reject queue item");
@@ -278,6 +308,120 @@ snapshot("tasks-after-update.md", `${project}/tasks.md`);
 const parsedTasks = must(tasks.readTasks(store, project), "read tasks");
 const { path: _p, ...taskDoc } = parsedTasks.data;
 writeJson("tasks-parsed.json", taskDoc);
+
+// --- Conformance gaps (docs/store-format.md §7) -----------------------------
+//
+// Everything below closes one of the five fixture-corpus gaps the spec
+// calls out. Each is additive — appended after every snapshot above has
+// already been taken — so none of the existing fixtures shift.
+
+// Gap 1 (§2.1): an unrecognised metadata comment must survive an edit
+// verbatim. This is the format's most important invariant and, per the
+// spec, nothing currently tests it: a "cleaner" reimplementation that
+// round-trips through a typed model would silently drop it instead.
+must(learning.addFindingToFile(store, project, "Unknown metadata comments must survive edits verbatim", undefined, {
+  extraAnnotations: ['<!-- someday:field "x" -->'],
+  now: new Date("2026-07-27T09:00:00.000Z"),
+  idSource: () => "0000a001",
+}), "add finding with unrecognised annotation");
+snapshot("findings-unknown-annotation-after-add.md", `${project}/FINDINGS.md`);
+must(access.editFinding(store, project, "Unknown metadata comments must survive edits verbatim", "Edited text after an unrecognised annotation round trip"), "edit finding with unrecognised annotation");
+snapshot("findings-unknown-annotation-after-edit.md", `${project}/FINDINGS.md`);
+
+// Gap 2 (§5.2): a legacy <details> archive block. Recognised by both
+// readers, written by neither — so unlike every fixture above, this one
+// cannot come from calling a real mutator. It's authored directly, then fed
+// through the real reader so both languages still get one committed ground
+// truth for "recognised but never emitted," rather than each hand-rolling
+// their own guess at the shape.
+const detailsArchiveContent = `# ${project} Findings
+
+## 2026-07-24
+
+- Active finding outside any archive block <!-- fid:00001234 --> <!-- created: 2026-07-24 --> <!-- phren:status "active" -->
+
+<details>
+<summary>Archived</summary>
+
+## 2026-01-05
+
+- Archived finding inside a legacy details block <!-- fid:0000abcd --> <!-- phren:status "superseded" --> <!-- phren:status_updated "2026-01-06" --> <!-- phren:status_reason "superseded_by" --> <!-- phren:status_ref "replacement text" -->
+
+</details>
+`;
+fs.writeFileSync(path.join(fixturesDir, "findings-legacy-details-archive.md"), detailsArchiveContent);
+console.log("wrote findings-legacy-details-archive.md (hand-authored — see docs/store-format.md §5.2)");
+{
+  const detailsTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-details-fixture-"));
+  fs.writeFileSync(path.join(detailsTmpDir, "phren.root.yaml"), "installMode: shared\nsyncMode: workspace-git\n");
+  fs.mkdirSync(path.join(detailsTmpDir, project), { recursive: true });
+  fs.writeFileSync(path.join(detailsTmpDir, project, "FINDINGS.md"), detailsArchiveContent);
+  const defaultRead = must(access.readFindings(detailsTmpDir, project), "read legacy details (default)");
+  const includingArchived = must(access.readFindings(detailsTmpDir, project, { includeArchived: true }), "read legacy details (includeArchived)");
+  writeJson("findings-legacy-details-archive-default-parsed.json", defaultRead.data);
+  writeJson("findings-legacy-details-archive-with-archived-parsed.json", includingArchived.data);
+  fs.rmSync(detailsTmpDir, { recursive: true, force: true });
+}
+
+// Gap 3 (§6): a [bracket] prefix outside every known vocabulary (offered,
+// decay-tracked, or auto-detected) must not be mangled — readers accept any
+// [a-z][a-z0-9_-]* tag, and editFinding's tag-preservation regex is equally
+// unpicky, so an edit that supplies no tag of its own must still keep it.
+must(learning.addFindingToFile(store, project, "[nonstandard] Bracket tags outside every known vocabulary must not be mangled", undefined, {
+  now: new Date("2026-07-27T09:05:00.000Z"),
+  idSource: () => "0000a002",
+}), "add finding with nonstandard tag");
+snapshot("findings-nonstandard-tag-after-add.md", `${project}/FINDINGS.md`);
+must(access.editFinding(store, project, "Bracket tags outside every known vocabulary must not be mangled", "Edited text without supplying any tag of its own"), "edit finding with nonstandard tag");
+snapshot("findings-nonstandard-tag-after-edit.md", `${project}/FINDINGS.md`);
+
+// Gap 4 (§4.2): a task carrying both priority and pinned state, edited by
+// text only. `updateTask` recomputes priority/pinned from the *new* text
+// every time text changes — pin the actual (documented-as-rough) behaviour:
+// a rename with no re-supplied tags silently drops both.
+withFixedIds(["0000b001"], () =>
+  must(tasks.addTask(store, project, "Ship urgent fix [high]"), "add task 4 (pin/priority gap)"));
+must(tasks.pinTask(store, project, "Ship urgent fix"), "pin task 4");
+snapshot("tasks-pinned-before-text-edit.md", `${project}/tasks.md`);
+must(tasks.updateTask(store, project, "Ship urgent fix", { text: "Ship urgent fix (renamed)" }), "text-only update on pinned+prioritised task");
+snapshot("tasks-pinned-after-text-only-edit.md", `${project}/tasks.md`);
+
+// Gap 5 (§2.2, §4.3): text long enough and Unicode-rich enough to cross the
+// 500-unit review-queue and 60-unit supersedes/superseded_by truncation
+// boundaries, counted in UTF-16 code units (JS's `.length`/`.slice`) rather
+// than Unicode scalars or grapheme clusters. Each string plants a CANARY
+// right past its boundary so truncation landing in the wrong place (e.g.
+// counting graphemes, where 200 astral emoji are 200 units short of where
+// UTF-16 counts them) is a visible test failure, not a fuzzy length check.
+const UNICODE_REVIEW_TEXT = "🧵".repeat(200) + "x".repeat(200) + "CANARY-MUST-NOT-SURVIVE-TRUNCATION" + "y".repeat(200);
+withFrozenDate("2026-07-29T09:00:00.000Z", () => {
+  must(policy.appendReviewQueue(store, project, "Review", [UNICODE_REVIEW_TEXT]), "append unicode review entry");
+});
+snapshot("review-unicode-boundary.md", `${project}/review.md`);
+{
+  const unicodeQueue = must(access.readReviewQueue(store, project), "read unicode review queue");
+  const entry = unicodeQueue.data.find((item) => item.text.startsWith("🧵"));
+  writeJson("review-unicode-boundary-parsed.json", entry ? [entry] : []);
+}
+
+const UNICODE_OLD_FINDING = "🧵🧵🧵🧵🧵" + "x".repeat(50) + "CANARY-MUST-NOT-SURVIVE-60-TRUNCATION";
+const UNICODE_NEW_FINDING = "🧵🧵🧵" + "z".repeat(80) + "NEW-FINDING-TAIL";
+must(learning.addFindingToFile(store, project, UNICODE_OLD_FINDING, undefined, {
+  now: new Date("2026-07-27T09:10:00.000Z"),
+  idSource: () => "0000a003",
+}), "add finding to be superseded (unicode)");
+snapshot("findings-unicode-supersede-before.md", `${project}/FINDINGS.md`);
+must(learning.addFindingToFile(store, project, UNICODE_NEW_FINDING, { supersedes: UNICODE_OLD_FINDING }, {
+  now: new Date("2026-07-27T09:11:00.000Z"),
+  idSource: () => "0000a004",
+}), "add superseding finding (unicode)");
+snapshot("findings-unicode-supersede-after.md", `${project}/FINDINGS.md`);
+{
+  const supersedeRead = must(access.readFindings(store, project), "read unicode supersede findings");
+  const oldEntry = supersedeRead.data.find((f) => f.stableId === "0000a003");
+  const newEntry = supersedeRead.data.find((f) => f.stableId === "0000a004");
+  writeJson("findings-unicode-supersede-parsed.json", { old: oldEntry, new: newEntry });
+}
 
 fs.rmSync(store, { recursive: true, force: true });
 console.log("done");
