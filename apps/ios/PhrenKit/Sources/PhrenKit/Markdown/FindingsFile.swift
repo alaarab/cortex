@@ -159,13 +159,17 @@ public struct FindingsFile: Sendable {
         public var type: FindingType?
         public var scope: String?
         public var provenance: FindingProvenance?
+        /// Set when promoting a review-queue item: the date it was queued.
+        public var queuedDate: String?
         public var now: Date
 
         public init(type: FindingType? = nil, scope: String? = nil,
-                    provenance: FindingProvenance? = nil, now: Date = Date()) {
+                    provenance: FindingProvenance? = nil, queuedDate: String? = nil,
+                    now: Date = Date()) {
             self.type = type
             self.scope = scope
             self.provenance = provenance
+            self.queuedDate = queuedDate
             self.now = now
         }
     }
@@ -196,6 +200,11 @@ public struct FindingsFile: Sendable {
         let fid = Self.randomHexId()
         var bullet = normalizedLearning.hasPrefix("- ") ? normalizedLearning : "- \(normalizedLearning)"
         bullet += " <!-- fid:\(fid) --> <!-- created: \(today) -->"
+        // A promoted queue item is written today but was observed earlier
+        // (access.ts:906) — record when, so the trail survives promotion.
+        if let queued = options.queuedDate, !queued.isEmpty {
+            bullet += " <!-- phren:queued \"\(queued)\" -->"
+        }
         let scopeComment = buildScopeComment(options.scope)
         if !scopeComment.isEmpty { bullet += " \(scopeComment)" }
         if let provenance = options.provenance {
@@ -323,6 +332,20 @@ public struct FindingsFile: Sendable {
         guard let first = matches.first else { return nil }
         let key = bulletContentKey(first.line)
         return matches.allSatisfy { bulletContentKey($0.line) == key } ? first : nil
+    }
+
+    /// access.ts:746 `existsAsLiveFinding` — does this text already exist as a
+    /// live (non-archived) bullet? "Ambiguous" counts as present: several
+    /// bullets matched, so it is there, just not uniquely addressable, and
+    /// approve must not write yet another copy.
+    public func existsAsLiveFinding(_ text: String) -> Bool {
+        let needle = normalizeFindingText(text)
+        guard !needle.isEmpty else { return false }
+        let active = collectBulletLines(content.components(separatedBy: "\n")).filter { !$0.archived }
+        switch matchIn(active, needle: needle, match: text) {
+        case .found, .ambiguous: return true
+        case .notFound: return false
+        }
     }
 
     /// access.ts:219 `findMatchingFindingBullet` + the archived-check wrapper

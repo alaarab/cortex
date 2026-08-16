@@ -791,9 +791,46 @@ public actor SyncEngine {
             return [FileEdit(path: "\(project)/FINDINGS.md", content: file.content)]
 
         case .approveQueue(_, let line):
-            var file = ReviewFile(content: await read("\(project)/review.md", overlay: overlay) ?? "")
-            try file.approve(lineText: line)
-            return [FileEdit(path: "\(project)/review.md", content: file.content)]
+            // access.ts:851 — approve means "this belongs in memory", so it
+            // WRITES the finding when it is not already there, then dequeues.
+            // `phren extract` queues every candidate below autoAcceptThreshold
+            // without adding it to FINDINGS.md, so for those the queue line is
+            // the only copy: splicing it out alone destroyed the candidate, and
+            // the Review tab makes that a swipe gesture.
+            var review = ReviewFile(content: await read("\(project)/review.md", overlay: overlay) ?? "")
+            let needle = ReviewFile.findingsTextFor(lineText: line)
+            var edits: [FileEdit] = []
+
+            if !needle.isEmpty {
+                if writeContext.usesTeamJournal {
+                    edits.append(try await journalEdit(project: project, text: needle,
+                                                       type: nil, overlay: overlay))
+                } else {
+                    var findings = FindingsFile(content: await read("\(project)/FINDINGS.md", overlay: overlay) ?? "")
+                    if !findings.existsAsLiveFinding(needle) {
+                        do {
+                            try findings.add(project: project, text: needle, options: .init(
+                                // The observation's own provenance, not this
+                                // device's — approving is not authoring.
+                                provenance: ReviewFile.capturedProvenanceFor(lineText: line),
+                                queuedDate: ReviewFile.queuedDateFor(lineText: line)
+                            ))
+                            edits.append(FileEdit(path: "\(project)/FINDINGS.md", content: findings.content))
+                        } catch PhrenKitError.duplicate {
+                            // Already present somewhere `existsAsLiveFinding` does
+                            // not look — an archive block. The CLI's
+                            // `already_archived` outcome: leave it, just dequeue.
+                        }
+                        // Any other failure (a secret in the text, a bad file)
+                        // propagates, so the queue line stays rather than being
+                        // dequeued over content that was never promoted.
+                    }
+                }
+            }
+
+            try review.dequeue(lineText: line)
+            edits.append(FileEdit(path: "\(project)/review.md", content: review.content))
+            return edits
 
         case .rejectQueue(_, let line):
             // access.ts:709 — remove the queue line AND the finding; a

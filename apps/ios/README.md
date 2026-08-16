@@ -340,6 +340,19 @@ Semantics, and where they intentionally diverge from the CLI:
   permission are marked **read-only**.
 - Removing a store in Settings deletes only this device's local copy.
 
+### The review queue
+
+Approving is a **write**, not a dequeue. `phren extract` queues every candidate
+scoring below `autoAcceptThreshold` into `review.md` *without* adding it to
+`FINDINGS.md`, so for those the queue line is the only copy — approving one is
+what creates the finding (`data/access.ts` → `approveQueueItem`). The app does
+the same: on approve it checks whether the text is already a live bullet and,
+if not, writes it with the queue line's own provenance and a
+`<!-- phren:queued "YYYY-MM-DD" -->` stamp before removing the line. A
+promotion that fails (a credential in the text, a locked file) leaves the queue
+line in place rather than dequeuing content it could not promote. In a team
+store the finding half lands in the journal, like every other add.
+
 ### Team stores
 
 A store with `role: team` does not line-splice `FINDINGS.md` when a finding is

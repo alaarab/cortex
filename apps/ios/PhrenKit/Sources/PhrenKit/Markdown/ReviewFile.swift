@@ -120,26 +120,52 @@ public struct ReviewFile: Sendable {
         return idx
     }
 
-    /// access.ts:700 `approveQueueItem` — remove the line from review.md only;
-    /// the finding already lives in FINDINGS.md.
-    public mutating func approve(lineText: String) throws {
+    /// Drop a queue line, touching nothing else.
+    ///
+    /// This is only *half* of approve or reject. `approve` means "this belongs
+    /// in memory" and must write the finding when it is not already there —
+    /// `phren extract` queues every candidate scoring below autoAcceptThreshold
+    /// **without** writing it to FINDINGS.md, so for those the queue line is the
+    /// only copy and dequeuing alone destroys it. The caller composes this with
+    /// `FindingsFile` (see SyncEngine.computeEdits).
+    public mutating func dequeue(lineText: String) throws {
         var lines = content.components(separatedBy: "\n")
         let idx = try lineIndex(of: lineText, in: lines)
         lines.remove(at: idx)
         content = FindingsFile.normalizeWrite(lines)
     }
 
-    /// The review.md half of `rejectQueueItem` (access.ts:709). The caller
+    /// The review.md half of `approveQueueItem` (access.ts:851).
+    public mutating func approve(lineText: String) throws {
+        try dequeue(lineText: lineText)
+    }
+
+    /// The review.md half of `rejectQueueItem` (access.ts:944). The caller
     /// composes this with `FindingsFile.remove` using `findingsTextFor(lineText:)`,
     /// tolerating a not-found finding exactly like the CLI does.
     public mutating func reject(lineText: String) throws {
-        try approve(lineText: lineText)
+        try dequeue(lineText: lineText)
     }
 
     /// The parsed queue text used as the FINDINGS.md match needle for
     /// reject/edit (`parseQueueLine(lineText).text` in access.ts:717,732).
     public static func findingsTextFor(lineText: String) -> String {
         parseQueueLine(lineText).text
+    }
+
+    /// Capture provenance recorded on the queue line, if any.
+    ///
+    /// A promoted finding is stamped with where the observation *came from*, not
+    /// with the device that happened to tap Approve (access.ts:906 carries the
+    /// queue line's provenance onto the promotion).
+    public static func capturedProvenanceFor(lineText: String) -> FindingProvenance? {
+        parseSourceComment(lineText)
+    }
+
+    /// The date the item was queued, recorded on a promoted finding as
+    /// `<!-- phren:queued "YYYY-MM-DD" -->` (access.ts:906).
+    public static func queuedDateFor(lineText: String) -> String? {
+        parseQueueLine(lineText).date
     }
 
     /// The review.md half of `editQueueItem` (access.ts:728) — rewrites the

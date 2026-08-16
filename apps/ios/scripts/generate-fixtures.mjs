@@ -257,6 +257,10 @@ withFrozenDate("2026-07-26T13:00:00.000Z", () => {
     must(access.approveQueueItem(store, project, queue.data[0].line), "approve queue item"));
 });
 snapshot("review-after-approve.md", `${project}/review.md`);
+// Approve's whole point is the FINDINGS.md write. Snapshotting only review.md
+// meant a port that just spliced the queue line out — silently discarding every
+// sub-threshold extraction candidate, whose only copy is that line — passed.
+snapshot("findings-after-approve.md", `${project}/FINDINGS.md`);
 
 must(access.rejectQueueItem(store, project, queue.data[1].line), "reject queue item");
 snapshot("review-after-reject.md", `${project}/review.md`);
