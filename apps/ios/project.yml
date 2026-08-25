@@ -1,0 +1,113 @@
+# XcodeGen project definition. Generate the Xcode project with:
+#   brew install xcodegen && cd apps/ios && xcodegen generate
+# The .xcodeproj is generated locally and gitignored — this file is the
+# source of truth for project settings.
+name: Phren
+options:
+  bundleIdPrefix: com.phren
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  PhrenKit:
+    path: PhrenKit
+
+targets:
+  Phren:
+    type: application
+    platform: iOS
+    sources:
+      - Phren
+    dependencies:
+      - package: PhrenKit
+      - target: PhrenWidgets
+        embed: true
+    entitlements:
+      path: Phren/Phren.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.phren.ios
+    # Only what has no INFOPLIST_KEY_ build-setting form lives here.
+    # GENERATE_INFOPLIST_FILE stays on and merges the INFOPLIST_KEY_* settings
+    # below into this file, so the plist keeps a single source per key rather
+    # than a hand-maintained copy of everything Xcode already synthesizes.
+    info:
+      path: Phren/Info.plist
+      properties:
+        # XcodeGen's info: template otherwise hardcodes a literal "1.0"/"1"
+        # here (see PhrenWidgets below). GENERATE_INFOPLIST_FILE's own
+        # MARKETING_VERSION substitution currently wins over the file, but
+        # only while it stays on — spell the versions out so the file is
+        # right on its own terms either way.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Siri hears "phren" as "friend" or "fren" more often than not —
+        # dictation has no entry for the word. These are the app names Siri
+        # will also accept for "…to phren" phrases; the pronunciation hint
+        # tells it they all sound like "fren".
+        INAlternativeAppNames:
+          - INAlternativeAppName: Fren
+            INAlternativeAppNamePronunciationHint: fren
+          - INAlternativeAppName: Friend
+            INAlternativeAppNamePronunciationHint: fren
+          - INAlternativeAppName: Phren
+            INAlternativeAppNamePronunciationHint: fren
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Phren records audio only while you dictate a note."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Phren transcribes your dictation into a note on this device when possible."
+        # Export compliance: the app only ever speaks HTTPS to the GitHub REST
+        # API (via URLSession/TLS, the OS-provided stack) and stores its token
+        # in the system Keychain — both exempt from import/export reporting.
+        # Without this key, App Store Connect stops every build on upload to
+        # ask; setting it to NO answers that question at build time and skips
+        # the prompt.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_USER_SCRIPT_SANDBOXING: true
+
+  PhrenWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - PhrenWidgets
+    info:
+      path: PhrenWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: phren
+        # XcodeGen's info: template otherwise hardcodes a literal "1.0"/"1"
+        # here instead of tracking the target's own build settings, which
+        # Xcode flags at build time ("must match that of its containing
+        # parent app") once the two targets' versions drift.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: PhrenWidgets/PhrenWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.phren.ios
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios.widgets
+        PRODUCT_NAME: PhrenWidgets
+        # Keep in lockstep with the Phren target above — App Store Connect
+        # rejects an upload where the extension's version doesn't match its
+        # containing app's.
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: true
+        ENABLE_USER_SCRIPT_SANDBOXING: true

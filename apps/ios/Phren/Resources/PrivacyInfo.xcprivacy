@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!--
+		NSPrivacyAccessedAPICategoryUserDefaults — CA92.1, not 1C8F.1.
+
+		Every UserDefaults call in the app (AppModel's attached-store registry,
+		CaptureLog, QuickCaptureDefault, VoiceCaptureLastTarget) goes through
+		`UserDefaults.standard`. None of it uses
+		`UserDefaults(suiteName: "group.com.phren.ios")` — the App Group
+		entitlement exists only so the widget extension can read a JSON
+		snapshot file from the shared container via
+		`FileManager.containerURL(forSecurityApplicationGroupIdentifier:)`,
+		which is not a UserDefaults access at all. 1C8F.1 (defaults shared
+		across an App Group) would only apply if the app and widget actually
+		shared a UserDefaults suite, which they don't — the widget can't link
+		PhrenKit or the app target and never touches UserDefaults itself.
+		CA92.1 (information accessible only to the app itself) is correct.
+
+		No other required-reason category applies: nothing in Phren or
+		PhrenKit calls a file-timestamp API (creationDate/modificationDate/
+		contentModificationDateKey/getattrlist/stat — the one resourceValues(
+		forKeys:) call site reads only .isRegularFileKey, not a timestamp
+		key), reads system boot time, checks disk space, or enumerates active
+		keyboards.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
