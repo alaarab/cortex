@@ -32,7 +32,13 @@ fs.mkdirSync(path.join(store, project), { recursive: true });
 // A root manifest so path helpers treat this directory as a store root.
 fs.writeFileSync(path.join(store, "phren.root.yaml"), "installMode: shared\nsyncMode: workspace-git\n");
 
-fs.rmSync(fixturesDir, { recursive: true, force: true });
+// Fixtures this script does NOT produce. They are authored by hand to pin
+// behaviour the CLI cannot generate — a legacy on-disk queue, for instance —
+// and a blanket wipe here used to delete them, leaving the suite red until
+// someone noticed the file was gone.
+const HAND_AUTHORED = new Set(["pending-ops-legacy.json"]);
+const written = new Set();
+
 fs.mkdirSync(fixturesDir, { recursive: true });
 
 function must(result, label) {
@@ -46,12 +52,23 @@ function snapshot(name, relPath) {
   const src = path.join(store, relPath);
   const dest = path.join(fixturesDir, name);
   fs.copyFileSync(src, dest);
+  written.add(name);
   console.log(`wrote ${name}`);
 }
 
 function writeJson(name, value) {
   fs.writeFileSync(path.join(fixturesDir, name), JSON.stringify(value, null, 2) + "\n");
+  written.add(name);
   console.log(`wrote ${name}`);
+}
+
+/** Prunes fixtures this run no longer generates, sparing hand-authored ones. */
+function pruneStale() {
+  for (const entry of fs.readdirSync(fixturesDir)) {
+    if (written.has(entry) || HAND_AUTHORED.has(entry)) continue;
+    fs.rmSync(path.join(fixturesDir, entry), { recursive: true, force: true });
+    console.log(`pruned stale ${entry}`);
+  }
 }
 
 // --- FINDINGS.md ------------------------------------------------------------
@@ -132,5 +149,6 @@ const parsedTasks = must(tasks.readTasks(store, project), "read tasks");
 const { path: _p, ...taskDoc } = parsedTasks.data;
 writeJson("tasks-parsed.json", taskDoc);
 
+pruneStale();
 fs.rmSync(store, { recursive: true, force: true });
 console.log("done");
