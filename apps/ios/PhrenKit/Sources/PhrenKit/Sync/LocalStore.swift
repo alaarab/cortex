@@ -64,6 +64,9 @@ public actor LocalStore {
     /// read-only tier: `global/journal/…` is refused for the same reason
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
+        // Skills are the one writable thing outside a project directory:
+        // `global/skills/…` is authored content, unlike the rest of `global/`.
+        if isSkillPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
@@ -96,6 +99,7 @@ public actor LocalStore {
         // (cli/namespaces-store.ts:147), so it is also how the phone knows
         // whether this repo's finding-adds belong in the journal.
         if path == TeamBootstrap.fileName { return true }
+        if isSkillPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2 else { return false }
         if parts[0] == globalDirName {
@@ -122,6 +126,31 @@ public actor LocalStore {
             return JournalFile.parseFileName(parts[2]) != nil
         }
         return false
+    }
+
+    /// The two skill file shapes `collectSkills` recognizes
+    /// (packages/cli/src/skill/registry.ts:97-102), under either
+    /// `global/skills/` or `<project>/skills/`: a flat `<name>.md`, or a folder
+    /// `<name>/SKILL.md`. Nothing else in a skill folder is synced —
+    /// supporting files would need a whole-directory model the app lacks.
+    public static func isSkillPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.count >= 3, parts[1] == "skills" else { return false }
+        guard parts[0] == globalDirName || isProjectDirName(parts[0]) else { return false }
+        if parts.count == 3 {
+            return parts[2].hasSuffix(".md") && isSkillNameSegment(String(parts[2].dropLast(3)))
+        }
+        if parts.count == 4 {
+            return parts[3] == "SKILL.md" && isSkillNameSegment(parts[2])
+        }
+        return false
+    }
+
+    /// Guards the segments the app will mint or write. Deliberately stricter
+    /// than the CLI's on-disk reader: it rejects dot-segments and separators,
+    /// so a name typed in the editor can never escape `skills/`.
+    static func isSkillNameSegment(_ name: String) -> Bool {
+        JSRegex(#"^[A-Za-z0-9][A-Za-z0-9._-]*$"#).test(name) && !name.contains("..")
     }
 
     /// The cross-project tier: consolidated findings that apply everywhere,
@@ -300,6 +329,10 @@ public actor LocalStore {
         /// findings have been moved to the cold tier; absent means the project
         /// has never been consolidated and nothing of it is hidden.
         public var consolidated: [String: String] = [:]
+        /// Every synced skill, global and project-scoped, sorted by scope then
+        /// name. Flat rather than keyed by project because `global` is not a
+        /// project and the Skills UI lists both together.
+        public var skills: [Skill] = []
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -316,9 +349,22 @@ public actor LocalStore {
         var queue: [ProjectQueueItem] = []
         var projectNames = Set<String>()
         var journals: [String: [JournalFile]] = [:]
+        var skills: [Skill] = []
 
         for path in allPaths() {
             let parts = path.split(separator: "/").map(String.init)
+
+            // Skills come first: they are the only synced content that can sit
+            // outside a project directory (`global/skills/…`), so the project
+            // guard below would drop them.
+            if Self.isSkillPath(path) {
+                if let content = read(path), let skill = Skill.parse(path: path, content: content) {
+                    skills.append(skill)
+                    if case .project(let name) = skill.scope { projectNames.insert(name) }
+                }
+                continue
+            }
+
             guard parts.count >= 2, Self.isReadableProjectDirName(parts[0]) else { continue }
             let project = parts[0]
             projectNames.insert(project)
@@ -388,11 +434,63 @@ public actor LocalStore {
             )
         }
 
+        // Global first, then projects alphabetically, then skill name — the
+        // grouping order the Skills list renders in.
+        skills.sort { left, right in
+            if left.scope != right.scope {
+                if case .global = left.scope { return true }
+                if case .global = right.scope { return false }
+                return left.scope.source < right.scope.source
+            }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
-            truths: truths, consolidated: consolidated
+            truths: truths, consolidated: consolidated, skills: skills
         )
+    }
+
+    /// Raw material for the on-device graph. The payload builder works from the
+    /// *unparsed* FINDINGS.md text because score keys are minted per bullet
+    /// line, tag prefix included — reconstructing those lines from parsed
+    /// `Finding` values would risk drifting from the CLI's keys.
+    public func graphInput(storeName: String) -> GraphBuilder.Input {
+        var findingsMarkdown: [String: String] = [:]
+        var tasks: [String: TaskDoc] = [:]
+        var projectNames = Set<String>()
+
+        for path in allPaths() {
+            let parts = path.split(separator: "/").map(String.init)
+            guard parts.count == 2, Self.isReadableProjectDirName(parts[0]) else { continue }
+            let project = parts[0]
+            guard let content = read(path) else { continue }
+            switch parts[1] {
+            case "FINDINGS.md":
+                findingsMarkdown[project] = content
+                projectNames.insert(project)
+            case "tasks.md":
+                tasks[project] = TasksFile(project: project, content: content).doc
+                projectNames.insert(project)
+            default:
+                continue
+            }
+        }
+
+        return GraphBuilder.Input(
+            findingsMarkdown: findingsMarkdown, tasks: tasks,
+            projects: projectNames.sorted(), storeName: storeName
+        )
+    }
+
+    /// Resolves a graph node's score key to the FINDINGS.md bullet it was
+    /// minted from. nil when the key no longer matches any line — the finding
+    /// moved or was edited elsewhere — and the caller falls back to the node's
+    /// displayed text.
+    public func findingBulletText(project: String, scoreKey: String) -> String? {
+        guard let markdown = read("\(project)/FINDINGS.md") else { return nil }
+        return GraphBuilder.findBulletText(project: project, scoreKey: scoreKey, findingsMarkdown: markdown)
     }
 
     /// access.ts:797 — section order, then date desc, then project, then id.

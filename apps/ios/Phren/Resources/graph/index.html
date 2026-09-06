@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover so the canvas runs under the home indicator; the HUD
+     insets itself with env(safe-area-inset-*) below. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>phren graph</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #05060f; color: #dbe4ff;
+    font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* The renderer handles its own gestures; without this iOS steals
+       two-finger drags for page zoom and the camera fights the browser. */
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #graph-canvas { position: absolute; inset: 0; }
+  #graph-tooltip { position: absolute; }
+  #graph-status {
+    position: absolute;
+    top: calc(env(safe-area-inset-top) + 12px); left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 12px; border-radius: 999px;
+    background: rgba(8, 10, 22, 0.85);
+    border: 1px solid rgba(103, 232, 249, 0.25);
+    font-size: 12px; letter-spacing: 0.02em;
+    pointer-events: none; transition: opacity 200ms ease;
+  }
+  #graph-status[hidden] { display: none; }
+</style>
+</head>
+<body>
+  <div id="graph-canvas"></div>
+  <div id="graph-tooltip"></div>
+  <div id="graph-status">Loading graph…</div>
+
+  <script src="phren-graph.js"></script>
+  <script>
+  (function () {
+    var status = document.getElementById("graph-status");
+    function setStatus(text) {
+      if (!text) { status.hidden = true; return; }
+      status.hidden = false;
+      status.textContent = text;
+    }
+
+    function post(name, body) {
+      var handler = window.webkit
+        && window.webkit.messageHandlers
+        && window.webkit.messageHandlers[name];
+      if (handler) handler.postMessage(body);
+    }
+
+    // Swift calls this with the payload built on-device by GraphBuilder.
+    window.phrenHost = {
+      render: function (payload) {
+        if (!window.phrenGraph) {
+          setStatus("Renderer failed to load");
+          post("graphError", { message: "window.phrenGraph is undefined" });
+          return;
+        }
+        try {
+          window.phrenGraph.mount(payload);
+          setStatus(payload && payload.nodes && payload.nodes.length ? "" : "Nothing to show yet");
+          wire();
+        } catch (err) {
+          setStatus("Could not draw the graph");
+          post("graphError", { message: String((err && err.message) || err) });
+        }
+      },
+      focusNode: function (id) {
+        if (window.phrenGraph && window.phrenGraph.focusNode) window.phrenGraph.focusNode(id);
+      },
+    };
+
+    var wired = false;
+    function wire() {
+      if (wired) return;
+      wired = true;
+
+      window.phrenGraph.onNodeSelect(function (node) {
+        post("graphSelect", serialize(node));
+      });
+      window.phrenGraph.onSelectionClear(function () {
+        post("graphSelect", null);
+      });
+
+      // The project pane's inline editor emits these. "save-inline" carries
+      // the edited text on the detail object; "delete" carries none.
+      window.phrenGraph.onItemAction(function (detail, action) {
+        var items = Array.isArray(detail) ? detail : [detail];
+        post("graphAction", {
+          action: action,
+          items: items.map(serialize),
+        });
+      });
+    }
+
+    // Only the fields Swift needs to resolve a node back to a markdown line.
+    function serialize(node) {
+      if (!node) return null;
+      return {
+        id: node.id,
+        kind: node.kind,
+        group: node.group,
+        project: node.project,
+        label: node.label,
+        fullLabel: node.fullLabel,
+        text: node.text,
+        scoreKey: node.scoreKey,
+        editedText: node.editedText,
+        editedSection: node.editedSection,
+        editedPriority: node.editedPriority,
+      };
+    }
+
+    post("graphReady", {});
+  })();
+  </script>
+</body>
+</html>

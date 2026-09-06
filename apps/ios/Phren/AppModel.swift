@@ -42,6 +42,19 @@ final class StoreContext: Identifiable {
 /// A (store, project) pair — the app's addressing unit. Unlike the CLI's
 /// name-keyed primary-wins merge (which silently shadows a project that exists
 /// in two stores), the app shows both, disambiguated by store.
+/// A skill plus the store it came from — skills exist in `global/` as well as
+/// in projects, so they are addressed by store rather than by (store, project).
+struct StoreSkill: Identifiable, Hashable {
+    let storeId: String
+    let storeName: String
+    let skill: Skill
+
+    var id: String { "\(storeId)/\(skill.path)" }
+
+    static func == (lhs: StoreSkill, rhs: StoreSkill) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 struct StoreProject: Identifiable, Hashable {
     let storeId: String
     let storeName: String
@@ -748,6 +761,120 @@ final class AppModel {
     }
 
     // MARK: - Mutations
+
+    // MARK: - Skills
+
+    /// Every synced skill across the open (and filtered) stores.
+    var mergedSkills: [StoreSkill] {
+        filteredContexts.flatMap { context in
+            context.snapshot.skills.map {
+                StoreSkill(storeId: context.id, storeName: context.descriptor.displayName, skill: $0)
+            }
+        }
+    }
+
+    /// Repo path for a new skill. Flat `<name>.md` is the shape the app mints:
+    /// `collectSkills` reads both, but a folder skill may carry supporting
+    /// files the app does not sync.
+    static func newSkillPath(scope: Skill.Scope, name: String) -> String {
+        "\(scope.source)/skills/\(name).md"
+    }
+
+    func saveSkill(path: String, content: String, in storeId: String) async throws {
+        try await enqueue(.updateSkill(path: path, content: content), in: storeId)
+        await refresh()
+    }
+
+    func deleteSkill(path: String, in storeId: String) async throws {
+        try await enqueue(.deleteSkill(path: path), in: storeId)
+        await refresh()
+    }
+
+    // MARK: - Graph
+
+    /// Builds the renderer payload from every open store and merges them, the
+    /// way `buildGraph` concatenates across store paths.
+    func graphPayloadJSON(focusProject: String?) async throws -> String {
+        var nodes: [GraphPayload.Node] = []
+        var links: [GraphPayload.Link] = []
+        var topics: [String: GraphPayload.Topic] = [:]
+
+        for context in filteredContexts {
+            let input = await context.store.graphInput(storeName: context.descriptor.displayName)
+            // Focusing a project that lives in another store would otherwise
+            // emit a bare project node with no findings.
+            if let focusProject, !input.projects.contains(focusProject) { continue }
+            let payload = GraphBuilder.build(input, focusProject: focusProject)
+            nodes.append(contentsOf: payload.nodes)
+            links.append(contentsOf: payload.links)
+            for topic in payload.topics { topics[topic.slug] = topic }
+        }
+
+        return try GraphPayload(
+            nodes: nodes, links: links,
+            topics: topics.values.sorted { $0.slug < $1.slug },
+            total: nodes.count
+        ).jsonString()
+    }
+
+    /// Applies an inline edit made in the graph's project pane. The node's
+    /// score key pins the exact source line, so two findings differing only by
+    /// `[tag]` stay distinguishable; the displayed text is the fallback when
+    /// the key no longer resolves.
+    func applyGraphEdit(node: GraphNodeRef, newText: String) async throws {
+        let (storeId, project, match) = try await resolveGraphNode(node)
+        if node.isTask {
+            try await enqueue(.updateTask(project: project, match: match, text: newText,
+                                          priority: nil, section: nil), in: storeId)
+        } else {
+            try await enqueue(.editFinding(project: project, match: match, newText: newText), in: storeId)
+        }
+        await refresh()
+    }
+
+    func applyGraphDelete(node: GraphNodeRef) async throws {
+        let (storeId, project, match) = try await resolveGraphNode(node)
+        if node.isTask {
+            try await enqueue(.removeTask(project: project, match: match), in: storeId)
+        } else {
+            try await enqueue(.removeFinding(project: project, match: match), in: storeId)
+        }
+        await refresh()
+    }
+
+    /// Locates the store holding a graph node and the markdown text its
+    /// mutation should match on.
+    private func resolveGraphNode(_ node: GraphNodeRef) async throws -> (storeId: String, project: String, match: String) {
+        guard node.isFinding || node.isTask else {
+            throw PhrenKitError.validation("Only findings and tasks can be edited from the graph.")
+        }
+        guard let project = node.project else {
+            throw PhrenKitError.validation("That node is not attached to a project.")
+        }
+        guard let context = filteredContexts.first(where: { context in
+            context.snapshot.projects.contains { $0.name == project }
+        }) else {
+            throw PhrenKitError.validation("No open store holds \(project).")
+        }
+
+        if node.isTask {
+            guard let text = node.sourceText, !text.isEmpty else {
+                throw PhrenKitError.validation("That task has no text to match on.")
+            }
+            return (context.id, project, text)
+        }
+
+        let resolved: String?
+        if let scoreKey = node.scoreKey {
+            resolved = await context.store.findingBulletText(project: project, scoreKey: scoreKey)
+        } else {
+            resolved = nil
+        }
+        guard let match = resolved ?? node.sourceText, !match.isEmpty else {
+            throw PhrenKitError.validation("Could not find that finding in \(project)/FINDINGS.md.")
+        }
+        return (context.id, project, match)
+    }
 
     func perform(_ op: PendingOp, in storeId: String) async {
         do {

@@ -68,6 +68,19 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        NavigationLink { GraphView() } label: {
+                            Label("Memory graph", systemImage: "circle.hexagongrid")
+                        }
+                        NavigationLink { SkillsView() } label: {
+                            Label("Skills", systemImage: "wand.and.stars")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More")
+                }
                 if model.hasMultipleStores {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {

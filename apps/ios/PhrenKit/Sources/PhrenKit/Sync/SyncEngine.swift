@@ -899,6 +899,29 @@ public actor SyncEngine {
                 section: section.flatMap(PhrenTask.Section.init(rawValue:))
             ))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
+
+        case .updateSkill(let path, let content):
+            // A skill is authored prose, so the op already holds the finished
+            // bytes: there is nothing to re-derive from current content, which
+            // makes a replay trivially deterministic.
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            guard !content.isEmpty else {
+                throw PhrenKitError.validation("Refusing to save an empty skill.")
+            }
+            // The same gate the CLI applies to findings — a skill body is free
+            // prose and just as capable of carrying a pasted token.
+            if let secret = SecretScanner.scan(content) {
+                throw PhrenKitError.validation(secret)
+            }
+            return [FileEdit(path: path, content: content)]
+
+        case .deleteSkill(let path):
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            return [FileEdit(path: path, content: nil)]
         }
     }
 }
