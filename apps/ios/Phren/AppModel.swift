@@ -40,6 +40,19 @@ struct StoreProject: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// A skill plus the store it came from — skills exist in `global/` as well as
+/// in projects, so they are addressed by store rather than by (store, project).
+struct StoreSkill: Identifiable, Hashable {
+    let storeId: String
+    let storeName: String
+    let skill: Skill
+
+    var id: String { "\(storeId)/\(skill.path)" }
+
+    static func == (lhs: StoreSkill, rhs: StoreSkill) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 struct StoreQueueEntry: Identifiable {
     let storeId: String
     let storeName: String
@@ -644,6 +657,140 @@ final class AppModel {
             lastActionError = error.localizedDescription
         }
         await refresh()
+    }
+
+    /// Throwing sibling of `perform` for callers that surface their own
+    /// errors inline (the graph and skill editors) rather than through the
+    /// global `lastActionError` banner.
+    func performThrowing(_ op: PendingOp, in storeId: String) async throws {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
+            throw PhrenKitError.validation("Store \(storeId) is not open.")
+        }
+        guard context.descriptor.canPush else {
+            throw PhrenKitError.validation("\(context.descriptor.displayName) is read-only — your GitHub token can't push to it.")
+        }
+        try await context.engine.enqueue(op)
+        if isDemo { await context.engine.discardPending() }
+        await refresh()
+    }
+
+    // MARK: - Skills
+
+    /// Every synced skill across the open (and filtered) stores.
+    var mergedSkills: [StoreSkill] {
+        filteredContexts.flatMap { context in
+            context.snapshot.skills.map {
+                StoreSkill(storeId: context.id, storeName: context.descriptor.displayName, skill: $0)
+            }
+        }
+    }
+
+    /// Repo path for a skill named `name` in `scope`. Flat `<name>.md` is the
+    /// shape the app creates — `collectSkills` reads both, and a folder skill
+    /// may carry supporting files the app does not sync, so it is not a shape
+    /// the app should mint.
+    static func newSkillPath(scope: Skill.Scope, name: String) -> String {
+        "\(scope.source)/skills/\(name).md"
+    }
+
+    func saveSkill(path: String, content: String, in storeId: String) async throws {
+        try await performThrowing(.updateSkill(path: path, content: content), in: storeId)
+    }
+
+    func deleteSkill(path: String, in storeId: String) async throws {
+        try await performThrowing(.deleteSkill(path: path), in: storeId)
+    }
+
+    // MARK: - Graph
+
+    /// Builds the renderer payload from every open store and merges them, the
+    /// way `buildGraph` concatenates across store paths.
+    func graphPayloadJSON(focusProject: String?) async throws -> String {
+        var nodes: [GraphPayload.Node] = []
+        var links: [GraphPayload.Link] = []
+        var topics: [String: GraphPayload.Topic] = [:]
+
+        for context in filteredContexts {
+            let input = await context.store.graphInput(storeName: context.descriptor.displayName)
+            // Focusing a project that lives in another store would otherwise
+            // emit a bare project node with no findings.
+            if let focusProject, !input.projects.contains(focusProject) { continue }
+            let payload = GraphBuilder.build(input, focusProject: focusProject)
+            nodes.append(contentsOf: payload.nodes)
+            links.append(contentsOf: payload.links)
+            for topic in payload.topics { topics[topic.slug] = topic }
+        }
+
+        return try GraphPayload(
+            nodes: nodes, links: links,
+            topics: topics.values.sorted { $0.slug < $1.slug },
+            total: nodes.count
+        ).jsonString()
+    }
+
+    /// Applies an inline edit made in the graph's project pane.
+    ///
+    /// The node's score key pins the exact source line, so two findings that
+    /// differ only by `[tag]` prefix stay distinguishable; the displayed text
+    /// is the fallback when the key no longer resolves.
+    func applyGraphEdit(node: GraphNodeRef, newText: String) async throws {
+        let (storeId, project, match) = try await resolveGraphNode(node)
+        if node.isTask {
+            try await performThrowing(
+                .updateTask(project: project, match: match, text: newText, priority: nil, section: nil),
+                in: storeId
+            )
+        } else {
+            try await performThrowing(
+                .editFinding(project: project, match: match, newText: newText),
+                in: storeId
+            )
+        }
+    }
+
+    func applyGraphDelete(node: GraphNodeRef) async throws {
+        let (storeId, project, match) = try await resolveGraphNode(node)
+        if node.isTask {
+            try await performThrowing(.removeTask(project: project, match: match), in: storeId)
+        } else {
+            try await performThrowing(.removeFinding(project: project, match: match), in: storeId)
+        }
+    }
+
+    /// Locates the store holding a graph node and the markdown text its
+    /// mutation should match on.
+    private func resolveGraphNode(_ node: GraphNodeRef) async throws -> (storeId: String, project: String, match: String) {
+        guard node.isFinding || node.isTask else {
+            throw PhrenKitError.validation("Only findings and tasks can be edited from the graph.")
+        }
+        guard let project = node.project else {
+            throw PhrenKitError.validation("That node is not attached to a project.")
+        }
+        guard let context = filteredContexts.first(where: { context in
+            context.snapshot.projects.contains { $0.name == project }
+        }) else {
+            throw PhrenKitError.validation("No open store holds \(project).")
+        }
+
+        if node.isTask {
+            // Tasks are matched by their line text; the graph node id already
+            // carries the positional id but that is recomputed on every read.
+            guard let text = node.sourceText, !text.isEmpty else {
+                throw PhrenKitError.validation("That task has no text to match on.")
+            }
+            return (context.id, project, text)
+        }
+
+        let resolved: String?
+        if let scoreKey = node.scoreKey {
+            resolved = await context.store.findingBulletText(project: project, scoreKey: scoreKey)
+        } else {
+            resolved = nil
+        }
+        guard let match = resolved ?? node.sourceText, !match.isEmpty else {
+            throw PhrenKitError.validation("Could not find that finding in \(project)/FINDINGS.md.")
+        }
+        return (context.id, project, match)
     }
 
     func retryFailedOps() async {

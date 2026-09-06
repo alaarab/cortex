@@ -68,6 +68,19 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        NavigationLink(value: Route.graph(project: nil)) {
+                            Label("Memory graph", systemImage: "circle.hexagongrid")
+                        }
+                        NavigationLink(value: Route.skills(project: nil)) {
+                            Label("Skills", systemImage: "wand.and.stars")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More")
+                }
                 // Local stores are the only place the app can create projects
                 // (GitHub stores get theirs from the CLI), so the button only
                 // appears when one exists.
@@ -306,6 +319,19 @@ struct FindingsTab: View {
             ToolbarItem(placement: .primaryAction) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("Add finding")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    NavigationLink(value: Route.graph(project: project)) {
+                        Label("Graph this project", systemImage: "circle.hexagongrid")
+                    }
+                    NavigationLink(value: Route.skills(project: project)) {
+                        Label("Project skills", systemImage: "wand.and.stars")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("More")
             }
         }
         .sheet(isPresented: $showAdd) {

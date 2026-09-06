@@ -585,6 +585,13 @@ public actor SyncEngine {
         case .removeNote(_, let date, let stableId):
             let notes = await store.readIfAvailable("\(project)/notes/\(date).md") ?? ""
             return !notes.contains("<!-- nid:\(stableId) -->")
+        case .updateSkill(let path, let content):
+            // Unusually for a text-addressed op this *is* provable: the op
+            // carries the exact bytes it meant to write, so a matching file is
+            // proof the write landed rather than a guess.
+            return await store.readIfAvailable(path) == content
+        case .deleteSkill(let path):
+            return await store.readIfAvailable(path) == nil
         case .promoteNote(_, let date, let stableId, _):
             let notes = await store.readIfAvailable("\(project)/notes/\(date).md") ?? ""
             guard let note = NotesFile(project: project, date: date, content: notes)
@@ -730,6 +737,29 @@ public actor SyncEngine {
                 section: section.flatMap(PhrenTask.Section.init(rawValue:))
             ))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
+
+        case .updateSkill(let path, let content):
+            // A skill is authored prose, so the op already holds the finished
+            // bytes: there is nothing to re-derive from current content, and a
+            // replay is trivially deterministic.
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            guard !content.isEmpty else {
+                throw PhrenKitError.validation("Refusing to save an empty skill.")
+            }
+            // Same gate the CLI applies to findings — a skill body is free
+            // prose and just as capable of carrying a pasted token.
+            if let secret = SecretScanner.scan(content) {
+                throw PhrenKitError.validation(secret)
+            }
+            return [FileEdit(path: path, content: content)]
+
+        case .deleteSkill(let path):
+            guard LocalStore.isSkillPath(path) else {
+                throw PhrenKitError.validation("\(path) is not a skill path.")
+            }
+            return [FileEdit(path: path, content: nil)]
         }
     }
 }

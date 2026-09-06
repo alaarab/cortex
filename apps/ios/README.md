@@ -88,9 +88,60 @@ anything the CLI would reject.
   `x-ratelimit-reset`) and block only their own file's lane, so one repo's
   permission error no longer stalls every other project's queue.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
-  and `notes/YYYY-MM-DD.md` are ever written. `.config/`, `phren.root.yaml`,
-  `stores.yaml`, `CLAUDE.md`, `summary.md`, `reference/`, `journal/` are
-  read-only or untouched.
+  `notes/YYYY-MM-DD.md`, and skills (`global/skills/…`, `<project>/skills/…`)
+  are ever written. `.config/`, `phren.root.yaml`, `stores.yaml`, `CLAUDE.md`,
+  `summary.md`, `reference/`, `journal/` are read-only or untouched.
+
+### Skills
+
+Both shapes `collectSkills` recognizes are synced and editable: a flat
+`<scope>/skills/<name>.md` and a folder `<scope>/skills/<name>/SKILL.md`, under
+`global/` as well as under a project. Skills are the one writable thing outside
+a project directory.
+
+A skill is authored prose with no line grammar, so unlike a finding it is
+edited as a **whole file**: `updateSkill` carries the finished bytes rather
+than a diff. That makes its replay trivially deterministic and its
+postcondition exactly checkable (the file either holds those bytes or it does
+not), so a lost PUT response drains cleanly instead of parking. Bodies are
+secret-scanned on save, same as findings.
+
+Only `SKILL.md` is synced from a folder skill — supporting files alongside it
+would need a whole-directory model the app does not have — and the app only
+ever *creates* flat skills. Frontmatter is validated the way `phren link`
+validates it (`name`, `description`), but a missing field warns rather than
+blocks: refusing to save a half-written skill would be worse than syncing one.
+
+### Graph
+
+The Graph screen runs the **same** `packages/cli/browser/graph` renderer as the
+web memory UI and the VS Code webview, bundled into the app by
+`scripts/bundle-graph.mjs` and hosted in a `WKWebView`. Regenerate it after
+changing anything under `packages/cli/browser/`; the output is gitignored.
+
+Those two hosts fetch `/api/graph` from the local phren server. The app is
+serverless, so `GraphBuilder` builds the payload **on-device** from synced
+markdown and injects it. Node ids and score keys match the CLI's exactly —
+pinned by `graph-identity.json`, generated from the real CLI hashers — which is
+what lets a tapped node resolve back to its exact `FINDINGS.md` bullet, tag
+prefix included, so two findings differing only by `[tag]` stay distinct.
+
+Inline edits and deletes made in the graph's project pane come back over a
+script-message bridge and become ordinary `PendingOp`s, so a graph edit syncs
+and conflicts exactly like one made in the findings list. The desktop's `merge`
+and `delete-batch` bulk actions are deliberately ignored — half-applying them
+would be worse than not offering them.
+
+Deliberate divergences from `buildGraph`, all consequences of what the app
+syncs rather than of the renderer:
+
+- no `entity` or `reference` nodes (both derive from `reference/` docs and the
+  FTS index, neither mirrored)
+- topics come from a finding's own `[tag]`, not `classifyTopicForText` — the
+  CLI's topic set is *adaptive*, built from a content signal over the whole
+  store, and a half-transcribed version would silently disagree with the
+  desktop graph
+- `scores` is empty (score journals live under `.config/`)
 
 ## Building
 
@@ -98,9 +149,13 @@ Requirements: Xcode 15+ (iOS 17 SDK), [XcodeGen](https://github.com/yonaskolb/Xc
 
 ```bash
 cd apps/ios
-xcodegen generate      # produces Phren.xcodeproj from project.yml
-open Phren.xcodeproj   # build & run the Phren scheme
+node scripts/bundle-graph.mjs   # bundles the 3D graph renderer (gitignored)
+xcodegen generate               # produces Phren.xcodeproj from project.yml
+open Phren.xcodeproj            # build & run the Phren scheme
 ```
+
+Without the bundle step the app builds and runs, but the Graph screen says the
+renderer is missing rather than showing a blank canvas.
 
 ### Running on a real device
 

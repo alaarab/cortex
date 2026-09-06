@@ -18,6 +18,11 @@ public enum PendingOp: Codable, Equatable, Sendable {
     case completeTask(project: String, match: String)
     case removeTask(project: String, match: String)
     case updateTask(project: String, match: String, text: String?, priority: String?, section: String?)
+    /// Whole-file write of a skill (creates the file when it does not exist).
+    /// Skills carry no line grammar, so the op stores the finished bytes rather
+    /// than a diff — which also makes its postcondition exactly checkable.
+    case updateSkill(path: String, content: String)
+    case deleteSkill(path: String)
 
     public var project: String {
         switch self {
@@ -28,6 +33,11 @@ public enum PendingOp: Codable, Equatable, Sendable {
              .addTask(let p, _), .completeTask(let p, _), .removeTask(let p, _),
              .updateTask(let p, _, _, _, _):
             return p
+        case .updateSkill(let path, _), .deleteSkill(let path):
+            // "global" for a global skill — not a project, but the correct
+            // commit-message scope, and the only place this value is read for
+            // skill ops.
+            return path.split(separator: "/").first.map(String.init) ?? "global"
         }
     }
 
@@ -41,6 +51,7 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .approveQueue, .rejectQueue, .editQueue: kind = "update"
         case .addNote, .editNote, .removeNote, .promoteNote: kind = "update"
         case .addTask, .completeTask, .removeTask, .updateTask: kind = "task"
+        case .updateSkill, .deleteSkill: kind = "skills"
         }
         return "phren: \(project)(\(kind)) via ios"
     }
@@ -64,6 +75,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
             return ["\(project)/FINDINGS.md", "\(project)/notes/\(date).md"]
         case .addTask, .completeTask, .removeTask, .updateTask:
             return ["\(project)/tasks.md"]
+        case .updateSkill(let path, _), .deleteSkill(let path):
+            return [path]
         }
     }
 
@@ -84,7 +97,18 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .completeTask: return "Complete task"
         case .removeTask: return "Delete task"
         case .updateTask: return "Update task"
+        case .updateSkill(let path, _): return "Save skill: \(Self.skillName(path))"
+        case .deleteSkill(let path): return "Delete skill: \(Self.skillName(path))"
         }
+    }
+
+    /// `<scope>/skills/<name>.md` and `<scope>/skills/<name>/SKILL.md` both
+    /// label as `<scope>/<name>`.
+    private static func skillName(_ path: String) -> String {
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.count >= 3 else { return path }
+        let name = parts.count == 4 ? parts[2] : String(parts[2].dropLast(3))
+        return "\(parts[0])/\(name)"
     }
 }
 

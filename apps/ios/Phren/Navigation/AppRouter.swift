@@ -17,6 +17,10 @@ enum Route: Hashable {
                  section: ProjectDetailView.Tab = .findings, scrollTo: String? = nil)
     case finding(storeId: String, project: String, ref: String)
     case task(storeId: String, project: String, ref: String)
+    /// nil focuses nothing — the whole store graph.
+    case graph(project: String?)
+    /// nil lists every scope, including global skills.
+    case skills(project: String?)
 
     /// Parses the SearchIndex result-id grammar: `f:<store>:<project>:<ref>`,
     /// and likewise `t:` (task), `n:` (note), `s:` (summary), `u:` (truth),
@@ -45,6 +49,10 @@ enum Route: Hashable {
              .finding(let storeId, let project, _),
              .task(let storeId, let project, _):
             return .project(storeId: storeId, project: project)
+        case .graph, .skills:
+            // Not project-scoped by identity — they are pushed on their own,
+            // so they seed no Back stack beneath themselves.
+            return self
         }
     }
 }
@@ -98,6 +106,8 @@ final class AppRouter {
 
     private static func stack(for route: Route) -> [Route] {
         if case .project = route { return [route] }
+        if case .graph = route { return [route] }
+        if case .skills = route { return [route] }
         return [route.projectRoute, route]
     }
 }
@@ -115,6 +125,10 @@ struct RouteDestinationView: View {
             FindingDetailView(storeId: storeId, project: project, ref: ref)
         case .task(let storeId, let project, let ref):
             TaskDetailView(storeId: storeId, project: project, ref: ref)
+        case .graph(let project):
+            GraphView(focusProject: project)
+        case .skills(let project):
+            SkillsView(project: project)
         }
     }
 }

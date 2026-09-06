@@ -22,7 +22,14 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Phren
+      # The graph renderer must keep its directory in the bundle: the page
+      # loads phren-graph.js by relative URL, so a flattened copy breaks it.
+      - path: Phren
+        excludes:
+          - "Resources/graph/**"
+      - path: Phren/Resources/graph
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: PhrenKit
     settings:
