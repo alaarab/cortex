@@ -36,6 +36,9 @@ struct LiveSessionsView: View {
             }
         }
         .navigationTitle("Live sessions")
+        // Keep the title in the navigation bar rather than the collapsible
+        // large-title region when this list is hosted directly by a tab.
+        .navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
         .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
     }
