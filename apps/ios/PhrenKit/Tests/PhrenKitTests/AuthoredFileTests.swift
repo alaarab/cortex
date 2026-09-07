@@ -65,7 +65,7 @@ final class AuthoredFileTests: XCTestCase {
         XCTAssertEqual(snapshot.instructions["demo"], content)
         let loaded = PendingOpsQueue.load(from: directory.appendingPathComponent("pending-ops.json"))
         XCTAssertNil(loaded.issue)
-        XCTAssertEqual(loaded.queue.schemaVersion, 2)
+        XCTAssertEqual(loaded.queue.schemaVersion, PendingOpsQueue.currentSchemaVersion)
         XCTAssertEqual(loaded.queue.pending.map(\.op), [op])
     }
 

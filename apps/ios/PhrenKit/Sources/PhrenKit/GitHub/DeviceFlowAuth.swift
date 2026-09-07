@@ -7,15 +7,23 @@ import FoundationNetworking
 /// No client secret is needed or embedded — the OAuth App must have
 /// "Device Flow" enabled in its settings (see apps/ios/README.md).
 public actor DeviceFlowAuth {
-    /// The registered phren OAuth App client ID. Replace the placeholder after
-    /// registering the OAuth App (README "GitHub OAuth App" section). Until
-    /// then, the PAT sign-in path is fully functional.
-    public static let defaultClientID = "REPLACE_WITH_PHREN_OAUTH_CLIENT_ID"
+    /// Supplied by the host app's build configuration; the reusable package
+    /// contains no app registration or secret. PAT sign-in works without it.
+    public static var defaultClientID: String {
+        configuredClientID(Bundle.main.object(forInfoDictionaryKey: "PhrenGitHubClientID") as? String) ?? ""
+    }
 
     /// Whether the owner has registered a real OAuth App and swapped in its
     /// client ID. While false, device-flow sign-in would 404 at GitHub, so
     /// callers should hide/disable that path and steer to PAT sign-in.
-    public static var isConfigured: Bool { !defaultClientID.hasPrefix("REPLACE_WITH_") }
+    public static var isConfigured: Bool { !defaultClientID.isEmpty }
+
+    public static func configuredClientID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty, !value.hasPrefix("REPLACE_WITH_"), !value.hasPrefix("YOUR_"),
+              value.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
 
     /// `repo` is a classic scope — required for private store repos. OAuth
     /// apps cannot request fine-grained permissions.
@@ -56,6 +64,9 @@ public actor DeviceFlowAuth {
 
     /// Step 1: request a device + user code to display.
     public func requestCode() async throws -> DeviceCodeResponse {
+        guard Self.configuredClientID(clientID) != nil else {
+            throw PhrenKitError.validation("GitHub sign-in isn't configured for this build.")
+        }
         let json = try await post("https://github.com/login/device/code", params: [
             "client_id": clientID,
             "scope": Self.scope,

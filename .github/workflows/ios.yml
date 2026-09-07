@@ -17,6 +17,7 @@ on:
       - "packages/cli/src/governance/policy.ts"
       - "packages/cli/src/core/**"
       - "packages/cli/src/task/**"
+      - "packages/cli/src/skill/**"
       - "packages/cli/browser/**"
       - "packages/cli/src/graph-core/**"
       - "pnpm-lock.yaml"
@@ -30,6 +31,7 @@ on:
       - "packages/cli/src/governance/policy.ts"
       - "packages/cli/src/core/**"
       - "packages/cli/src/task/**"
+      - "packages/cli/src/skill/**"
       - "packages/cli/browser/**"
       - "packages/cli/src/graph-core/**"
       - "pnpm-lock.yaml"
@@ -77,3 +79,19 @@ jobs:
         run: pnpm exec playwright install chromium
       - name: Test phone graph renderer
         run: node --test apps/ios/scripts/test-graph.mjs
+      - name: Test native graph navigation
+        working-directory: apps/ios
+        run: |
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/phren-devices.json"
+          PHREN_TEST_DEVICE_ID=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(v["udid"] for devices in d["devices"].values() for v in devices if v["name"].startswith("iPhone")))' "$RUNNER_TEMP/phren-devices.json")
+          xcodebuild test -project Phren.xcodeproj -scheme Phren \
+            -destination "platform=iOS Simulator,id=$PHREN_TEST_DEVICE_ID" \
+            -resultBundlePath "$RUNNER_TEMP/PhrenUITests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Save native test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhrenUITests
+          path: ${{ runner.temp }}/PhrenUITests.xcresult
+          if-no-files-found: ignore

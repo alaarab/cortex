@@ -51,6 +51,10 @@ struct SkillsView: View {
                                 HStack {
                                     if model.hasMultipleStores { TagChip(text: entry.storeName, role: .store) }
                                     if !model.canPush(storeId: entry.storeId) { TagChip(text: "Read-only", role: .status) }
+                                    if let preferences = try? model.skillPreferences(in: entry.storeId),
+                                       preferences.explicitSetting(scope: entry.skill.scope.source, name: entry.skill.name) == false {
+                                        TagChip(text: "Disabled", role: .status)
+                                    }
                                     if project != nil && entry.skill.scope == .global {
                                         TagChip(text: "Global", role: .scope)
                                     }
@@ -119,6 +123,32 @@ struct SkillEditorView: View {
                 }
                 Section("Instructions") { DocumentPreview(content: current.skill.content) }
                 Section {
+                    if let preferences = try? model.skillPreferences(in: entry.storeId) {
+                        if let enabled = preferences.explicitSetting(scope: current.skill.scope.source, name: current.skill.name) {
+                            Toggle("Enabled for agents", isOn: Binding(
+                                get: { enabled },
+                                set: { value in Task { await toggle(current, enabled: value) } }
+                            ))
+                            .disabled(busy || !model.canPush(storeId: entry.storeId))
+                        } else {
+                            LabeledContent("Availability", value: "Computer settings")
+                            Text("No synced choice yet. A computer may have a different local setting.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if model.canPush(storeId: entry.storeId) {
+                                Button("Enable on linked computers") { Task { await toggle(current, enabled: true) } }.disabled(busy)
+                                Button("Disable on linked computers") { Task { await toggle(current, enabled: false) } }.disabled(busy)
+                            }
+                        }
+                    } else {
+                        Label("Skill settings couldn't be read. Refresh or update phren before changing them.", systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(.orange)
+                    }
+                } header: { Text("Availability") } footer: {
+                    Text(current.skill.scope == .global
+                         ? "Applies to this global skill in all projects. Linked computers apply the choice after syncing with an updated phren CLI."
+                         : "Applies to this project's skill. Linked computers apply the choice after syncing with an updated phren CLI.")
+                }
+                Section {
                     Text(current.skill.path).font(.caption.monospaced()).foregroundStyle(.secondary)
                     ShareLink(item: current.skill.content) { Label("Share skill", systemImage: "square.and.arrow.up") }
                 }
@@ -152,7 +182,7 @@ struct SkillEditorView: View {
             Text("The skill's instructions will be removed from \(entry.storeName) on sync."
                  + (entry.skill.format == .folder ? " Supporting files will remain in its folder." : ""))
         }
-        .alert("Couldn't delete", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+        .alert("Couldn't update skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
     }
@@ -161,6 +191,13 @@ struct SkillEditorView: View {
         busy = true
         defer { busy = false }
         do { try await model.deleteSkill(entry); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func toggle(_ entry: StoreSkill, enabled: Bool) async {
+        busy = true
+        defer { busy = false }
+        do { try await model.setSkillEnabled(entry, enabled: enabled) }
         catch { self.error = error.localizedDescription }
     }
 }

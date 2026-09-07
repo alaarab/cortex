@@ -90,6 +90,10 @@
       focusNode: function (id) {
         if (window.phrenGraph && window.phrenGraph.focusNode) window.phrenGraph.focusNode(id);
       },
+      revealNode: function (id) {
+        window.phrenGraph.clearSelection();
+        window.phrenGraph.peekNode(id);
+      },
       reset: function () { window.graphReset(); },
       zoom: function (factor) { window.graphZoom(factor); },
       clear: function () { window.phrenGraph.clearSelection(); },

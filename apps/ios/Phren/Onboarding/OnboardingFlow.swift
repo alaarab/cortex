@@ -28,6 +28,7 @@ struct WelcomeView: View {
     @State private var deviceCode: DeviceCodeResponse?
     @State private var authError: String?
     @State private var polling = false
+    @State private var authTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -43,7 +44,7 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
             TypewriterFindingCard()
                 .padding(.top, 4)
-            Text("Connect a GitHub token to open your phren store. It's stored only in this device's Keychain.")
+            Text("Connect GitHub to open your phren store. Your access token stays in this device's Keychain.")
                 .font(.footnote)
                 .foregroundStyle(PhrenTheme.textMuted)
                 .multilineTextAlignment(.center)
@@ -59,21 +60,24 @@ struct WelcomeView: View {
             }
 
             VStack(spacing: 12) {
+                if DeviceFlowAuth.isConfigured {
+                    Button {
+                        authTask = Task { await startDeviceFlow() }
+                    } label: {
+                        Label("Sign in with GitHub", systemImage: "person.crop.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(polling)
+                }
                 Button {
+                    authTask?.cancel()
                     showPATSheet = true
                 } label: {
                     Label("Connect with a GitHub token", systemImage: "key.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-
-                if DeviceFlowAuth.isConfigured {
-                    Button("Sign in with GitHub instead") {
-                        Task { await startDeviceFlow() }
-                    }
-                    .font(.footnote)
-                    .disabled(polling)
-                }
+                .buttonStyle(.bordered)
             }
             .padding(.bottom)
         }
@@ -83,20 +87,22 @@ struct WelcomeView: View {
         .sheet(isPresented: $showPATSheet) {
             PATSignInSheet()
         }
+        .onDisappear { authTask?.cancel() }
     }
 
     private func startDeviceFlow() async {
+        guard !polling else { return }
         authError = nil
         guard DeviceFlowAuth.isConfigured else {
             authError = "GitHub sign-in isn't set up yet — use a token instead."
             return
         }
+        polling = true
+        defer { polling = false; deviceCode = nil }
         let auth = DeviceFlowAuth()
         do {
             let code = try await auth.requestCode()
             deviceCode = code
-            polling = true
-            defer { polling = false }
             #if canImport(UIKit)
             if let url = URL(string: code.verificationUri) {
                 await UIApplication.shared.open(url)
@@ -104,6 +110,7 @@ struct WelcomeView: View {
             #endif
             switch try await auth.waitForAuthorization(code) {
             case .authorized(let token):
+                try Task.checkCancellation()
                 try await model.signIn(token: token, kind: .oauth)
             case .expired:
                 authError = "The code expired — try again."
@@ -113,9 +120,8 @@ struct WelcomeView: View {
                 break
             }
         } catch {
-            authError = "Couldn't reach GitHub: \(error.localizedDescription)"
+            if !Task.isCancelled { authError = "Couldn't reach GitHub: \(error.localizedDescription)" }
         }
-        deviceCode = nil
     }
 }
 

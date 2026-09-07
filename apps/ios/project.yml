@@ -9,11 +9,37 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
+configFiles:
+  Debug: Config/App.xcconfig
+  Release: Config/App.xcconfig
+
 packages:
   PhrenKit:
     path: PhrenKit
 
+schemes:
+  Phren:
+    build:
+      targets:
+        Phren: all
+    test:
+      targets:
+        - PhrenUITests
+
 targets:
+  PhrenUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - PhrenUITests
+    dependencies:
+      - target: Phren
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios.uitests
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.9"
+
   Phren:
     type: application
     platform: iOS
@@ -63,6 +89,7 @@ targets:
         # right on its own terms either way.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        PhrenGitHubClientID: "$(PHREN_GITHUB_CLIENT_ID)"
         # Siri hears "phren" as "friend" or "fren" more often than not —
         # dictation has no entry for the word. These are the app names Siri
         # will also accept for "…to phren" phrases; the pronunciation hint

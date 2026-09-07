@@ -19,6 +19,16 @@ struct GraphView: View {
     @State private var rendererID = UUID()
     @State private var renderedStore: String?
     @State private var renderedProject: String?
+    @State private var focusedNodeID: String?
+    @State private var connectionSteps = 1
+    @State private var focusHistory: [String] = []
+    @State private var showingSavedViews = false
+    @State private var namingView = false
+    @State private var savedViewName = ""
+    @State private var suggestedViewName = "Graph"
+    @State private var notice: String?
+    @State private var restoringView: GraphSavedView?
+    @AppStorage("graph.savedViews.v1") private var savedViewData = Data()
     @FocusState private var searchFocused: Bool
 
     private var selectedStore: String {
@@ -29,7 +39,14 @@ struct GraphView: View {
         return value
     }
     private var projects: [String] { model.snapshot(for: selectedStore).projects.map(\.name).sorted() }
-    private var visible: GraphPayload? { payload?.filtered(by: filter) }
+    private var filtered: GraphPayload? { payload?.filtered(by: filter) }
+    private var visible: GraphPayload? {
+        guard let filtered else { return nil }
+        return focusedNodeID.map { filtered.neighborhood(of: $0, steps: connectionSteps) } ?? filtered
+    }
+    private var savedViews: [GraphSavedView] {
+        (try? JSONDecoder().decode([GraphSavedView].self, from: savedViewData)) ?? []
+    }
     private var refreshKey: RefreshKey {
         RefreshKey(store: selectedStore, project: selectedProject, date: model.syncStatus.lastSyncedAt)
     }
@@ -81,6 +98,13 @@ struct GraphView: View {
                     if !showingSearch { query = "" }
                 } label: { Label("Search graph", systemImage: "magnifyingglass") }
                 Menu {
+                    Button("Save this view", systemImage: "bookmark") {
+                        suggestedViewName = focusedNodeID.flatMap { id in filtered?.nodes.first { $0.id == id }?.label }
+                            ?? selectedProject ?? "All projects"
+                        savedViewName = ""
+                        namingView = true
+                    }.disabled(payload == nil)
+                    Button("Saved views", systemImage: "bookmark.fill") { showingSavedViews = true }
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         Task { await model.pullToRefresh(); await rebuild() }
                     }
@@ -89,21 +113,33 @@ struct GraphView: View {
             }
         }
         .task(id: refreshKey) { await rebuild() }
-        .onChange(of: storeId) { _, _ in resetSelection() }
-        .onChange(of: project) { _, _ in resetSelection() }
-        .onChange(of: filter) { _, _ in resetSelection() }
-        .sheet(item: $selection, onDismiss: { command = GraphCommand(action: .clear) }) { node in
-            GraphNodeSheet(node: node)
+        .sheet(item: $selection, onDismiss: {
+            switch command?.action {
+            case .reset, .reveal: break
+            default: command = GraphCommand(action: .clear)
+            }
+        }) { node in
+            GraphNodeSheet(node: node) { focus(on: node.id) }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
+        .sheet(isPresented: $showingSavedViews) { savedViewsSheet }
+        .alert("Save graph view", isPresented: $namingView) {
+            TextField(suggestedViewName, text: $savedViewName)
+            Button("Save") { saveCurrentView() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Save this store, project, content filter, and connection focus on this iPhone.") }
+        .alert("Graph view", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+            Button("OK") { notice = nil }
+        } message: { Text(notice ?? "") }
         .sheet(isPresented: $showingInfo) {
             NavigationStack {
                 List {
                     Section("Explore") {
                         Text("Drag to rotate. Pinch to zoom. Tap a node to read its details or open its project.")
-                        Text("Search finds content in this view. Choose a project to load more of its findings and tasks.")
+                        Text("Search finds content in this view. Choose a project to load more of its findings and tasks. Open a node's details and choose Focus connections to follow one or two steps of actual links.")
+                        Text("Save views from the options menu. Bookmarks stay on this iPhone and restore the view using the latest synced data.")
                     }
                     Section("Your data") {
                         Text("The graph uses the same 3D renderer as the VS Code extension and the graph format shared with the terminal.")
@@ -123,6 +159,7 @@ struct GraphView: View {
                 Menu {
                     ForEach(model.storeDescriptors) { store in
                         Button(store.id) {
+                            clearFocus()
                             storeId = store.id
                             project = "*"
                             payload = nil
@@ -135,8 +172,8 @@ struct GraphView: View {
                 .accessibilityLabel("Store: \(selectedStore)")
                 Spacer(minLength: 10)
                 Menu {
-                    Button("All projects") { project = "*" }
-                    ForEach(projects, id: \.self) { name in Button(name) { project = name } }
+                    Button("All projects") { clearFocus(); project = "*" }
+                    ForEach(projects, id: \.self) { name in Button(name) { clearFocus(); project = name } }
                 } label: {
                     Label(selectedProject ?? "All projects", systemImage: "square.grid.2x2").lineLimit(1)
                 }
@@ -145,9 +182,33 @@ struct GraphView: View {
             .font(.subheadline)
             .frame(minHeight: 36)
 
-            Picker("Graph content", selection: $filter) {
+            Picker("Graph content", selection: Binding(get: { filter }, set: { filter = $0; clearFocus() })) {
                 ForEach(GraphPayload.ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented)
+
+            if let focusedNodeID, let anchor = filtered?.nodes.first(where: { $0.id == focusedNodeID }) {
+                HStack {
+                    if !focusHistory.isEmpty {
+                        Button {
+                            self.focusedNodeID = focusHistory.removeLast()
+                            resetSelection()
+                        } label: { Label("Previous focus", systemImage: "chevron.left").labelStyle(.iconOnly) }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                    Text(anchor.label).font(.caption).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Menu("\(connectionSteps) \(connectionSteps == 1 ? "step" : "steps")") {
+                        ForEach(1...2, id: \.self) { steps in
+                            Button("\(steps) \(steps == 1 ? "step" : "steps") of connections") {
+                                connectionSteps = steps
+                                resetSelection()
+                            }
+                        }
+                    }.font(.caption)
+                    Button { clearFocus() } label: { Label("Show full view", systemImage: "xmark.circle.fill").labelStyle(.iconOnly) }
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+            }
 
             if showingSearch {
                 HStack {
@@ -212,7 +273,74 @@ struct GraphView: View {
         selection = nil
         query = ""
         error = nil
-        command = GraphCommand(action: .reset)
+        command = GraphCommand(action: focusedNodeID.map(GraphCommand.Action.reveal) ?? .reset)
+    }
+
+    private func clearFocus() {
+        focusedNodeID = nil
+        focusHistory = []
+        resetSelection()
+    }
+
+    private func focus(on id: String) {
+        if let current = focusedNodeID, current != id { focusHistory.append(current) }
+        focusedNodeID = id
+        resetSelection()
+    }
+
+    private var savedViewsSheet: some View {
+        NavigationStack {
+            List {
+                if savedViews.isEmpty { Text("Save a view from the graph's options menu to return to it here.").foregroundStyle(.secondary) }
+                ForEach(savedViews) { view in
+                    Button {
+                        guard model.storeDescriptors.contains(where: { $0.id == view.storeID }) else {
+                            showingSavedViews = false
+                            notice = "Add \(view.storeID) in Settings before opening this saved view."
+                            return
+                        }
+                        restoringView = view
+                        clearFocus()
+                        payload = nil
+                        storeId = view.storeID
+                        project = view.project ?? "*"
+                        filter = view.filter
+                        showingSavedViews = false
+                        Task { await rebuild() }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(view.name).foregroundStyle(.primary)
+                            Text("\(view.storeID) · \(view.project ?? "All projects") · \(view.filter.rawValue)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete { offsets in
+                    var views = savedViews
+                    views.remove(atOffsets: offsets)
+                    persist(views)
+                }
+            }
+            .navigationTitle("Saved views")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingSavedViews = false } } }
+        }
+    }
+
+    private func saveCurrentView() {
+        let entered = savedViewName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = entered.isEmpty ? suggestedViewName : entered
+        var views = savedViews
+        views.append(GraphSavedView(name: name, storeID: selectedStore, project: selectedProject,
+                                    filter: filter, nodeID: focusedNodeID, steps: connectionSteps))
+        persist(views)
+    }
+
+    private func persist(_ views: [GraphSavedView]) {
+        do {
+            // Preserve unsupported/corrupted bookmarks instead of overwriting them.
+            if !savedViewData.isEmpty { _ = try JSONDecoder().decode([GraphSavedView].self, from: savedViewData) }
+            savedViewData = try JSONEncoder().encode(views)
+        } catch { notice = "Saved views couldn't be updated: \(error.localizedDescription)" }
     }
 
     private func rebuild() async {
@@ -222,8 +350,25 @@ struct GraphView: View {
             try Task.checkCancellation()
             guard request.store == selectedStore, request.project == selectedProject else { return }
             payload = next
+            let currentIDs = Set(next.filtered(by: filter).nodes.map(\.id))
+            focusHistory = focusHistory.filter { currentIDs.contains($0) }
+            if let restoringView, restoringView.storeID == request.store, restoringView.project == request.project {
+                focusedNodeID = restoringView.nodeID
+                connectionSteps = min(2, max(1, restoringView.steps))
+                command = GraphCommand(action: focusedNodeID.map(GraphCommand.Action.reveal) ?? .reset)
+                self.restoringView = nil
+                if let project = request.project, !projects.contains(project) {
+                    self.project = "*"
+                    notice = "The saved project is no longer available. Showing all projects in this store."
+                    return
+                }
+            }
+            if let focusedNodeID, !next.filtered(by: filter).nodes.contains(where: { $0.id == focusedNodeID }) {
+                clearFocus()
+                notice = "The focused node is no longer in this view. Showing the current graph."
+            }
             if renderedStore != request.store || renderedProject != request.project {
-                command = GraphCommand(action: .reset)
+                command = GraphCommand(action: focusedNodeID.map(GraphCommand.Action.reveal) ?? .reset)
                 renderedStore = request.store
                 renderedProject = request.project
             }
@@ -276,6 +421,7 @@ struct GraphNodeRef: Codable, Equatable, Identifiable {
 private struct GraphNodeSheet: View {
     @Environment(AppModel.self) private var model
     let node: GraphNodeRef
+    let onFocus: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -288,6 +434,7 @@ private struct GraphNodeSheet: View {
                 }
                 if let project = node.project, let storeId = node.store {
                     Section {
+                        Button("Focus connections", systemImage: "point.3.connected.trianglepath.dotted", action: onFocus)
                         NavigationLink("Open project") { ProjectDetailView(storeId: storeId, project: project) }
                         ShareLink(item: node.sourceText ?? node.label ?? node.id) {
                             Label("Share", systemImage: "square.and.arrow.up")

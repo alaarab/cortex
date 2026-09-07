@@ -14,6 +14,7 @@ struct PhrenApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .defaultAppStorage(AppModel.isUITesting ? UserDefaults(suiteName: "phren.ui-tests")! : .standard)
                 .tint(PhrenTheme.accent)
                 // The phren identity is dark-only (docs/style.css).
                 .preferredColorScheme(.dark)

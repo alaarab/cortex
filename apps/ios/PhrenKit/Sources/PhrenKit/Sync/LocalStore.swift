@@ -53,7 +53,7 @@ public actor LocalStore {
     }
 
     /// Only these paths are ever written back to GitHub. Everything else in
-    /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`,
+    /// the store — `.config/` (except skill preferences), `phren.root.yaml`, `stores.yaml`,
     /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
     /// read-only. Authored skills and canonical CLAUDE.md instructions are
     /// explicitly writable in project directories and global/.
@@ -64,6 +64,7 @@ public actor LocalStore {
     /// read-only tier: `global/journal/…` is refused for the same reason
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
+        if path == SkillPreferences.path { return true }
         // Authored content is separate from global's read-only findings tier.
         if isSkillPath(path) || AgentInstructions.isPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
@@ -81,7 +82,7 @@ public actor LocalStore {
     }
 
     /// Paths the sync engine mirrors locally — the **hot tier**. Skips
-    /// `.config/` and `reference/`; `reference/topics/` instead
+    /// `.config/` except skill preferences, and `reference/`; `reference/topics/` instead
     /// gets a lazily hydrated cold tier (``ColdStore``), and the rest is
     /// deliberately untouched.
     ///
@@ -92,6 +93,7 @@ public actor LocalStore {
     /// ``isProjectDirName``, because ``isWritablePath`` delegates to that
     /// predicate and would otherwise make the phone able to rewrite it.
     public static func isSyncedPath(_ path: String) -> Bool {
+        if path == SkillPreferences.path { return true }
         if path == "phren.root.yaml" || path == "stores.yaml" { return true }
         // A team store repo describes itself: `.phren-team.yaml` is what the
         // CLI reads to decide the role it registers a joined store under
@@ -334,6 +336,8 @@ public actor LocalStore {
         public var skills: [Skill] = []
         /// Canonical agent instructions, keyed by global/project scope.
         public var instructions: [String: String] = [:]
+        /// Raw so malformed or newer settings cannot be mistaken for defaults.
+        public var skillPreferencesContent: String? = nil
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -452,7 +456,8 @@ public actor LocalStore {
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
-            truths: truths, consolidated: consolidated, skills: skills, instructions: instructions
+            truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
+            skillPreferencesContent: read(SkillPreferences.path)
         )
     }
 

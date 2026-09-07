@@ -3,7 +3,7 @@ import WebKit
 
 struct GraphCommand: Equatable {
     enum Action: Equatable {
-        case reset, zoomIn, zoomOut, clear, focus(String)
+        case reset, zoomIn, zoomOut, clear, focus(String), reveal(String)
     }
     let id = UUID()
     let action: Action
@@ -119,6 +119,7 @@ struct GraphWebView: UIViewRepresentable {
             case .zoomOut: name = "zoom"; arguments["value"] = 1 / 1.4
             case .clear: name = "clear"
             case .focus(let id): name = "focusNode"; arguments["value"] = id
+            case .reveal(let id): name = "revealNode"; arguments["value"] = id
             }
             arguments["name"] = name
             if arguments["value"] == nil { arguments["value"] = NSNull() }

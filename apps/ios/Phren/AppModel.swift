@@ -132,6 +132,16 @@ final class AppModel {
         Self.current = self
     }
 
+    /// Deterministic, isolated simulator data for the native interaction suite.
+    /// This entry point is absent from every device and Release build.
+    static var isUITesting: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        #else
+        return false
+        #endif
+    }
+
     enum Phase {
         case loading
         case signedOut
@@ -458,6 +468,24 @@ final class AppModel {
 
     func bootstrap() async {
         guard phase == .loading else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if Self.isUITesting {
+            do {
+                for owner in ["sample", "team"] {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")
+                    let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
+                    try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
+                    try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
+                    // A fresh tokenless client refuses before making any request.
+                    let engine = SyncEngine(client: GitHubClient(), store: store, stateDirectory: directory)
+                    storeContexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: "brain", branch: "main", canPush: true), store: store, engine: engine))
+                }
+                await refresh()
+                phase = .ready
+            } catch { lastActionError = error.localizedDescription }
+            return
+        }
+        #endif
         guard let stored = KeychainStore.load() else {
             phase = .signedOut
             return
@@ -534,6 +562,7 @@ final class AppModel {
     }
 
     private func startLiveAll() async {
+        guard !Self.isUITesting else { return }
         // Stagger starts so N stores don't wake the radio simultaneously.
         for (i, context) in storeContexts.enumerated() {
             if i > 0 {
@@ -789,6 +818,19 @@ final class AppModel {
 
     func skills(in storeId: String) -> [Skill] {
         storeContexts.first { $0.id == storeId }?.snapshot.skills ?? []
+    }
+
+    func skillPreferences(in storeId: String) throws -> SkillPreferences {
+        try SkillPreferences.parse(snapshot(for: storeId).skillPreferencesContent)
+    }
+
+    func setSkillEnabled(_ entry: StoreSkill, enabled: Bool) async throws {
+        let current = try skillPreferences(in: entry.storeId)
+        try await enqueue(.setSkillEnabled(scope: entry.skill.scope.source, name: entry.skill.name,
+                                          enabled: enabled,
+                                          expectedEnabled: current.explicitSetting(scope: entry.skill.scope.source, name: entry.skill.name)),
+                          in: entry.storeId)
+        await refresh()
     }
 
     // MARK: - Graph

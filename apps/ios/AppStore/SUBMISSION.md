@@ -16,20 +16,20 @@ Everything in this folder is referenced from here.
 
 ## Phase 0 — Code blockers
 
-- [ ] **Persistence hardening merged.** `PendingOpsQueue.load` and
-      `LocalStore.init` previously discarded unreadable files silently,
-      which would erase users' unsynced work on any schema change between
-      releases. Branch: `fix/ios-persistence`. **Do not ship without
-      this** — it is the one defect that destroys user data.
-- [ ] **Release-readiness merged.** Export-compliance key, privacy
-      manifest verified against actual API usage, version at 1.0.0,
-      Release configuration builds clean, app icon has no alpha. Branch:
-      `chore/ios-release-readiness`.
+- [x] **Persistence hardening is in the app.** Unreadable queue/cache state
+      is preserved with a reported issue. Queue schemas 1 and 2 remain
+      readable by schema 3. Verify an actual upgrade with queued offline work
+      using [the device checklist](DEVICE_CHECKLIST.md).
+- [x] **Release configuration is present.** Export-compliance key, privacy
+      manifest, 1.0.0 versions, and app icon are in the repository.
+- [ ] Complete a signed Release archive and the device checklist.
 - [ ] Everything merged to `main` and pushed.
 
 ## Phase 1 — Apple Developer portal (manual, ~15 minutes)
 
-Nothing below can be automated; it all lives in the portal UI.
+Xcode automatic provisioning can register identifiers and fetch profiles for
+an authenticated team. The September 2026 check obtained profiles for both
+targets with the App Group. Verify these for the account used to distribute:
 
 - [ ] Register App ID **`com.phren.ios`** (Certificates, Identifiers &
       Profiles → Identifiers → App IDs)
@@ -37,9 +37,8 @@ Nothing below can be automated; it all lives in the portal UI.
 - [ ] Create App Group **`group.com.phren.ios`**
 - [ ] Enable the App Groups capability on **both** App IDs and assign that
       group to each
-- [ ] Re-enable entitlements in the build. Unsigned builds have been using
-      `CODE_SIGN_ENTITLEMENTS=` to skip the unregistered group; once the
-      group exists, drop that override and confirm a signed build succeeds.
+- [ ] Confirm a signed build succeeds with the declared entitlements.
+      Unsigned CI uses `CODE_SIGNING_ALLOWED=NO`; a release must retain the group.
       `xcodegen generate` regenerates the entitlements files from
       `project.yml` — never hand-edit them.
 
@@ -93,6 +92,13 @@ instructions in `review-notes.md`.
 - [ ] Organizer → **Distribute App** → App Store Connect → Upload
 - [ ] Wait for processing (usually minutes), then confirm the build appears
 
+Alternatively, configure `Config/Local.xcconfig` and run
+`python3 scripts/release.py --build-number <next-number> --upload` from
+`apps/ios`. It checks the team/OAuth settings, archives with App Groups intact,
+and uploads. `--allow-token-sign-in` permits a build before OAuth registration.
+An `errSecInternalComponent` signing failure needs signing-key access resolved
+in the Mac's login keychain; do not strip entitlements to bypass it.
+
 ## Phase 7 — TestFlight first, always
 
 - [ ] Install the TestFlight build on your own phone
@@ -139,8 +145,8 @@ of a specific third-party service. Same basis every Git client ships on.
 - Keep `privacy-label.md` honest — the moment analytics, a backend, or
   push notifications land, the label must change **before** that build
   ships
-- Register the GitHub OAuth app and fill in
-  `DeviceFlowAuth.defaultClientID` to replace token-paste sign-in with a
+- Register the GitHub OAuth app and set `PHREN_GITHUB_CLIENT_ID` in the
+  build configuration to enable a
   proper device flow. It is the biggest remaining onboarding improvement,
   and it is currently the first thing every new user has to struggle
   through.

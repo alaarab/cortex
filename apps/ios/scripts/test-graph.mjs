@@ -87,7 +87,10 @@ test("phone graph renders, selects nodes, and accepts camera commands", { timeou
   await page.waitForFunction(() => window.messages.some(message => message.name === "graphSelect" && message.body === null));
   await page.evaluate(graph => window.phrenHost.render(graph), graph);
   assert.equal(await page.locator("#graph-canvas canvas").count(), 1, "refresh reuses the canvas");
+  // Connection focus moves the camera without reopening the native details sheet.
+  await page.evaluate(() => { window.messages = []; window.phrenHost.revealNode("mobile:0"); });
   await page.waitForTimeout(3000);
+  assert.equal(await page.evaluate(() => window.messages.filter(message => message.name === "graphSelect" && message.body !== null).length), 0);
   if (process.env.PHREN_GRAPH_SCREENSHOT) await page.screenshot({ path: process.env.PHREN_GRAPH_SCREENSHOT });
   assert.deepEqual(errors, []);
   assert.deepEqual(await page.evaluate(() => window.messages.filter(message => message.name === "graphError")), []);

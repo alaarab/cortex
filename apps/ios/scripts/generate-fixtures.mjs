@@ -91,6 +91,9 @@ const tasks = await import(path.join(dist, "data/tasks.js"));
 const learning = await import(path.join(dist, "content/learning.js"));
 const policy = await import(path.join(dist, "governance/policy.js"));
 const journal = await import(path.join(dist, "finding/journal.js"));
+const skillState = await import(path.join(dist, "skill/state.js"));
+const { entryScoreKey } = await import(path.join(dist, "governance/scores.js"));
+const { findingStableId } = await import(path.join(dist, "finding-graph-id.js"));
 
 /** Run `fn` with `new Date()` frozen to a fixed instant (bare `new Date()`
  *  only — same shape as the pre-existing per-call freeze further down).
@@ -422,6 +425,25 @@ snapshot("findings-unicode-supersede-after.md", `${project}/FINDINGS.md`);
   const newEntry = supersedeRead.data.find((f) => f.stableId === "0000a004");
   writeJson("findings-unicode-supersede-parsed.json", { old: oldEntry, new: newEntry });
 }
+
+skillState.setSkillEnabled(store, "myproj", "Audit.MD", false);
+skillState.setSkillEnabled(store, "global", "audit", true);
+snapshot("skill-preferences.json", skillState.SKILL_PREFERENCES_PATH);
+
+// Graph identity must survive fixture regeneration too: derive hashes from
+// the same CLI functions that build desktop graph nodes.
+const graphSamples = [
+  ["myproj", "FINDINGS.md", "[pattern] Use the shared cache for repeated lookups"],
+  ["myproj", "FINDINGS.md", "Plain untagged finding with enough length"],
+  ["myproj", "FINDINGS.md", "[pitfall] Use the shared cache for repeated lookups"],
+  ["other-proj", "tasks.md", "Ship the iOS app"],
+  ["myproj", "FINDINGS.md", "[bug]   collapses\n   runs   of\twhitespace"],
+  ["myproj", "FINDINGS.md", "[decision] " + "x".repeat(300)],
+];
+writeJson("graph-identity.json", graphSamples.map(([project, filename, snippet]) => {
+  const scoreKey = entryScoreKey(project, filename, snippet);
+  return { project, filename, snippet, scoreKey, nodeId: findingStableId(scoreKey) };
+}));
 
 fs.rmSync(store, { recursive: true, force: true });
 console.log("done");

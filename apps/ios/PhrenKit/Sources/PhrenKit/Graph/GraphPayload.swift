@@ -65,8 +65,7 @@ public struct GraphPayload: Codable, Equatable, Sendable {
     public var topics: [Topic]
     public var total: Int
 
-    // A public struct's memberwise init is internal; the app builds a merged
-    // payload across stores, so this one has to cross the module boundary.
+    // Public initializer for native graph views and derived slices.
     public init(nodes: [Node], links: [Link], topics: [Topic], total: Int) {
         self.nodes = nodes
         self.links = links
@@ -83,7 +82,7 @@ public struct GraphPayload: Codable, Equatable, Sendable {
         return json
     }
 
-    public enum ContentFilter: String, CaseIterable, Sendable {
+    public enum ContentFilter: String, Codable, CaseIterable, Sendable {
         case all = "All", findings = "Findings", tasks = "Tasks"
     }
 
@@ -106,6 +105,30 @@ public struct GraphPayload: Codable, Equatable, Sendable {
             let text = "\(node.fullLabel) \(node.project) \(node.topicLabel ?? "")"
             return terms.allSatisfy { text.localizedCaseInsensitiveContains($0) }
         }
+    }
+
+    /// Traverse actual edges in either direction; never invent similarity links.
+    /// A missing anchor returns the current graph so a deleted bookmark cannot
+    /// strand the viewer on an empty canvas.
+    public func neighborhood(of nodeID: String, steps: Int = 1) -> GraphPayload {
+        guard nodes.contains(where: { $0.id == nodeID }) else { return self }
+        let available = Set(nodes.map(\.id))
+        var neighbors: [String: Set<String>] = [:]
+        for link in links where available.contains(link.source) && available.contains(link.target) {
+            neighbors[link.source, default: []].insert(link.target)
+            neighbors[link.target, default: []].insert(link.source)
+        }
+        var included: Set<String> = [nodeID]
+        var frontier = included
+        for _ in 0..<min(2, max(1, steps)) {
+            let next = Set(frontier.flatMap { neighbors[$0] ?? [] }).subtracting(included)
+            included.formUnion(next)
+            frontier = next
+        }
+        let slice = nodes.filter { included.contains($0.id) }
+        return GraphPayload(nodes: slice,
+                            links: links.filter { included.contains($0.source) && included.contains($0.target) },
+                            topics: topics, total: slice.count)
     }
 }
 

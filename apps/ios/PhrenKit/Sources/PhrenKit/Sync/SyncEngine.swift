@@ -916,6 +916,11 @@ public actor SyncEngine {
             ))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
 
+        case .setSkillEnabled(let scope, let name, let enabled, let expected):
+            let content = try SkillPreferences.setting(await read(SkillPreferences.path, overlay: overlay),
+                                                       scope: scope, name: name, enabled: enabled, expected: expected)
+            return [FileEdit(path: SkillPreferences.path, content: content)]
+
         case .saveAuthoredFile(let path, let content, let expected):
             let current = await read(path, overlay: overlay)
             try AuthoredFile.validate(path: path, current: current, expected: expected, content: content)

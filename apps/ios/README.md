@@ -142,7 +142,8 @@ has been hydrated at least once, because until then the number lives inside
 documents nobody has downloaded. Archived entries are marked as such and have
 no edit affordance — they are read-only everywhere else in phren too.
 
-`.config/` and the rest of `reference/` are not synced.
+`.config/skill-preferences.json` is the only synced configuration document;
+the rest of `.config/` and `reference/` are not synced.
 
 #### Writes
 
@@ -164,7 +165,8 @@ no edit affordance — they are read-only everywhere else in phren too.
   `notes/YYYY-MM-DD.md` and `journal/YYYY-MM-DD-<actor>.md` are writable knowledge
   files, and only for a `<project>` that is a real project directory. Authored
   skills and canonical `CLAUDE.md` are also writable, under a project or
-  `global/`. `.config/`, `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`,
+  `global/`. Skill switches write individual keys in `.config/skill-preferences.json`.
+  The rest of `.config/`, `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`,
   `summary.md`, `truths.md`, `reference/`, global findings and every reserved
   directory (`profiles`, `templates`, `scripts`, mirroring the CLI's
   `RESERVED_PROJECT_DIR_NAMES` plus `link.sh`'s store scaffolding) are
@@ -180,14 +182,32 @@ read, edit, share or delete an existing skill. Creation checks names without
 case sensitivity across both flat and folder formats. Project choices come
 only from the selected writable store. Read-only stores have no editing controls.
 
+Each skill has an **Enabled for agents** switch. A project skill's choice
+affects that project; a global skill's choice affects all projects. These
+are source-scope switches, not project-specific overrides of inherited globals.
+The shared file `.config/skill-preferences.json` uses schema 1 and an
+`enabledSkills` object keyed by `<scope>:<normalized-name>` with boolean values.
+Names are lowercased with one trailing `.md` removed, matching the CLI.
+Unknown JSON fields are preserved. Each queued change guards its previous
+key value, so edits to different skills merge while conflicting choices are
+reported in Settings. An invalid or future settings document cannot be overwritten.
+
+The updated CLI reads these settings before legacy machine-local
+`disabledSkills` choices. A key without a shared choice still uses the old
+local preference on that computer; the phone labels that state explicitly.
+Upgrade the desktop CLI and enable periodic pulls with
+`phren config pull-interval 60` to refresh existing managed skill links and
+generated instructions after phone changes arrive. A manual sync/link also
+applies them. Agent tools may need a new session to reload their skill list.
+
 Projects → **Agent instructions** groups global and project instructions,
 with links to each scope's skills. The app edits the canonical store
 `CLAUDE.md`; phren's link step derives managed `AGENTS.md` and Copilot mirrors
 on the computer. Changes reach linked agents after the computer syncs, and
-generated mirrors refresh when phren links the project. This screen manages
+generated mirrors refresh when phren links the project or its MCP poller pulls. This screen manages
 agent setup; running agents are still local to the computer, with no mobile
-monitoring or start/stop connection. Skill enable/disable preferences and hook
-configuration are not synced by the app.
+monitoring or start/stop connection. Hook configuration remains computer-local.
+See [agent connection design notes](AGENT_CONNECTIONS.md) for the Moshi/Herdr path.
 
 Editors keep a separate draft during live refreshes and confirm before
 discarding changes. Saves and deletes carry the content the user opened, so
@@ -196,8 +216,8 @@ while editing offers a comparison and merge flow. A conflict found during
 upload preserves the queued draft in Settings → Needs attention → Review saved
 draft, where its text can be copied or shared. Background pulls preserve
 queued files and their original SHAs until flush can check them. Pending queue
-schema 2 adds these guarded operations and upgrades schema 1 queues while
-retaining all existing operations.
+schema 2 added guarded authored edits; schema 3 adds individual skill switches.
+Schema 1 and 2 queues upgrade while retaining all existing operations.
 
 ## Building
 
@@ -236,6 +256,15 @@ are replaced by these native controls; editing is available in the project's
 normal findings and task screens. Bloom is disabled on the phone, and label
 widths are constrained for the smaller viewport.
 
+**Focus connections** in a node's detail sheet limits the view to one or two
+steps of actual links. The back button returns to previous focus points; the
+close button restores the full current view. **Options → Save this view**
+bookmarks its store, project, filter, and focused node. **Saved views** restores
+them after app relaunch using current synced content. These bookmarks stay on
+the device; they do not preserve a camera position or copy store content.
+Missing stores ask to be reattached; deleted projects/nodes return to a wider
+view with an explanation.
+
 One explicitly selected store is rendered at a time. The picker uses full
 owner/repository names and node selections carry that identity, so projects
 with the same name in different stores cannot be confused. The view rebuilds
@@ -261,13 +290,22 @@ These tests cover local assets, node selection and store attribution, camera
 commands, repeated mounts, and missing-renderer recovery. Set
 `PHREN_GRAPH_SCREENSHOT=/tmp/graph.png` to save the synthetic test graph image.
 
+`PhrenUITests` exercises native search → focus → save → relaunch → restore in
+an iPhone simulator (`xcodebuild test -scheme Phren -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`).
+It also checks restoring across stores and changing a skill from computer-local
+defaults to an explicit enabled/disabled choice.
+It uses isolated synthetic stores and tokenless clients; the fixture entry point
+is compiled only in Debug simulator builds. Saved test views use a separate
+UserDefaults suite.
+
 ## Releasing
 
-Every build so far has been Debug + unsigned or Debug + device. The App Group
-entitlement (`group.com.phren.ios`, shared by `com.phren.ios` and
-`com.phren.ios.widgets`) is declared in `project.yml` but **not yet
-registered** with an Apple Developer account, which blocks a signed archive.
-Before the owner can produce one:
+The App Group entitlement (`group.com.phren.ios`, shared by `com.phren.ios`
+and `com.phren.ios.widgets`) is declared in `project.yml`. The September 2026
+release check obtained development provisioning profiles for both targets,
+including that group. The archive then stopped at signing-key access
+(`errSecInternalComponent`); no TestFlight upload or real-device verification
+has completed. Other developer accounts still need their own setup:
 
 1. **Register both App IDs** in the Apple Developer portal → Certificates,
    Identifiers & Profiles → Identifiers: `com.phren.ios` (the app) and
@@ -280,31 +318,53 @@ Before the owner can produce one:
    in `project.yml` on every `xcodegen generate`; any manual edit is silently
    overwritten the next time someone runs it.
 
-Until that portal setup is done, two local paths still work without it:
+For local development:
 
 - **Unsigned build** (what CI / release-readiness checks use):
-  `CODE_SIGNING_ALLOWED=NO` skips code signing entirely, so the unregistered
-  App Group entitlement is never evaluated:
+  `CODE_SIGNING_ALLOWED=NO` checks compilation without validating signing
+  identities or provisioning profiles:
   ```bash
   xcodebuild -project Phren.xcodeproj -scheme Phren -configuration Release \
     -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
   ```
-- **Signed Debug-to-device build**, e.g. with a personal (free) team that
-  can't provision an unregistered App Group: override
-  `CODE_SIGN_ENTITLEMENTS=` (empty) so the signing step has no entitlements
-  file to satisfy, at the cost of the app and widget not actually sharing
-  data on that install until the App Group is registered for real.
+- **Signed Debug-to-device build**: select the registered development team
+  and connected iPhone in Xcode, enable automatic signing, and run. Retain
+  the App Group entitlement so the app and widget can share synced data.
 
 ## GitHub OAuth App (one-time owner setup)
 
-Device-flow sign-in needs a registered GitHub **OAuth App** (not a GitHub App):
+Device-flow sign-in needs a registered GitHub **OAuth App**:
 
 1. GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.
 2. Any homepage/callback URL (device flow doesn't use the callback).
 3. In the app's settings, **enable "Device Flow"**.
-4. Put the client ID in `DeviceFlowAuth.defaultClientID`
-   (`PhrenKit/Sources/PhrenKit/GitHub/DeviceFlowAuth.swift`). No client
-   secret is needed or shipped.
+4. Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set
+   `PHREN_GITHUB_CLIENT_ID` to the public client ID and `DEVELOPMENT_TEAM` to
+   your Apple team ID. Local configuration is ignored by git. The committed
+   `Config/App.xcconfig` optionally includes it; command-line build settings
+   can supply the values in CI. No client secret is needed or shipped.
+
+The app reads the ID from its built Info.plist, makes GitHub device sign-in
+the primary button when configured, and retains token sign-in as a fallback.
+Empty, placeholder, and unexpanded IDs hide device sign-in and fail locally
+before any invalid request. Registering the OAuth App remains owner setup.
+
+Once the login keychain permits signing and the App Store Connect app record
+exists, the release helper creates an archive and can export or upload it:
+
+```bash
+python3 scripts/release.py --build-number 2             # signed archive
+python3 scripts/release.py --build-number 3 --export    # signed IPA
+python3 scripts/release.py --build-number 4 --upload    # TestFlight upload
+```
+
+Run from `apps/ios`. Use the next unused build number. Pass `--team` and
+`--client-id` or set the local xcconfig; the helper resolves the effective
+Xcode settings before archiving. `--allow-token-sign-in` explicitly permits
+a build without OAuth. It never removes the App Group entitlement. Archive
+and export files go under `~/Library/Developer/Xcode/Archives/phren/`.
+`--upload` sends a build to App Store Connect; it does not submit App Review.
+Follow [the device checklist](AppStore/DEVICE_CHECKLIST.md) before release.
 
 Until then, the **personal access token** sign-in path works out of the box:
 create a fine-grained PAT with **Contents: Read and write** + **Metadata:
@@ -476,5 +536,5 @@ exactly which transcription needs updating.
   tools address `FINDINGS.md`, and folding a journal into it has no command
   yet, only `materializeTeamFindings` in `finding/journal.ts`)
 - `stores.yaml` auto-discovery as an add-store suggestion source
-- Skill enable/disable preferences and hook configuration from the web UI
+- Hook configuration from the phone
 - Monitoring and controlling agents running on a computer

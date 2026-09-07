@@ -2,6 +2,30 @@ import XCTest
 @testable import PhrenKit
 
 final class GraphExplorerTests: XCTestCase {
+    func testConnectionFocusTraversesEitherDirectionWithoutUnrelatedProjects() throws {
+        let graph = GraphBuilder.build(.init(
+            findingsMarkdown: ["demo": "- [pattern] Integrates with other", "other": "- [decision] Keep local memory", "unrelated": "- [pattern] Standalone"],
+            tasks: [:], projects: ["demo", "other", "unrelated"], storeName: "o/r"
+        ))
+        let leaf = try XCTUnwrap(graph.nodes.first { $0.project == "demo" && $0.group != "project" })
+        XCTAssertEqual(Set(graph.neighborhood(of: leaf.id).nodes.map(\.id)), [leaf.id, "demo"])
+        let twoSteps = graph.neighborhood(of: leaf.id, steps: 2)
+        XCTAssertTrue(twoSteps.nodes.contains { $0.id == "other" })
+        XCTAssertFalse(twoSteps.nodes.contains { $0.project == "unrelated" })
+        XCTAssertTrue(graph.neighborhood(of: "other").nodes.contains { $0.id == "demo" }, "Edges are traversable in reverse")
+        XCTAssertEqual(graph.neighborhood(of: "deleted"), graph)
+        let ids = Set(twoSteps.nodes.map(\.id))
+        XCTAssertTrue(twoSteps.links.allSatisfy { ids.contains($0.source) && ids.contains($0.target) })
+    }
+
+    func testSavedViewsRoundTripStoreAndFilterWithoutCrossStoreIdentityLoss() throws {
+        let first = GraphSavedView(name: "Work", storeID: "work/brain", project: "demo", filter: .tasks, nodeID: "demo", steps: 2)
+        let second = GraphSavedView(name: "Personal", storeID: "me/brain", project: "demo", filter: .findings, nodeID: "demo")
+        let loaded = try JSONDecoder().decode([GraphSavedView].self, from: JSONEncoder().encode([first, second]))
+        XCTAssertEqual(loaded, [first, second])
+        XCTAssertNotEqual(loaded[0].storeID, loaded[1].storeID)
+    }
+
     func testTaskOnlyProjectAppearsAndFocusedGraphLiftsTaskCap() throws {
         var tasks = TasksFile(project: "demo", content: nil)
         for index in 1...60 { try tasks.add("Investigate task \(index)") }
