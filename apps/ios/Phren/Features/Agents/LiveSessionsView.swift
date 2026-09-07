@@ -83,6 +83,17 @@ final class LiveHostMonitor {
         #if DEBUG && targetEnvironment(simulator)
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
             if ProcessInfo.processInfo.arguments.contains("--session-discovery-offline") { throw LiveConnectionError.disconnected }
+            if ProcessInfo.processInfo.arguments.contains("--observed-live-session-ids") {
+                // Match the reported shape: every workspace's first tab is
+                // labelled "1", IDs include uppercase letters, and order changes.
+                var groups = [
+                    #"{"id":"w7","label":"Phone work","children":[{"id":"w7:t1","label":"1","cwd":"/work/phone"}]}"#,
+                    #"{"id":"wC","label":"Other work","children":[{"id":"wC:t1","label":"1","cwd":"/work/other"}]}"#,
+                    #"{"id":"w2","label":"Third work","children":[{"id":"w2:t1","label":"1","cwd":"/work/third"}]}"#,
+                ]
+                if previousUpdate != nil { groups.reverse() }
+                return try MoshiWorkspaces.read(Data((#"{"kind":"herdr","groups":["# + groups.joined(separator: ",") + "]}").utf8))
+            }
             let extra = ProcessInfo.processInfo.arguments.contains("--multiple-project-sessions")
                 ? #",{"id":"w7:t10","label":"Review phone changes","agent":"claude","agentStatus":"waiting","cwd":"/work/phone"}"# : ""
             return try MoshiWorkspaces.read(Data((#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"Build phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","sessionId":"not-a-server"}"# + extra + #"]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"Unrelated session","cwd":"/work/other"}]}]}"#).utf8))
@@ -141,7 +152,8 @@ private struct LiveHostView: View {
                     Section(group.label) {
                         ForEach(group.children) { tab in
                             LiveTabRow(session: DiscoveredMoshiSession(host: host, workspaceID: group.id,
-                                                                      workspaceName: group.label, tab: tab),
+                                                                      workspaceName: group.label, tab: tab,
+                                                                      workspaceTabCount: group.children.count),
                                        stale: monitor.message != nil || !monitor.polling, lastUpdated: monitor.lastUpdated)
                         }
                     }
@@ -236,9 +248,9 @@ private struct LiveTabRow: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if let link = try? session.link() {
+            if let destination = try? session.link().url() {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    MoshiSessionOpenButton(link: link)
+                    MoshiSessionOpenLink(destination: destination, workspaceName: session.workspaceName)
                         .accessibilityIdentifier("live-open:\(session.workspaceID):\(tab.id)")
                         .disabled(stale || lastUpdated.map { context.date.timeIntervalSince($0) >= 25 } != false)
                 }

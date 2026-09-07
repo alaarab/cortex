@@ -46,11 +46,23 @@ final class SessionDiscoveryTests: XCTestCase {
         let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
         let snapshot = try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w/api","label":"Not a server name","children":[{"id":"w1:t1","label":"Build","cwd":"/work/phren","sessionId":"private-conversation-id","agentPaneCount":2}]}]}"#.utf8))
         let session = try XCTUnwrap(snapshot.sessions(on: host).first)
-        XCTAssertEqual(try session.link().url().absoluteString, "moshi://herdr?session=default&workspace=w%2Fapi&tab=w1%3At1")
+        XCTAssertEqual(try session.link().url().absoluteString, "moshi://herdr?workspace=w%2Fapi")
         XCTAssertEqual(session.host.id, host.id)
         XCTAssertTrue(try session.link().pane.isEmpty, "A tab with several agents provides no exact pane identity")
         XCTAssertThrowsError(try DiscoveredMoshiSession(host: host, workspaceID: "", workspaceName: "x", tab: session.tab).link())
         XCTAssertThrowsError(try DiscoveredMoshiSession(host: host, workspaceID: " w1 ", workspaceName: "x", tab: session.tab).link())
+    }
+
+    func testSingleTabWorkspacesUseVerifiedWorkspaceLinksAndMultipleTabsRemainExact() throws {
+        let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
+        let snapshot = try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phren","children":[{"id":"w7:t1","label":"1"}]},{"id":"wC","label":"Mutter","children":[{"id":"wC:t1","label":"1"}]},{"id":"w2","label":"AlphaLens","children":[{"id":"w2:t1","label":"1"}]},{"id":"wB","label":"Several tabs","children":[{"id":"wB:t1","label":"1"},{"id":"wB:t2","label":"2"}]}]}"#.utf8))
+        let sessions = snapshot.sessions(on: host)
+        XCTAssertEqual(try sessions.map { try $0.link().url().absoluteString }, [
+            "moshi://herdr?workspace=w7", "moshi://herdr?workspace=wC", "moshi://herdr?workspace=w2",
+            "moshi://herdr?workspace=wB&tab=wB%3At1", "moshi://herdr?workspace=wB&tab=wB%3At2",
+        ])
+        let unknown = DiscoveredMoshiSession(host: host, workspaceID: "wC", workspaceName: "Mutter", tab: sessions[1].tab)
+        XCTAssertEqual(try unknown.link().url().absoluteString, "moshi://herdr?workspace=wC&tab=wC%3At1")
     }
 
     func testHostCollisionsAreDetectedEvenWhenTabsDiffer() throws {

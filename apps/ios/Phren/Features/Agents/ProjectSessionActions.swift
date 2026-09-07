@@ -97,22 +97,33 @@ struct MoshiLaunchAlert: ViewModifier {
     }
 }
 
-/// A live row already identifies the target; it never opens a link editor.
-struct MoshiSessionOpenButton: View {
-    let link: MoshiSessionLink
+/// Bind the live row's destination to a native Link. Its URL is also its view
+/// identity, so a refreshed/reused row cannot retain a previous launch target.
+struct MoshiSessionOpenLink: View {
+    let destination: URL
+    let workspaceName: String
     @Environment(\.openURL) private var openURL
     @State private var error: String?
 
     var body: some View {
-        Button("Open in Moshi", systemImage: "arrow.up.forward.app") {
-            do {
-                let url = try link.url()
-                openURL(url) { accepted in
-                    if !accepted { error = "Moshi couldn't be opened on this iPhone. Install it and open this computer's session there first." }
-                }
-            } catch { self.error = error.localizedDescription }
+        Link(destination: destination) {
+            Label("Open \(workspaceName) in Moshi", systemImage: "arrow.up.forward.app")
         }
+        .id(destination)
         .buttonStyle(.borderless)
+        .environment(\.openURL, OpenURLAction { requestedURL in
+            // Forward the URL supplied by the tapped Link, without consulting
+            // project mappings, a saved shortcut, or the last opened session.
+            openURL(requestedURL) { accepted in
+                if !accepted { error = "Moshi couldn't be opened on this iPhone. Install it and open this computer's session there first." }
+            }
+            return .handled
+        })
+        .contextMenu {
+            Button("Copy Moshi link", systemImage: "link") {
+                UIPasteboard.general.url = destination
+            }
+        }
         .modifier(MoshiLaunchAlert(error: $error))
     }
 }

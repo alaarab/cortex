@@ -15,7 +15,9 @@ final class MoshiSessionLinkTests: XCTestCase {
 
     func testHerdrDefaultsAndStableWorkspaceTabAndPaneIDs() throws {
         let link = try MoshiSessionLink(multiplexer: .herdr, session: "", workspace: "w/api", tab: "w1:t1", pane: "w1:p2")
-        XCTAssertEqual(try link.url().absoluteString, "moshi://herdr?session=default&workspace=w%2Fapi&tab=w1%3At1&pane=w1%3Ap2")
+        XCTAssertEqual(try link.url().absoluteString, "moshi://herdr?workspace=w%2Fapi&tab=w1%3At1&pane=w1%3Ap2")
+        let explicit = try MoshiSessionLink(multiplexer: .herdr, session: "default", workspace: "w1")
+        XCTAssertEqual(try explicit.url().absoluteString, "moshi://herdr?session=default&workspace=w1")
         let named = try MoshiSessionLink(multiplexer: .herdr, session: " work ")
         XCTAssertEqual(try named.url().absoluteString, "moshi://herdr?session=work")
         XCTAssertFalse(try named.url().absoluteString.contains("hostId"))

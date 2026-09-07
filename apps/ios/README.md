@@ -241,9 +241,10 @@ Schema 1 and 2 queues upgrade while retaining all existing operations.
 
 ### Automatic Moshi session handoff
 
-After connecting a computer in **Agents**, tap **Open in Moshi** on a live tab.
-Phren builds its destination from the hook's workspace and tab IDs; no session
-link form or project mapping is needed for that action.
+After connecting a computer in **Agents**, tap **Open [workspace] in Moshi** on
+a live tab. Phren uses the hook's workspace ID directly when that workspace
+has one tab, and includes the selected tab ID when there are several. No session
+link form or project mapping is needed. Long-press the action to copy its link.
 
 A project's **Project session → Open in Moshi**, and **Session → Open in Moshi**
 in graph details, discover sessions on the configured computers. One matching
@@ -350,6 +351,10 @@ Set `device` from `xcrun devicectl list devices` and your Apple development
 `team`. Optional `derived_data` reuses a build directory; `--device` overrides
 the saved phone. The command builds Release, verifies its signature, installs
 the app, and launches `com.phren.ios`, preserving its existing app data.
+Each build increments the previous build number in that derived-data directory
+for both app and widget. Use `--build-number N` to choose a higher number when
+switching build directories or Macs. Settings → About and the installation page
+show the version and build, so device updates can be identified unambiguously.
 If the phone is away, add `--build-only` to prepare and verify the signed app
 without contacting a device, then use the private Tailscale installer below.
 

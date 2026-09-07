@@ -55,7 +55,9 @@ public struct MoshiSessionLink: Codable, Equatable, Sendable {
             items = [("session", session), ("window", window), ("pane", pane)]
         case .herdr:
             guard window.isEmpty else { throw PhrenKitError.validation("Window numbers apply to tmux sessions.") }
-            items = [("session", session.isEmpty ? "default" : session), ("workspace", workspace), ("tab", tab), ("pane", pane)]
+            // An omitted session selects Herdr's default server. Preserve an
+            // explicitly named server, including older saved "default" links.
+            items = [("session", session), ("workspace", workspace), ("tab", tab), ("pane", pane)]
         }
         let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         var components = URLComponents()

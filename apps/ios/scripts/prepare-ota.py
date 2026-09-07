@@ -83,6 +83,7 @@ def main():
         (delivery / "manifest.plist").write_bytes(plistlib.dumps(manifest))
         install = "itms-services://?action=download-manifest&url=" + quote(base + "/manifest.plist", safe="")
         version = html.escape(str(info["CFBundleShortVersionString"]))
+        build_number = html.escape(str(info["CFBundleVersion"]))
         note = html.escape(args.note)
         icon_tag = '<img src="icon.png" alt="" width="88" height="88">' if icon.is_file() else ""
         (delivery / "index.html").write_text(f'''<!doctype html>
@@ -94,7 +95,7 @@ main{{max-width:420px;padding:64px 28px;margin:auto}}img{{border-radius:22px}}
 h1{{font-size:38px;letter-spacing:-1px;margin:20px 0 4px}}p{{color:#bbb3cf}}
 a{{display:block;background:#aa82ff;color:#150d29;text-align:center;text-decoration:none;
 font-weight:700;padding:16px;border-radius:16px;margin:30px 0}}small{{color:#8e86a4}}
-</style><main>{icon_tag}<h1>Phren for iPhone</h1><small>Version {version}</small>
+</style><main>{icon_tag}<h1>Phren for iPhone</h1><small>Version {version} · Build {build_number}</small>
 <p>{note}</p><a href="{html.escape(install, quote=True)}">Install Phren</a>
 <p>Open this page in Safari with Tailscale connected. Tap Install Phren, then confirm Install.</p>
 <p>Once the download finishes, open Phren from your Home Screen.</p>

@@ -37,7 +37,7 @@ extension LiveSessionPreferences {
 }
 
 /// The tab selected on a known computer. Its destination comes from the hook's
-/// workspace and tab IDs, never its unrelated agent `sessionId` or display label.
+/// workspace and (when needed) tab IDs, never the agent `sessionId` or label.
 public struct DiscoveredMoshiSession: Equatable, Identifiable, Sendable {
     public struct ID: Hashable, Sendable {
         public let hostID: UUID
@@ -47,11 +47,14 @@ public struct DiscoveredMoshiSession: Equatable, Identifiable, Sendable {
     public let host: LiveHost
     public let workspaceID: String
     public let workspaceName: String
+    public let workspaceTabCount: Int?
     public let tab: MoshiWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id) }
 
-    public init(host: LiveHost, workspaceID: String, workspaceName: String, tab: MoshiWorkspaces.Tab) {
+    public init(host: LiveHost, workspaceID: String, workspaceName: String, tab: MoshiWorkspaces.Tab,
+                workspaceTabCount: Int? = nil) {
         self.host = host; self.workspaceID = workspaceID; self.workspaceName = workspaceName; self.tab = tab
+        self.workspaceTabCount = workspaceTabCount
     }
 
     public func link() throws -> MoshiSessionLink {
@@ -60,7 +63,11 @@ public struct DiscoveredMoshiSession: Equatable, Identifiable, Sendable {
               tab.id == tab.id.trimmingCharacters(in: .whitespacesAndNewlines) else {
             throw PhrenKitError.validation("This session has no usable workspace or tab destination.")
         }
-        return try MoshiSessionLink(multiplexer: .herdr, session: "default", workspace: workspaceID, tab: tab.id)
+        // On a one-tab workspace the workspace identifies the entire target.
+        // Avoid Moshi's extra tab-refinement transition after resuming a card.
+        // Unknown counts retain exact tab selection; never infer from the label.
+        return try MoshiSessionLink(multiplexer: .herdr, session: "", workspace: workspaceID,
+                                    tab: workspaceTabCount == 1 ? "" : tab.id)
     }
 
     /// Moshi's public link has no host selector. Workspace IDs can be reused on
@@ -73,7 +80,8 @@ public struct DiscoveredMoshiSession: Equatable, Identifiable, Sendable {
 extension MoshiWorkspaces {
     public func sessions(on host: LiveHost) -> [DiscoveredMoshiSession] {
         groups.flatMap { group in
-            group.children.map { DiscoveredMoshiSession(host: host, workspaceID: group.id, workspaceName: group.label, tab: $0) }
+            group.children.map { DiscoveredMoshiSession(host: host, workspaceID: group.id, workspaceName: group.label,
+                                                       tab: $0, workspaceTabCount: group.children.count) }
         }
     }
 }

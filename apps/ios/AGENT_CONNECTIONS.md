@@ -42,8 +42,14 @@ See [phone setup and tests](README.md#live-herdr-sessions-over-tailscale--ssh),
 
 ## Optional iPhone handoff
 
-Live rows construct an exact Herdr workspace/tab destination from the hook's
-observed IDs. No manual link or project mapping is needed to open the tab.
+Live rows construct a Herdr destination from the hook's observed IDs. When the
+latest snapshot contains just one tab in a workspace, the handoff uses only
+`workspace`, avoiding a second tab-focus transition after Moshi resumes its card.
+Multiple tabs (or an unknown tab count) include the selected tab's ID. The default
+server is implicit. No manual link or project mapping is needed to open the tab.
+The Agents action is a native link labelled with the destination workspace,
+with its view identity tied to the URL across row refreshes. Long-pressing it
+can copy that same link for a direct comparison in Safari.
 Project → Project session and graph node details → Session discover current
 sessions using directory recognition and explicit mappings. A single match opens
 automatically after a successful discovery pass. Multiple matches stay in a

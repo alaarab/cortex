@@ -2,6 +2,29 @@ import XCTest
 
 final class AutomaticSessionTests: XCTestCase {
     @MainActor
+    func testLiveLinksKeepTheirDestinationsAfterRefreshAndReturningToTheApp() {
+        let app = launch(extra: ["--capture-moshi-links", "--observed-live-session-ids"])
+        app.tabBars.buttons["Agents"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch.tap()
+        let first = app.buttons["live-open:w7:w7:t1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.tap()
+        let url = app.staticTexts["moshi-opened-url"]
+        XCTAssertEqual(url.label, "moshi://herdr?workspace=w7")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        // Foreground refresh reverses the workspace order in this fixture.
+        for (workspace, title) in [("wC", "Other work"), ("w2", "Third work"), ("w7", "Phone work")] {
+            let link = app.buttons["live-open:\(workspace):\(workspace):t1"]
+            XCTAssertTrue(link.waitForExistence(timeout: 10))
+            XCTAssertEqual(link.label, "Open \(title) in Moshi")
+            if !link.isHittable { app.swipeUp() }
+            link.tap()
+            XCTAssertEqual(url.label, "moshi://herdr?workspace=\(workspace)")
+        }
+    }
+
+    @MainActor
     func testSwitchingLiveRowsSendsTheSelectedWorkspaceAndTab() {
         let app = launch(extra: ["--capture-moshi-links"])
         app.tabBars.buttons["Agents"].tap()
@@ -11,11 +34,11 @@ final class AutomaticSessionTests: XCTestCase {
         first.tap()
         let url = app.staticTexts["moshi-opened-url"]
         XCTAssertTrue(url.waitForExistence(timeout: 5))
-        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w7&tab=w7%3At9")
+        XCTAssertEqual(url.label, "moshi://herdr?workspace=w7")
         let other = app.buttons["live-open:w8:w8:t1"]
         if !other.isHittable { app.swipeUp() }
         other.tap()
-        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w8&tab=w8%3At1")
+        XCTAssertEqual(url.label, "moshi://herdr?workspace=w8")
     }
 
     @MainActor
@@ -27,7 +50,7 @@ final class AutomaticSessionTests: XCTestCase {
         chosen.tap()
         let url = app.staticTexts["moshi-opened-url"]
         XCTAssertTrue(url.waitForExistence(timeout: 5))
-        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w7&tab=w7%3At10")
+        XCTAssertEqual(url.label, "moshi://herdr?workspace=w7&tab=w7%3At10")
     }
 
     @MainActor
@@ -70,7 +93,7 @@ final class AutomaticSessionTests: XCTestCase {
         let graph = app.buttons["live-graph:sample/brain:phone"]
         XCTAssertTrue(graph.waitForExistence(timeout: 10))
         // This row can hand off even though no manual project/session link exists.
-        app.buttons["Open in Moshi"].firstMatch.tap()
+        app.buttons["live-open:w7:w7:t9"].tap()
         XCTAssertTrue(app.alerts["Couldn't open Moshi"].waitForExistence(timeout: 5))
         app.alerts.buttons["OK"].tap()
         graph.tap()
