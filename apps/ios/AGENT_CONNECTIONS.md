@@ -62,6 +62,24 @@ Phren cannot inspect Moshi's iPhone session cards or share its credentials.
 An agent conversation ID is never used as a Herdr server, workspace, tab, or pane.
 [Link grammar](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
 
+### Investigating a wrong-session handoff
+
+Moshi 3.13.0 or newer is required for the `tab` and `pane` parameters. Verify
+the installed phone version when workspace navigation resumes the old tab.
+The hook version alone does not establish the phone app's capabilities.
+
+`AutomaticSessionTests` captures the actual URL passed to iOS and checks both
+switching between live workspace rows and choosing a different tab in a project.
+The capture is enabled only in debug simulator UI tests with
+`--capture-moshi-links`; it does not intercept links in device builds.
+
+If the outgoing workspace/tab IDs are correct, compare a direct Safari link
+using the current hook IDs, first with `workspace` alone and then with `tab`.
+This separates Phren's project matching from Moshi's card selection and focus.
+An accepted iOS URL-open callback confirms only that the app handled the URL;
+it cannot confirm which terminal or Chat View Moshi displayed. A passing
+simulator launch test is therefore not physical-device handoff verification.
+
 ## Next integration steps
 
 - Verify setup and the app handoff on a physical iPhone over its tailnet.

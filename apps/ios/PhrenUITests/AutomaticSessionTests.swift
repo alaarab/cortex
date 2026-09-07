@@ -2,6 +2,35 @@ import XCTest
 
 final class AutomaticSessionTests: XCTestCase {
     @MainActor
+    func testSwitchingLiveRowsSendsTheSelectedWorkspaceAndTab() {
+        let app = launch(extra: ["--capture-moshi-links"])
+        app.tabBars.buttons["Agents"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch.tap()
+        let first = app.buttons["live-open:w7:w7:t9"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.tap()
+        let url = app.staticTexts["moshi-opened-url"]
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w7&tab=w7%3At9")
+        let other = app.buttons["live-open:w8:w8:t1"]
+        if !other.isHittable { app.swipeUp() }
+        other.tap()
+        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w8&tab=w8%3At1")
+    }
+
+    @MainActor
+    func testChosenProjectSessionSendsItsOwnTab() {
+        let app = launch(extra: ["--multiple-project-sessions", "--capture-moshi-links"])
+        openProjectSession(app)
+        let chosen = app.buttons["discovered-session:A1000000-0000-0000-0000-000000000001:w7:w7:t10"]
+        XCTAssertTrue(chosen.waitForExistence(timeout: 10))
+        chosen.tap()
+        let url = app.staticTexts["moshi-opened-url"]
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        XCTAssertEqual(url.label, "moshi://herdr?session=default&workspace=w7&tab=w7%3At10")
+    }
+
+    @MainActor
     func testProjectFindsOneSessionAndOpensWithoutEditingALink() {
         let app = launch()
         openProjectSession(app)

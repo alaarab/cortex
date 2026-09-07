@@ -18,6 +18,7 @@ struct PhrenApp: App {
                 .tint(PhrenTheme.accent)
                 // The phren identity is dark-only (docs/style.css).
                 .preferredColorScheme(.dark)
+                .modifier(MoshiURLTestCapture())
                 .task { await model.bootstrap() }
                 .onChange(of: scenePhase) { _, phase in
                     // Live sync runs only while the app is visible; returning
@@ -66,6 +67,33 @@ struct PhrenApp: App {
         tab.backgroundColor = navy
         UITabBar.appearance().standardAppearance = tab
         UITabBar.appearance().scrollEdgeAppearance = tab
+    }
+}
+
+/// UI tests inspect the actual URL handed to iOS, rather than merely checking
+/// that a button attempted to launch an unavailable app in the simulator.
+private struct MoshiURLTestCapture: ViewModifier {
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var captured = ""
+    #endif
+    func body(content: Content) -> some View {
+        #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--capture-moshi-links") {
+            content
+                .environment(\.openURL, OpenURLAction { url in
+                    guard url.scheme == "moshi" else { return .systemAction }
+                    captured = url.absoluteString
+                    return .handled
+                })
+                .overlay(alignment: .top) {
+                    Text(captured).font(.caption2)
+                        .accessibilityIdentifier("moshi-opened-url")
+                        .allowsHitTesting(false)
+                }
+        } else { content }
+        #else
+        content
+        #endif
     }
 }
 

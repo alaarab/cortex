@@ -239,6 +239,7 @@ private struct LiveTabRow: View {
             if let link = try? session.link() {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     MoshiSessionOpenButton(link: link)
+                        .accessibilityIdentifier("live-open:\(session.workspaceID):\(tab.id)")
                         .disabled(stale || lastUpdated.map { context.date.timeIntervalSince($0) >= 25 } != false)
                 }
             }
