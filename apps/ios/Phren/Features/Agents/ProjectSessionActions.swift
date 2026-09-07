@@ -11,7 +11,9 @@ struct ProjectSessionActions: View {
 
     @Environment(\.openURL) private var openURL
     @AppStorage("sessions.moshi.links.v1") private var savedData = Data()
+    @AppStorage("sessions.live.preferences.v1") private var liveData = Data()
     @State private var editing = false
+    @State private var discovering = false
     @State private var error: String?
 
     private var link: MoshiSessionLink? {
@@ -27,6 +29,7 @@ struct ProjectSessionActions: View {
                     .sheet(isPresented: $editing) {
                         NavigationStack { ProjectSessionEditor(storeId: storeId, project: project) }
                     }
+                    .sheet(isPresented: $discovering) { ProjectSessionsView(storeID: storeId, project: project) }
                     .modifier(MoshiLaunchAlert(error: $error))
             case .section:
                 Section("Session") {
@@ -38,8 +41,20 @@ struct ProjectSessionActions: View {
     }
 
     @ViewBuilder private var actions: some View {
+        // Discovery is the default when a computer is configured. Existing
+        // manual shortcuts remain usable for tmux and unsupported connections.
+        let hasComputers = ((try? LiveSessionPreferences.read(liveData))?.hosts.isEmpty == false)
+        if hasComputers || link == nil {
+            let discoverButton = Button("Open in Moshi", systemImage: "arrow.up.forward.app") { discovering = true }
+            switch presentation {
+            case .menu: discoverButton
+            case .section:
+                discoverButton
+                    .sheet(isPresented: $discovering) { ProjectSessionsView(storeID: storeId, project: project) }
+            }
+        }
         if let link {
-            let openButton = Button("Open in Moshi", systemImage: "arrow.up.forward.app") {
+            let openButton = Button(hasComputers ? "Open saved Moshi shortcut" : "Open in Moshi", systemImage: "arrow.up.forward.app") {
                 do {
                     let url = try link.url()
                     openURL(url) { accepted in
@@ -73,12 +88,32 @@ struct ProjectSessionActions: View {
 }
 
 /// Present from one concrete button/menu, not a Section's multiple children.
-private struct MoshiLaunchAlert: ViewModifier {
+struct MoshiLaunchAlert: ViewModifier {
     @Binding var error: String?
     func body(content: Content) -> some View {
         content.alert("Couldn't open Moshi", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
+    }
+}
+
+/// A live row already identifies the target; it never opens a link editor.
+struct MoshiSessionOpenButton: View {
+    let link: MoshiSessionLink
+    @Environment(\.openURL) private var openURL
+    @State private var error: String?
+
+    var body: some View {
+        Button("Open in Moshi", systemImage: "arrow.up.forward.app") {
+            do {
+                let url = try link.url()
+                openURL(url) { accepted in
+                    if !accepted { error = "Moshi couldn't be opened on this iPhone. Install it and open this computer's session there first." }
+                }
+            } catch { self.error = error.localizedDescription }
+        }
+        .buttonStyle(.borderless)
+        .modifier(MoshiLaunchAlert(error: $error))
     }
 }
 
@@ -154,7 +189,7 @@ private struct ProjectSessionEditor: View {
                         Text(error.localizedDescription).foregroundStyle(.secondary)
                     }
                 } header: { Text("Opening the session") } footer: {
-                    Text("Moshi resumes an open or minimized session and reports if it is unavailable. Phren cannot check its live status. Use distinct session names across computers to avoid opening a different match.")
+                    Text("Moshi resumes an open or minimized session and reports if it is unavailable. This manual shortcut is not checked against discovered tabs. Use distinct session names across computers to avoid opening a different match.")
                 }
                 if hasSavedLink {
                     Section {

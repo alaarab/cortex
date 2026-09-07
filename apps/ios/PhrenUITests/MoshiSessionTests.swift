@@ -57,6 +57,9 @@ final class MoshiSessionTests: XCTestCase {
         app.swipeUp()
         app.buttons["Remove link"].tap()
         XCTAssertTrue(app.buttons["Add Moshi link"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Open in Moshi"].exists)
+        XCTAssertFalse(app.buttons["Edit Moshi link"].exists)
+        // Removing a manual shortcut leaves automatic discovery available.
+        app.buttons["Open in Moshi"].tap()
+        XCTAssertTrue(app.buttons["Manage computers"].waitForExistence(timeout: 5))
     }
 }

@@ -472,11 +472,28 @@ final class AppModel {
         #if DEBUG && targetEnvironment(simulator)
         if Self.isUITesting {
             do {
+                // Keep discovery fixtures from changing later tests' connection setup.
+                let defaults = UserDefaults(suiteName: "phren.ui-tests")!
+                let fixtureHostID = UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!
+                if !ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture"),
+                   let data = defaults.data(forKey: "sessions.live.preferences.v1"),
+                   (try? LiveSessionPreferences.read(data).hosts.contains { $0.id == fixtureHostID }) == true {
+                    defaults.set(try LiveSessionPreferences.removing(fixtureHostID, from: data), forKey: "sessions.live.preferences.v1")
+                }
                 for owner in ["sample", "team"] {
                     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")
                     let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
                     try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
                     try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
+                    if owner == "sample", ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
+                        try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
+                        let host = try LiveHost(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,
+                                                name: "Test Mac", address: "fixture.invalid", username: "fixture",
+                                                fingerprint: "SHA256:" + String(repeating: "A", count: 43))
+                        let defaults = UserDefaults(suiteName: "phren.ui-tests")!
+                        defaults.set(try LiveSessionPreferences.saving(host, in: Data()), forKey: "sessions.live.preferences.v1")
+                        defaults.set(Data(), forKey: "sessions.moshi.links.v1")
+                    }
                     if ProcessInfo.processInfo.arguments.contains("--workflow-fixture") {
                         let longTask = "Large migration plan. " + String(repeating: "Update the shared modules and verify behavior across projects. ", count: 18) + "END OF PLAN"
                         try await store.write("demo/tasks.md", content: """

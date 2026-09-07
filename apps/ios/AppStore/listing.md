@@ -74,6 +74,9 @@ instructions, and search what your agents know. The Agents tab can read
 live Herdr sessions through an optional SSH connection to your computer's
 Moshi hook. No Phren gateway is required.
 
+Open a live tab directly in Moshi, or let phren find a project's session
+from its working directory. Choose between real sessions when several match.
+
 Your agents capture and use memory while they work. Optional maintenance
 groups candidates, stale memories, and conflicts by project. Copy a request
 into your agent conversation, or select entries to manage yourself.

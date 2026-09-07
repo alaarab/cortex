@@ -6,7 +6,7 @@ Moshi beside Phren on the iPhone remains optional for interacting with sessions.
 
 ## Implemented connection
 
-Projects → Live sessions adds a computer with its own device SSH key and a
+Agents → Add computer adds a computer with its own device SSH key and a
 verified host fingerprint. Tailscale provides network reachability; Phren does
 not borrow the Moshi app's credentials or tunnel. No Phren gateway is required.
 The SSH channel only opens the remote loopback address `127.0.0.1:24543` and
@@ -20,11 +20,13 @@ A tab can contain several agents; the screen does not invent per-pane records.
 An agent conversation's `sessionId` is **not** a Herdr server/session name and
 must not be used as one in a Moshi URL. Unknown states remain unknown.
 
-The phone polls only the visible computer screen, with cancellation, a total
+The phone polls only visible computer or project-session screens, with cancellation, a total
 request deadline, response size limits, and explicit stale/disconnected labels.
 Live metadata stays in memory. An explicit directory → full store ID/project
-mapping connects a tab to a graph; path boundaries and longest-root matching
-prevent similarly named directories or projects from being conflated. Missing
+mapping connects a tab to a graph. Without an explicit mapping, the deepest
+directory component matching one unique attached project recognizes it automatically.
+Path boundaries, longest-root matching, and full store identity prevent similarly
+named directories or projects from being conflated. Missing
 stores or projects are shown as unavailable. Preferences reject corrupt or
 future schemas without replacing the original data.
 
@@ -40,15 +42,24 @@ See [phone setup and tests](README.md#live-herdr-sessions-over-tailscale--ssh),
 
 ## Optional iPhone handoff
 
-Project → Project session and graph node details → Session configure a tmux or
-Herdr destination using Moshi's public URL grammar. Linked live rows expose
-that same project shortcut. The app encodes each value independently and shows
-failed app launches without deleting the saved shortcut.
+Live rows construct an exact Herdr workspace/tab destination from the hook's
+observed IDs. No manual link or project mapping is needed to open the tab.
+Project → Project session and graph node details → Session discover current
+sessions using directory recognition and explicit mappings. A single match opens
+automatically after a successful discovery pass. Multiple matches stay in a
+chooser; failed hosts prevent automatic opening from incomplete discovery.
+The chooser refreshes while visible but never automatically opens on a later poll.
+Choosing an unmatched session remembers its directory for this project.
+
+Manual tmux/Herdr shortcuts remain available for unsupported discovery targets.
+The app encodes each value independently and preserves shortcuts on launch failure.
 
 Moshi's links resume active/minimized session cards; they do not create a
-connection and have no documented host selector. Matching names across hosts
-can therefore be ambiguous. Destinations remain manually configured rather
-than inferred from the hook's agent conversation IDs.
+connection and have no public host selector. Matching workspaces across hosts
+can therefore be ambiguous. Known workspace collisions disable automatic handoff
+and show a warning; the user must have the intended computer connected in Moshi.
+Phren cannot inspect Moshi's iPhone session cards or share its credentials.
+An agent conversation ID is never used as a Herdr server, workspace, tab, or pane.
 [Link grammar](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
 
 ## Next integration steps

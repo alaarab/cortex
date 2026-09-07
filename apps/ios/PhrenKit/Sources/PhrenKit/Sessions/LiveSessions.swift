@@ -151,7 +151,7 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         }.max { $0.directory.count < $1.directory.count }
     }
 
-    private static func normalizedDirectory(_ directory: String) throws -> String {
+    static func normalizedDirectory(_ directory: String) throws -> String {
         let parts = directory.split(separator: "/", omittingEmptySubsequences: true)
         guard directory.hasPrefix("/"), !parts.isEmpty, !parts.contains(".."),
               !parts.contains("."), directory.rangeOfCharacter(from: .controlCharacters) == nil else {

@@ -239,29 +239,48 @@ queued files and their original SHAs until flush can check them. Pending queue
 schema 2 added guarded authored edits; schema 3 adds individual skill switches.
 Schema 1 and 2 queues upgrade while retaining all existing operations.
 
-### Optional Moshi session links
+### Automatic Moshi session handoff
 
-With Moshi installed beside phren on an iPhone, open a project's **Project
-session** menu → **Add Moshi link**. The same controls appear under **Session**
-in graph node details. Choose tmux or Herdr and enter its session name; optional
-window, workspace, tab, and pane fields select a more specific destination.
-Then use **Open in Moshi** from either screen. **Edit Moshi link** changes or
-removes the shortcut.
+After connecting a computer in **Agents**, tap **Open in Moshi** on a live tab.
+Phren builds its destination from the hook's workspace and tab IDs; no session
+link form or project mapping is needed for that action.
 
-These are device-local project bookmarks, including for read-only stores.
+A project's **Project session → Open in Moshi**, and **Session → Open in Moshi**
+in graph details, discover sessions on the configured computers. One matching
+session opens automatically after discovery succeeds. Several matches offer a
+chooser with the actual agent, status, workspace, directory, and computer.
+Later refreshes never unexpectedly open another app. If no session matches,
+choosing one remembers its directory for this project on this iPhone.
+
+Directory recognition uses the deepest path component matching a unique attached
+project name, including subfolders and worktrees. Explicit directory mappings
+take precedence. Duplicate project names across stores require a choice; Phren
+does not infer a project from a session label or agent conversation ID.
+
+Moshi must already have an open or minimized session for the computer. Its public
+links cannot create a connection or select a host ID. Known workspace collisions
+across computers prevent automatic opening and show a warning. Phren cannot read
+the Moshi iPhone app's active cards. Computer setup in Phren remains a one-time step.
+
+**Add Moshi link** and **Edit Moshi link** remain manual fallbacks for tmux,
+named Herdr servers, or other destinations outside the discovery adapter.
+With a computer configured, an existing link appears as **Open saved Moshi shortcut**.
+
+Manual shortcuts are device-local project bookmarks, including for read-only stores.
 They are keyed by full store identity and project, never synced to Git, and
 do not create an agent or supply live status. Failed app launches retain the
 link; Moshi handles unavailable sessions. Phren remains usable without Moshi.
 See [Moshi's public session links](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links)
 for supported app versions and session matching.
 
-`MoshiSessionLinkTests` covers encoding, validation, store isolation, and saved
-data compatibility. `MoshiSessionTests` covers native setup, relaunch, graph
-access, removal, and the unavailable-app message in an isolated simulator.
+`SessionDiscoveryTests` covers project recognition, ambiguous stores, exact tab
+destinations, and host collisions. Native `AutomaticSessionTests` covers project
+and graph handoffs, direct live-row opening, multiple matches, and offline hosts.
+The existing Moshi tests cover manual shortcuts, encoding, persistence, and removal.
 
 ### Live Herdr sessions over Tailscale / SSH
 
-Open **Projects → Live sessions → Add computer** (also in the graph options).
+Open **Agents → Add computer** (also available from Projects and graph options).
 Enter the computer's Tailscale hostname/IP, SSH port, and user. Create a device
 key and add the copied authorization line to that user's `~/.ssh/authorized_keys`
 on the computer. Enable SSH/Remote Login and run `moshi-hook` with its gateway
@@ -285,12 +304,13 @@ This adapter was verified with `moshi-hook 0.3.19` and currently supports its
 **default Herdr server**. Entries are tabs, possibly aggregating multiple agent
 panes. Unknown states stay unknown. Other gateway kinds show an unsupported
 message. Named servers, tmux discovery, transcripts, approvals, starting or
-stopping agents, and automatic Moshi destination discovery are not implemented.
+stopping agents are not implemented.
 
 **Link to project** associates an observed directory with an explicit full
 store ID and project on this phone. Subdirectories match at path boundaries,
-with the most specific mapping winning. A linked row opens that project's
-graph and offers the existing optional, manually configured Moshi shortcut.
+with the most specific mapping winning. When no mapping exists, Phren tries
+directory recognition. A recognized row opens the project's graph; every live
+tab with valid destination IDs can open directly in Moshi without a project link.
 Hostnames, fingerprints, and mappings stay in device preferences, never Git;
 live status is not persisted. There is no new Phren daemon or public gateway.
 
@@ -330,6 +350,8 @@ Set `device` from `xcrun devicectl list devices` and your Apple development
 `team`. Optional `derived_data` reuses a build directory; `--device` overrides
 the saved phone. The command builds Release, verifies its signature, installs
 the app, and launches `com.phren.ios`, preserving its existing app data.
+If the phone is away, add `--build-only` to prepare and verify the signed app
+without contacting a device. Run the normal command once it reconnects.
 
 For unattended signing, `signing_helper` points to an existing executable that
 accepts `unlock` and `lock`: `unlock` prints only the dedicated keychain's path

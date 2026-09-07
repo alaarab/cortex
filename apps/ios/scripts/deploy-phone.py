@@ -74,6 +74,7 @@ def build(command, log_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", help="Override the paired device in Local.deploy.json")
+    parser.add_argument("--build-only", action="store_true", help="Prepare and verify the signed app without a connected iPhone")
     parser.add_argument("--config", type=Path, default=ROOT / "Local.deploy.json")
     args = parser.parse_args()
     if not args.config.exists():
@@ -81,12 +82,13 @@ def main():
     config = json.loads(args.config.read_text())
     device = args.device or config.get("device")
     team = config.get("team", "")
-    if not device or not re.fullmatch(r"[A-Z0-9]{10}", team):
+    if (not device and not args.build_only) or not re.fullmatch(r"[A-Z0-9]{10}", team):
         raise ValueError("Set the paired device and Apple development team in Local.deploy.json.")
     derived = Path(config.get("derived_data", "~/Library/Developer/Xcode/DerivedData/PhrenPhone")).expanduser().resolve()
     derived.mkdir(parents=True, exist_ok=True)
     log_path = derived / "deploy-build.log"
-    run("xcrun", "devicectl", "device", "info", "lockState", "--device", device, "--timeout", "30")
+    if not args.build_only:
+        run("xcrun", "devicectl", "device", "info", "lockState", "--device", device, "--timeout", "30")
     run("xcodegen", "generate")
     with signing(config) as settings:
         print(f"Building and signing Phren. Build log: {log_path}", flush=True)
@@ -98,6 +100,9 @@ def main():
         ], log_path)
     app = derived / "Build/Products/Release-iphoneos/Phren.app"
     run("codesign", "--verify", "--deep", "--strict", str(app))
+    if args.build_only:
+        print(f"Signed app ready: {app}")
+        return
     run("xcrun", "devicectl", "device", "install", "app", "--device", device, str(app), "--timeout", "120")
     print("Phren installed. Launching…", flush=True)
     run("xcrun", "devicectl", "device", "process", "launch", "--device", device,

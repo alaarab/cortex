@@ -59,7 +59,7 @@ final class LiveHostMonitor {
         while !Task.isCancelled {
             refreshing = true
             do {
-                let value = try await fetch(host)
+                let value = try await Self.fetch(host, previousUpdate: lastUpdated)
                 try Task.checkCancellation()
                 guard generation == run else { return }
                 snapshot = value
@@ -79,10 +79,16 @@ final class LiveHostMonitor {
         }
     }
 
-    private func fetch(_ host: LiveHost) async throws -> MoshiWorkspaces {
+    static func fetch(_ host: LiveHost, previousUpdate: Date? = nil) async throws -> MoshiWorkspaces {
         #if DEBUG && targetEnvironment(simulator)
+        if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("--session-discovery-offline") { throw LiveConnectionError.disconnected }
+            let extra = ProcessInfo.processInfo.arguments.contains("--multiple-project-sessions")
+                ? #",{"id":"w7:t10","label":"Review phone changes","agent":"claude","agentStatus":"waiting","cwd":"/work/phone"}"# : ""
+            return try MoshiWorkspaces.read(Data((#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"Build phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","sessionId":"not-a-server"}"# + extra + #"]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"Unrelated session","cwd":"/work/other"}]}]}"#).utf8))
+        }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--live-sessions-fixture") {
-            if lastUpdated != nil && ProcessInfo.processInfo.arguments.contains("--live-sessions-offline") {
+            if previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--live-sessions-offline") {
                 throw LiveConnectionError.disconnected
             }
             return try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone project","children":[{"id":"w1:t1","label":"Build graph","agent":"codex","agentStatus":"working","cwd":"/work/demo","agentPaneCount":1}]}]}"#.utf8))
@@ -130,16 +136,24 @@ private struct LiveHostView: View {
                 Button("Refresh now", systemImage: "arrow.clockwise") { refreshID = UUID() }
                     .disabled(monitor.refreshing)
             }
-            if let snapshot = monitor.snapshot {
+            if let snapshot = monitor.snapshot, let host {
                 ForEach(snapshot.groups) { group in
                     Section(group.label) {
                         ForEach(group.children) { tab in
-                            LiveTabRow(hostID: hostID, tab: tab, stale: monitor.message != nil || !monitor.polling)
+                            LiveTabRow(session: DiscoveredMoshiSession(host: host, workspaceID: group.id,
+                                                                      workspaceName: group.label, tab: tab),
+                                       stale: monitor.message != nil || !monitor.polling, lastUpdated: monitor.lastUpdated)
                         }
                     }
                 }
                 if snapshot.groups.isEmpty {
                     Text("No Herdr workspaces are running on this computer.").foregroundStyle(.secondary)
+                }
+            }
+            if (preferences?.hosts.count ?? 0) > 1 {
+                Section {
+                    Text("If Moshi has sessions on several computers, make this computer's session active there first. Moshi's links cannot select a computer directly.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -184,17 +198,21 @@ private struct LiveTabRow: View {
     @Environment(AppModel.self) private var model
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var assigning = false
-    let hostID: UUID
-    let tab: MoshiWorkspaces.Tab
+    let session: DiscoveredMoshiSession
     let stale: Bool
-    private var mapping: LiveSessionPreferences.Mapping? {
-        (try? LiveSessionPreferences.read(data))?.mapping(hostID: hostID, cwd: tab.cwd)
+    let lastUpdated: Date?
+    private var hostID: UUID { session.host.id }
+    private var tab: MoshiWorkspaces.Tab { session.tab }
+    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var mapping: LiveSessionPreferences.Mapping? { preferences?.mapping(hostID: hostID, cwd: tab.cwd) }
+    private var match: SessionProjectMatch? {
+        preferences?.projectMatch(hostID: hostID, cwd: tab.cwd, projects: model.sessionProjects)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(tab.label).font(.headline)
+                Text(tab.label).font(.headline).lineLimit(2)
                 Spacer()
                 Text(tab.status + (stale ? " · stale" : "")).font(.caption)
                     .foregroundStyle(!stale && tab.status == "Working" ? .green : .secondary)
@@ -204,23 +222,28 @@ private struct LiveTabRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let cwd = tab.cwd { Text(cwd).font(.caption.monospaced()).foregroundStyle(.secondary) }
-            if let mapping {
-                if model.storeDescriptors.contains(where: { $0.id == mapping.storeID }),
-                   model.snapshot(for: mapping.storeID).projects.contains(where: { $0.name == mapping.project }) {
+            if let match {
+                let project = match.project
+                if model.sessionProjects.contains(project) {
                     NavigationLink {
-                        GraphView(focusProject: mapping.project, initialStoreId: mapping.storeID)
+                        GraphView(focusProject: project.name, initialStoreId: project.storeID)
                     } label: {
-                        Label("\(mapping.project) · \(mapping.storeID)", systemImage: "circle.hexagongrid")
+                        Label("\(project.name) · \(project.storeID)", systemImage: "circle.hexagongrid")
                     }
-                    .accessibilityIdentifier("live-graph:\(mapping.storeID):\(mapping.project)")
-                    ProjectSessionActions(storeId: mapping.storeID, project: mapping.project)
+                    .accessibilityIdentifier("live-graph:\(project.storeID):\(project.name)")
                 } else {
-                    Text("Linked project is unavailable: \(mapping.storeID)/\(mapping.project)")
+                    Text("Linked project is unavailable: \(project.storeID)/\(project.name)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if let link = try? session.link() {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    MoshiSessionOpenButton(link: link)
+                        .disabled(stale || lastUpdated.map { context.date.timeIntervalSince($0) >= 25 } != false)
+                }
+            }
             if tab.cwd != nil {
-                Button(mapping == nil ? "Link to project" : "Change project link") { assigning = true }
+                Button(match == nil ? "Link to project" : "Change project link") { assigning = true }
                     .font(.caption).buttonStyle(.borderless)
             }
         }
