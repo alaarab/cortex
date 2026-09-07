@@ -1,0 +1,49 @@
+import XCTest
+@testable import PhrenKit
+
+final class LiveSessionsTests: XCTestCase {
+    private let fixture = Data(#"{"kind":"herdr","capabilities":{"paneList":true},"groups":[{"id":"wA","label":"Project","agentStatus":"working","children":[{"id":"wA:t2","label":"Build","agentStatus":"working","agent":"codex","sessionId":"agent-conversation-not-a-herdr-server","cwd":"/work/app","agentPaneCount":2},{"id":"wA:t3","label":"Shell"}]}]}"#.utf8)
+
+    func testObservedHookContractAndUnknownState() throws {
+        let value = try MoshiWorkspaces.read(fixture)
+        XCTAssertEqual(value.groups[0].children[0].status, "Working")
+        XCTAssertEqual(value.groups[0].children[0].agentPaneCount, 2)
+        XCTAssertEqual(value.groups[0].children[1].status, "Unknown")
+        XCTAssertNil(value.groups[0].children[1].cwd)
+        XCTAssertThrowsError(try MoshiWorkspaces.read(Data(#"{"kind":"tmux","groups":[]}"#.utf8)))
+        XCTAssertThrowsError(try MoshiWorkspaces.read(Data(repeating: 32, count: 1_048_577)))
+        XCTAssertThrowsError(try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"a","children":[]},{"id":"w1","label":"b","children":[]}]}"#.utf8)))
+    }
+
+    func testExplicitStoreAndHostIdentityWithLongestDirectoryBoundary() throws {
+        let a = try LiveHost(name: "A", address: "100.64.0.1", username: "user")
+        let b = try LiveHost(name: "B", address: "server.tail.example", username: "user")
+        var data = try LiveSessionPreferences.saving(a, in: Data())
+        data = try LiveSessionPreferences.saving(b, in: data)
+        data = try LiveSessionPreferences.assigning(hostID: a.id, directory: "/work/app/", storeID: "personal/brain", project: "app", in: data)
+        data = try LiveSessionPreferences.assigning(hostID: a.id, directory: "/work/app/team", storeID: "team/brain", project: "app", in: data)
+        let value = try LiveSessionPreferences.read(data)
+        XCTAssertEqual(value.mapping(hostID: a.id, cwd: "/work/app/src")?.storeID, "personal/brain")
+        XCTAssertEqual(value.mapping(hostID: a.id, cwd: "/work/app/team/src")?.storeID, "team/brain")
+        XCTAssertNil(value.mapping(hostID: a.id, cwd: "/work/app-other"))
+        XCTAssertNil(value.mapping(hostID: b.id, cwd: "/work/app"))
+        XCTAssertNil(value.mapping(hostID: a.id, cwd: "/work/app/../secret"))
+        XCTAssertNil(value.mapping(hostID: a.id, cwd: nil))
+        let removed = try LiveSessionPreferences.read(LiveSessionPreferences.removing(a.id, from: data))
+        XCTAssertEqual(removed.hosts.map(\.id), [b.id])
+        XCTAssertTrue(removed.mappings.isEmpty)
+    }
+
+    func testCorruptAndFuturePreferencesCannotBeOverwritten() throws {
+        let host = try LiveHost(name: "Mac", address: "example", username: "user")
+        for raw in ["garbage", #"{"schemaVersion":2,"hosts":[],"mappings":[]}"#] {
+            let original = Data(raw.utf8)
+            XCTAssertThrowsError(try LiveSessionPreferences.saving(host, in: original))
+            XCTAssertThrowsError(try LiveSessionPreferences.removing(host.id, from: original))
+        }
+        XCTAssertNoThrow(try LiveSessionPreferences.read(Data(#"{"schemaVersion":1,"hosts":[],"mappings":[]}"#.utf8)))
+        XCTAssertThrowsError(try LiveHost(name: "Mac", address: "https://example", username: "user"))
+        XCTAssertThrowsError(try LiveHost(name: "Mac", address: "example", port: 65536, username: "user"))
+        XCTAssertThrowsError(try LiveHost(name: "Mac", address: "example", username: "user", fingerprint: "not-a-pin"))
+    }
+}

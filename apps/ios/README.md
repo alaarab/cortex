@@ -10,8 +10,9 @@ foreground, so new findings and tasks appear on your phone within seconds.
 
 **Serverless.** A phren store is a git repo of markdown, and git is phren's
 sync layer — so the app talks straight to the GitHub REST API. There is no
-phren backend, no third-party service, and the GitHub token never leaves the
-device Keychain.
+phren backend. The GitHub token is stored in the device Keychain and sent only
+to GitHub. Optional live sessions use a separate SSH connection to a computer
+the user adds, reusing its installed Moshi hook.
 
 ```
 apps/ios/
@@ -24,6 +25,7 @@ apps/ios/
     Features/            # Projects, Review, Tasks, Search, Settings tabs
                          #   + native Skills, Agent setup and Memory graph screens
   PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
+  PhrenLive/             # app-only SSH transport (SwiftNIO SSH) + connection tests
   PhrenKit/              # Swift package: everything testable, UI-free
     Sources/PhrenKit/
       Models/            # Finding, Note, PhrenTask, QueueItem — mirror the TS shapes
@@ -205,8 +207,8 @@ with links to each scope's skills. The app edits the canonical store
 `CLAUDE.md`; phren's link step derives managed `AGENTS.md` and Copilot mirrors
 on the computer. Changes reach linked agents after the computer syncs, and
 generated mirrors refresh when phren links the project or its MCP poller pulls. This screen manages
-agent setup; running agents are still local to the computer, with no mobile
-monitoring or start/stop connection. Hook configuration remains computer-local.
+agent setup. **Live sessions** separately reads running Herdr tabs through the
+computer's Moshi hook. Hook configuration remains computer-local.
 See [agent connection design notes](AGENT_CONNECTIONS.md) for the Moshi/Herdr path.
 
 Editors keep a separate draft during live refreshes and confirm before
@@ -239,9 +241,51 @@ for supported app versions and session matching.
 data compatibility. `MoshiSessionTests` covers native setup, relaunch, graph
 access, removal, and the unavailable-app message in an isolated simulator.
 
+### Live Herdr sessions over Tailscale / SSH
+
+Open **Projects → Live sessions → Add computer** (also in the graph options).
+Enter the computer's Tailscale hostname/IP, SSH port, and user. Create a device
+key and add the copied authorization line to that user's `~/.ssh/authorized_keys`
+on the computer. Enable SSH/Remote Login and run `moshi-hook` with its gateway
+on the default loopback port 24543. Connect Tailscale on the phone when needed.
+
+Save and open the computer. Compare the displayed host fingerprint with
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that computer (or its
+matching ECDSA host key), then trust it. Phren rejects later key changes.
+The private Ed25519 key lives in this device's Keychain, separately from GitHub
+credentials. **Connection settings → Forget computer** removes it and the
+local directory mappings; remove the public authorization line on the host to
+revoke access there too.
+
+The screen fetches `GET /v1/workspaces` through an authenticated SSH channel
+to `127.0.0.1:24543`, every ten seconds while visible and active. Requests have
+a 20-second total deadline and a 1 MB response limit. Leaving the screen or
+backgrounding cancels the read and closes the socket. Last received status is
+held in memory and explicitly marked stale after a failure or pause.
+
+This adapter was verified with `moshi-hook 0.3.19` and currently supports its
+**default Herdr server**. Entries are tabs, possibly aggregating multiple agent
+panes. Unknown states stay unknown. Other gateway kinds show an unsupported
+message. Named servers, tmux discovery, transcripts, approvals, starting or
+stopping agents, and automatic Moshi destination discovery are not implemented.
+
+**Link to project** associates an observed directory with an explicit full
+store ID and project on this phone. Subdirectories match at path boundaries,
+with the most specific mapping winning. A linked row opens that project's
+graph and offers the existing optional, manually configured Moshi shortcut.
+Hostnames, fingerprints, and mappings stay in device preferences, never Git;
+live status is not persisted. There is no new Phren daemon or public gateway.
+
+`PhrenLive` pins the SSH, NIO, and Crypto dependencies separately from
+`PhrenKit`, so widgets do not link them. Run `swift test` inside both packages.
+The SSH suite uses an isolated loopback server and ephemeral test keys; add
+`PHREN_TEST_MOSHI_HOOK=1` locally to also check the installed hook's real payload.
+Native simulator tests use ad hoc signing to exercise Keychain access; they do
+not require a developer certificate or connect to real hosts.
+
 ## Building
 
-Requirements: Xcode 15+ (iOS 17 SDK), [XcodeGen](https://github.com/yonaskolb/XcodeGen),
+Requirements: Xcode 26+ (Swift 6.2; deployment target iOS 17), [XcodeGen](https://github.com/yonaskolb/XcodeGen),
 Node 20+ and pnpm (the version in the root package.json).
 
 ```bash

@@ -171,6 +171,15 @@ struct SettingsView: View {
                 Section("About") {
                     LabeledContent("App", value: "phren for iOS")
                     Link("phren on GitHub", destination: URL(string: "https://github.com/alaarab/phren")!)
+                    NavigationLink("Open-source notices") {
+                        ScrollView {
+                            Text(Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt")
+                                .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "Notices unavailable.")
+                                .font(.caption).textSelection(.enabled).padding()
+                        }
+                        .navigationTitle("Open-source notices")
+                        .phrenScreen()
+                    }
                 }
             }
             .phrenScreen()

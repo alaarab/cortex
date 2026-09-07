@@ -1,0 +1,61 @@
+import XCTest
+
+final class LiveSessionsTests: XCTestCase {
+    @MainActor
+    func testConnectionSetupProjectGraphAndStaleStatus() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Live sessions"].waitForExistence(timeout: 15))
+        app.buttons["Live sessions"].tap()
+        let computer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
+        if !computer.exists {
+            app.buttons["Add computer"].tap()
+            let name = app.textFields["live-host-name"]
+            XCTAssertTrue(name.waitForExistence(timeout: 5))
+            name.tap(); name.typeText("Test Mac")
+            app.textFields["live-host-address"].tap()
+            app.textFields["live-host-address"].typeText("fixture.invalid")
+            app.textFields["live-host-username"].tap()
+            app.textFields["live-host-username"].typeText("fixture")
+            app.swipeUp()
+            app.buttons["Create device key"].tap()
+            XCTAssertTrue(app.buttons["Copy SSH authorization line"].waitForExistence(timeout: 5))
+            app.buttons["Save"].tap()
+        }
+        computer.tap()
+        XCTAssertTrue(app.staticTexts["Build graph"].waitForExistence(timeout: 10))
+        if app.buttons["Change project link"].exists { app.buttons["Change project link"].tap() }
+        else { app.buttons["Link to project"].tap() }
+        let project = app.buttons["live-project:team/brain:demo"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5))
+        project.tap()
+        let graph = app.buttons["live-graph:team/brain:demo"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        graph.tap()
+        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        app.navigationBars.buttons["Test Mac"].tap()
+        let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "showing previous status")).firstMatch
+        XCTAssertTrue(stale.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Working · stale"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Live sessions retain clearly stale status"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["Live sessions"].waitForExistence(timeout: 15))
+        app.buttons["Live sessions"].tap()
+        computer.tap()
+        XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        app.buttons["Change project link"].tap()
+        app.buttons["Remove directory link"].tap()
+        XCTAssertTrue(app.buttons["Link to project"].waitForExistence(timeout: 5))
+        app.buttons["Connection settings"].tap()
+        app.swipeUp()
+        app.buttons["Forget computer"].tap()
+        app.sheets.buttons["Forget computer"].tap()
+        XCTAssertTrue(app.navigationBars["Computer removed"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Build graph"].exists)
+    }
+}

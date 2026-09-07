@@ -63,7 +63,11 @@ ARCHITECTURE — NO BACKEND
 There is no phren account and no phren server. The app talks directly to
 the GitHub REST API using a personal access token the user supplies, which
 is stored only in the device Keychain. We collect no data of any kind: no
-analytics, no crash reporting, no telemetry, no third-party SDKs.
+analytics, no crash reporting, and no telemetry. Optional Live sessions uses
+SwiftNIO SSH and Swift Crypto to read the Moshi hook on a computer the user
+adds. It requires its own SSH key and verified host fingerprint; it does not
+use a phren backend or share GitHub credentials. The core app does not require
+Moshi, Herdr, Tailscale, or a live computer connection.
 
 
 HOW TO SIGN IN

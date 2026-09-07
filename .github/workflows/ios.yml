@@ -43,10 +43,15 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      # Use the runner image's default Xcode — pinning an older version
-      # conflicts with the project format Homebrew's current XcodeGen emits.
+      # SwiftNIO's current dependency graph requires Swift 6.2. macos-15
+      # still defaults to Xcode 16.4; select the installed compatible toolchain.
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
       - name: swift test
         working-directory: apps/ios/PhrenKit
+        run: swift test
+      - name: SSH connection tests
+        working-directory: apps/ios/PhrenLive
         run: swift test
 
   app-build:
@@ -55,6 +60,8 @@ jobs:
     needs: phrenkit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -80,6 +87,8 @@ jobs:
       - name: Test phone graph renderer
         run: node --test apps/ios/scripts/test-graph.mjs
       - name: Test native graph navigation
+        # Ad hoc simulator signing supplies Keychain entitlements without a
+        # developer certificate; PHRENTEST01 is a synthetic test team prefix.
         working-directory: apps/ios
         run: |
           xcrun simctl list devices available --json > "$RUNNER_TEMP/phren-devices.json"
@@ -87,7 +96,7 @@ jobs:
           xcodebuild test -project Phren.xcodeproj -scheme Phren \
             -destination "platform=iOS Simulator,id=$PHREN_TEST_DEVICE_ID" \
             -resultBundlePath "$RUNNER_TEMP/PhrenUITests.xcresult" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=PHRENTEST01
       - name: Save native test results
         if: always()
         uses: actions/upload-artifact@v4

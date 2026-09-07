@@ -32,6 +32,9 @@ struct ProjectsView: View {
                         }
                     }
                     Section("Agent setup") {
+                        NavigationLink { LiveSessionsView() } label: {
+                            Label("Live sessions", systemImage: "waveform.path")
+                        }
                         NavigationLink { SkillsView() } label: {
                             Label("Skills", systemImage: "wand.and.stars")
                         }

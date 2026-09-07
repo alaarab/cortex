@@ -105,6 +105,9 @@ struct GraphView: View {
                         namingView = true
                     }.disabled(payload == nil)
                     Button("Saved views", systemImage: "bookmark.fill") { showingSavedViews = true }
+                    NavigationLink { LiveSessionsView() } label: {
+                        Label("Live sessions", systemImage: "waveform.path")
+                    }
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         Task { await model.pullToRefresh(); await rebuild() }
                     }

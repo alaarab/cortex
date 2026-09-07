@@ -16,6 +16,8 @@ configFiles:
 packages:
   PhrenKit:
     path: PhrenKit
+  PhrenLive:
+    path: PhrenLive
 
 schemes:
   Phren:
@@ -54,6 +56,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: PhrenKit
+      - package: PhrenLive
       - target: PhrenWidgets
         embed: true
     preBuildScripts:
@@ -113,13 +116,10 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Phren records audio only while you dictate a note."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Phren transcribes your dictation into a note on this device when possible."
-        # Export compliance: the app only ever speaks HTTPS to the GitHub REST
-        # API (via URLSession/TLS, the OS-provided stack) and stores its token
-        # in the system Keychain — both exempt from import/export reporting.
-        # Without this key, App Store Connect stops every build on upload to
-        # ask; setting it to NO answers that question at build time and skips
-        # the prompt.
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Phren connects to a computer you add to read live session status over SSH."
+        # SSH now includes bundled cryptographic implementation (Swift Crypto).
+        # Complete App Store Connect's encryption questionnaire for distribution;
+        # the previous OS-only HTTPS exemption no longer describes this binary.
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: true

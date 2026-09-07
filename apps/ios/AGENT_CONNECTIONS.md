@@ -1,79 +1,65 @@
 # Agent connections: Moshi and Herdr
 
-The iPhone app edits agent instructions and skills and can optionally open a
-saved project session in the Moshi iPhone app. It does not list or control
-live desktop agents.
+Phren manages project memory, skills, findings, tasks, and the graph. The iPhone
+app also reads live Herdr session status through an existing Moshi hook.
+Moshi beside Phren on the iPhone remains optional for interacting with sessions.
+
+## Implemented connection
+
+Projects → Live sessions adds a computer with its own device SSH key and a
+verified host fingerprint. Tailscale provides network reachability; Phren does
+not borrow the Moshi app's credentials or tunnel. No Phren gateway is required.
+The SSH channel only opens the remote loopback address `127.0.0.1:24543` and
+issues `GET /v1/workspaces`. There is no shell or arbitrary route API.
+
+The endpoint was observed on installed `moshi-hook 0.3.19`, which returns
+`kind`, `capabilities`, and workspace `groups` with tab `children`. Tab metadata
+includes `agentStatus`, `agent`, `cwd`, and optionally `agentPaneCount`. The
+adapter supports the default Herdr server, not tmux or named server discovery.
+A tab can contain several agents; the screen does not invent per-pane records.
+An agent conversation's `sessionId` is **not** a Herdr server/session name and
+must not be used as one in a Moshi URL. Unknown states remain unknown.
+
+The phone polls only the visible computer screen, with cancellation, a total
+request deadline, response size limits, and explicit stale/disconnected labels.
+Live metadata stays in memory. An explicit directory → full store ID/project
+mapping connects a tab to a graph; path boundaries and longest-root matching
+prevent similarly named directories or projects from being conflated. Missing
+stores or projects are shown as unavailable. Preferences reject corrupt or
+future schemas without replacing the original data.
+
+The exported SSH authorization line restricts forwarding to the gateway and
+disables shell commands. The hook itself offers more capabilities than status;
+this is a client limited to reads, not a new server-side read-only credential
+scope. The transport exposes no approval, terminal input, or transcript calls.
+
+See [phone setup and tests](README.md#live-herdr-sessions-over-tailscale--ssh),
+[Moshi gateway roles](https://getmoshi.app/docs/install-desktop),
+[workspace discovery](https://getmoshi.app/docs/debug-multiplexer-chooser), and
+[Tailscale setup](https://getmoshi.app/docs/tailscale).
 
 ## Optional iPhone handoff
 
-Moshi is an optional app beside phren on the iPhone. Project → Project session
-and graph node details → Session configure a tmux or Herdr destination.
-Bookmarks use the full store ID and project, stay in device preferences, and
-can be edited or removed without changing the repository or running session.
-The app builds a validated public URL; names and IDs are encoded individually.
-If iOS cannot open Moshi, phren reports the failure and retains the shortcut.
-Moshi handles a session that no longer exists; a successful app launch is not
-evidence of a running agent. No desktop companion is installed by this feature.
+Project → Project session and graph node details → Session configure a tmux or
+Herdr destination using Moshi's public URL grammar. Linked live rows expose
+that same project shortcut. The app encodes each value independently and shows
+failed app launches without deleting the saved shortcut.
 
-## Start with an integration
+Moshi's links resume active/minimized session cards; they do not create a
+connection and have no documented host selector. Matching names across hosts
+can therefore be ambiguous. Destinations remain manually configured rather
+than inferred from the hook's agent conversation IDs.
+[Link grammar](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
 
-Keep phren responsible for project memory, skills, findings, tasks, and the
-graph. Users who choose Moshi can use it for live interaction. The CLI
-already has `AgentRecord`, `JoinedAgent`, and a Herdr discovery
-provider in `packages/cli/src/agents/`. A phone adapter can build on that
-contract without implementing another process supervisor.
+## Next integration steps
 
-Moshi's public links resume active/minimized session cards. Herdr links can
-carry session, workspace, tab, and pane IDs; tmux links carry session and
-optionally window/pane. They cannot create a saved connection and have no
-public host selector, so matching names across hosts are ambiguous. The
-manual setup explains using distinct session names. A future discovered
-destination should retain host identity and avoid an ambiguous automatic
-handoff. Do not use Moshi's internal terminal route.
-[Documented link grammar and limitations](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
+- Verify setup and the app handoff on a physical iPhone over its tailnet.
+- Add named Herdr servers and tmux only after observing their discovery contract.
+- Retain provider session/workspace/tab/pane metadata if the desktop registry
+  becomes a source. Never execute its `focus` argv from a phone payload.
+- Consider reviewed task handoffs after status and project linking are proven.
+  Phren can supply context and tasks while Moshi handles terminal interaction.
 
-The Herdr provider should retain session/workspace/tab/pane IDs as structured
-provider metadata; its existing `focus` command is a desktop action and must
-never be executed from a phone payload. Moshi already uses Herdr's session
-and workspace context in its agent events.
-[Moshi's Herdr integration](https://getmoshi.app/docs/herdr).
-
-## Read-only status bridge
-
-Proposed first payload: protocol version, host ID, observed-at time, and
-agents with stable provider IDs, label, status, project/store identity, and
-optional structured handoff metadata. Show disconnected/stale explicitly;
-an empty successful snapshot means no agents, not a connection failure.
-Resolve working directories to projects on the host. Do not infer a store
-from its display name or send full transcripts just to show status.
-
-For hosts already reachable over Tailscale, investigate a phren SSH
-connection over that network to an existing `moshi-hook` gateway first;
-another phren gateway is not a prerequisite. iOS cannot borrow another app's
-SSH credentials or its existing tunnel. Tailscale supplies reachability, not
-cross-app access. Keep live state out of Git; the store repo remains the
-durable memory layer. [Tailscale setup](https://getmoshi.app/docs/tailscale).
-
-Moshi documents a loopback gateway at port 24543. Its `/events` WebSocket is
-session-context oriented, and transcript streaming is a separate route. This
-is a candidate adapter, not evidence of a stable remote all-agent API; verify
-the supported discovery contract before depending on it. Keep the gateway
-private and use its documented tunnel path.
-[Gateway behavior](https://getmoshi.app/docs/debug-gateway).
-
-Moshi's Desktop documentation also describes structured workspace and agent
-APIs on that same gateway. Verify the installed version's endpoints and data
-before implementing the live adapter; the optional phone handoff does not
-require Moshi Desktop. [Daemon and gateway roles](https://getmoshi.app/docs/install-desktop).
-
-## What to decide together
-
-1. Where agents actually run: this Mac, another host, or several hosts; and
-   which sessions use Herdr versus tmux.
-2. Whether the first phone view needs all agents or only agents for the open
-   project. Start with status and a Moshi handoff.
-3. Whether task assignment is useful after that. A reviewed task handoff can
-   build on phren's tasks without taking ownership of terminal sessions.
-
-No remote execution, new daemon, webhook notifications, or credential sharing
-has been enabled by this iteration.
+The CLI's existing `AgentRecord`/`JoinedAgent` and Herdr provider remain in
+`packages/cli/src/agents/`. No process supervisor, remote task execution,
+transcript collection, new daemon, or webhook notifications are added here.

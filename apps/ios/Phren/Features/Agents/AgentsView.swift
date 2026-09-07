@@ -20,6 +20,9 @@ struct AgentsView: View {
             Section {
                 Text("Shape how your agents work with shared instructions and reusable skills.")
                     .foregroundStyle(.secondary)
+                NavigationLink { LiveSessionsView() } label: {
+                    Label("Live sessions", systemImage: "waveform.path")
+                }
             }
             Section("Global instructions") {
                 ForEach(stores.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query)

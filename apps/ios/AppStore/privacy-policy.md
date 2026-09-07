@@ -15,14 +15,15 @@ change is worse than no policy.
 phren for iOS ("the app") is a client for a knowledge store you own,
 stored in a Git repository on GitHub. This policy explains what the app
 does with your data. Store sync goes directly to the GitHub account you
-connect. Optional app handoffs and voice features are described below.
+connect. Optional SSH connections, app handoffs, and voice features are described below.
 
 ## We do not collect your data
 
 There is no phren account, no phren server, and no phren backend. The
 developer of this app receives **no** data from it — no analytics, no
 crash reporting, no telemetry, no advertising identifiers, no usage
-statistics. The app contains no third-party SDKs.
+statistics. The app uses open-source SwiftNIO SSH and Swift Crypto for optional
+computer connections; these libraries do not provide analytics or telemetry.
 
 ## What the app stores on your device
 
@@ -35,10 +36,18 @@ statistics. The app contains no third-party SDKs.
   pushed to GitHub.
 - **App settings**, such as your chosen default project for quick capture
   and a short log of recent captures, saved graph views, and optional Moshi
-  session links associated with your projects.
+  session links associated with your projects. Optional live connections also
+  save computer addresses, usernames, trusted SSH fingerprints, and directory
+  links to projects in device preferences.
+- **A separate SSH private key per added computer**, in the device Keychain,
+  accessible only while unlocked and excluded from Keychain syncing and backups.
+- **Last received live session metadata**, such as tab names, agent states, and
+  working directories, in memory while the session screen exists.
 
-All of this lives in the app's private container and is removed when you
-delete the app. Signing out clears the stored token.
+Deleting the app removes its private container. Keychain credentials can
+survive app deletion: signing out clears the GitHub token, and **Forget
+computer** deletes that connection's SSH key. Remove the corresponding public
+key from the computer's authorized_keys file to revoke its access there.
 
 ## What the app sends, and where
 
@@ -60,6 +69,19 @@ window, tab, and pane identifiers remain in phren's device settings.
 Tapping **Open in Moshi** passes those identifiers to the Moshi app through
 an iOS URL handoff. The handoff contains no GitHub token or store content.
 Moshi handles the destination session under its own privacy policy.
+
+## Optional live computer connections
+
+When you open an added computer, phren connects directly to its configured
+SSH address and reads session metadata from the Moshi hook on that computer.
+The SSH public key identifies this device; the private key is never sent.
+The app verifies the computer's SSH host key against the fingerprint you trust.
+It does not send GitHub credentials or store contents to this connection.
+
+Reads stop when you leave the computer screen or the app becomes inactive.
+The app does not fetch transcripts, send terminal commands, or approve agent
+actions. No live metadata is uploaded to GitHub or a phren server. Copying or
+sharing the SSH authorization line exports only public key material.
 
 ## Microphone and speech recognition
 
