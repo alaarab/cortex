@@ -48,14 +48,13 @@ layer for AI coding agents, published on npm as @phren/cli
 
 AI coding agents accumulate knowledge as they work. phren stores that
 knowledge as markdown in a Git repository the user owns. This app is the
-mobile client for reviewing and governing that knowledge: approving or
-rejecting findings the agents captured automatically, and adding notes and
-tasks on the go.
+mobile client for exploring that knowledge, managing skills and instructions,
+checking optional live agent sessions, and adding notes and tasks on the go.
 
 It is not a general-purpose notes or to-do app. Tasks and notes are two of
-several surfaces over a developer's knowledge store; the primary surface is
-the review queue, where a developer accepts or discards what their agents
-have learned.
+several surfaces over a developer's knowledge store. Projects and the memory
+graph make that knowledge explorable; maintenance is an optional project view
+for candidates, stale memories, and conflicts.
 
 
 ARCHITECTURE — NO BACKEND
@@ -83,16 +82,18 @@ path is the supported sign-in method for version 1.0.
 
 WHAT TO TRY
 
-1. Projects tab — the demo store's projects, with counts of findings,
-   tasks, notes and pending review items.
-2. Review tab, then the Triage button (stacked-squares icon, top right) —
-   full-screen review: swipe right to approve a finding, left to reject,
-   with undo. This is the app's primary feature.
-3. Tasks tab — Active/Queue/Done sections; tap a completed task's
-   checkmark to reopen it; long-press any row for edit and delete.
+1. Projects tab — the demo store's projects, findings, skills, instructions,
+   and memory graph. Search or tap a graph node to explore its connections.
+2. Agents tab — optional live sessions and computer setup. The demo store
+   works without connecting a computer or installing Moshi.
+3. Tasks tab — Active opens first; switch to Backlog or Done to browse those
+   lists. Tap task text for full details, a checkbox to complete or reopen,
+   or long-press for edit and delete.
 4. Search tab — on-device search across the whole store, no network.
 5. Settings — per-store health (sync state, pending writes), recent
-   captures and their destinations, and quick-capture defaults.
+   captures and their destinations, and quick-capture defaults. Open Memory
+   maintenance for project groups, a copyable agent request, and manual batch
+   selection. The filter menu also offers optional individual triage.
 6. Optional: the microphone button on the Projects tab dictates a note or
    task using on-device speech recognition. Siri shortcuts ("Add a phren
    task") do the same hands-free. Both are optional; declining the
@@ -130,10 +131,10 @@ PERMISSIONS
 
 ## If a rejection arrives anyway
 
-**4.3 Spam / "this is a to-do app"** — reply pointing at the review queue
+**4.3 Spam / "this is a to-do app"** — reply pointing at the memory graph
 as the primary surface, the open-source CLI it accompanies, and the
-Developer Tools category. Offer a short screen recording of a triage
-session; it makes the distinction obvious in a way text does not.
+Developer Tools category. Offer a short screen recording exploring connected
+findings and project instructions.
 
 **4.2 Minimum Functionality** — reply with the offline behaviour: turn on
 Airplane Mode, make edits, watch them queue and then sync. That is the

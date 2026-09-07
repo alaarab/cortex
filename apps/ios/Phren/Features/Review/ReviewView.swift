@@ -1,24 +1,23 @@
 import SwiftUI
 import PhrenKit
 
-/// Cross-store, cross-project review queue: approve / reject / edit pending
-/// findings with the exact semantics of access.ts:700-749, routed to the
-/// store each item came from.
+/// Optional maintenance for one project's queue, scoped to its source store.
 struct ReviewView: View {
+    let storeID: String
+    let project: String
     @Environment(AppModel.self) private var model
-    @State private var projectFilter: String?
     @State private var flaggedOnly = false
     @State private var selection = Set<String>()
     @State private var editMode: EditMode = .inactive
     @State private var editing: StoreQueueEntry?
     @State private var triaging = false
+    @State private var reading: StoreQueueEntry?
+    @State private var copied = false
 
     private var items: [StoreQueueEntry] {
-        model.mergedReviewQueue.filter { item in
-            if let projectFilter, item.entry.project != projectFilter { return false }
-            if flaggedOnly, !item.entry.item.risky { return false }
-            return true
-        }
+        model.snapshot(for: storeID).reviewQueue
+            .filter { $0.project == project && (!flaggedOnly || $0.item.risky) }
+            .map { StoreQueueEntry(storeId: storeID, storeName: model.storeName(for: storeID), entry: $0) }
     }
 
     /// The deck triage works: the same items the list shows, in the same
@@ -29,24 +28,45 @@ struct ReviewView: View {
         }
     }
 
-    private var projectNames: [String] {
-        Array(Set(model.mergedReviewQueue.map(\.entry.project))).sorted()
-    }
-
     var body: some View {
-        @Bindable var model = model
-        NavigationStack {
+        Group {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
                 List(selection: $selection) {
+                    Section {
+                        Text(storeID).font(.caption).foregroundStyle(.secondary)
+                        Button(copied ? "Agent request copied" : "Copy request for my agent", systemImage: "doc.on.doc") {
+                            UIPasteboard.general.string = """
+                            Inspect memory maintenance for project \(project) in Phren store \(storeID).
+                            Read its review queue and current project context. Summarize candidates,
+                            stale memories, and conflicts by theme. Suggest a batch of useful updates and
+                            call out ambiguous or destructive decisions for me. Do not blindly approve
+                            or discard the queue just to clear its count.
+                            """
+                            copied = true
+                        }
+                        .buttonStyle(.borderless)
+                        Text("Paste this into your agent conversation. You can also select several entries below for manual maintenance.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     ForEach(QueueItem.Section.allCases, id: \.self) { section in
                         let sectionItems = items.filter { $0.entry.item.section == section }
                         if !sectionItems.isEmpty {
                             Section("\(section.rawValue) (\(sectionItems.count))") {
                                 ForEach(sectionItems) { entry in
-                                    ReviewRow(entry: entry, showStore: model.hasMultipleStores)
+                                    Group {
+                                        if editMode == .active {
+                                            ReviewRow(entry: entry, showStore: false)
+                                        } else {
+                                            Button { reading = entry } label: {
+                                                ReviewRow(entry: entry, showStore: false)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
                                         .tag(entry.id)
+                                        .contentShape(Rectangle())
                                         .swipeActions(edge: .leading) {
                                             Button {
                                                 Task { await approve([entry]) }
@@ -85,16 +105,14 @@ struct ReviewView: View {
                             }
                         }
                     }
-                }
-                .environment(\.editMode, $editMode)
-                .overlay {
                     if items.isEmpty {
-                        PhrenEmptyState(
-                            title: "Review queue is clear",
-                            message: "Auto-captured findings land here for approval — approving keeps the finding, rejecting deletes it permanently."
-                        )
+                        Section {
+                            Text("No maintenance entries for this project and filter.")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .environment(\.editMode, $editMode)
                 .refreshable { await model.pullToRefresh() }
         .phrenScreen()
 
@@ -102,47 +120,24 @@ struct ReviewView: View {
                     batchBar
                 }
             }
-            .navigationTitle("Review")
+            .navigationTitle(project)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Picker("Project", selection: $projectFilter) {
-                            Text("All projects").tag(String?.none)
-                            ForEach(projectNames, id: \.self) { name in
-                                Text(name).tag(String?.some(name))
-                            }
-                        }
-                        if model.hasMultipleStores {
-                            Picker("Store", selection: $model.storeFilter) {
-                                Text("All stores").tag(String?.none)
-                                ForEach(model.storeDescriptors) { store in
-                                    Text(store.displayName).tag(String?.some(store.id))
-                                }
-                            }
-                        }
                         Toggle("Flagged only", isOn: $flaggedOnly)
+                        Button("Review individually", systemImage: "square.stack") { triaging = true }
+                            .disabled(triageDeck.isEmpty)
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                     }
-                }
-                if editMode == .inactive {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            triaging = true
-                        } label: {
-                            Label("Triage", systemImage: "square.stack")
-                                .labelStyle(.titleAndIcon)
-                                .fontWeight(.semibold)
-                        }
-                        .tint(PhrenTheme.accentHover)
-                        .disabled(triageDeck.isEmpty)
-                    }
+                    .accessibilityLabel("Maintenance options")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         withAnimation {
                             editMode = editMode == .active ? .inactive : .active
-                            if editMode == .inactive { selection.removeAll() }
+                            selection.removeAll()
                         }
                     } label: {
                         if editMode == .active {
@@ -169,6 +164,22 @@ struct ReviewView: View {
             .fullScreenCover(isPresented: $triaging) {
                 TriageView(entries: triageDeck)
             }
+            .sheet(item: $reading) { entry in
+                NavigationStack {
+                    List {
+                        Text(.init(entry.entry.item.text)).textSelection(.enabled)
+                        LabeledContent("Project", value: entry.entry.project)
+                        LabeledContent("Store", value: entry.storeId)
+                        LabeledContent("Category", value: entry.entry.item.section.rawValue)
+                    }
+                    .navigationTitle("Memory entry")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { Button("Done") { reading = nil } }
+                    .phrenScreen()
+                }
+            }
+            .onChange(of: flaggedOnly) { _, _ in selection.removeAll() }
+            .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         }
     }
 
@@ -235,8 +246,9 @@ struct ReviewRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.entry.item.text)
+            Text(.init(entry.entry.item.text))
                 .font(.callout)
+                .lineLimit(4)
             HStack(spacing: 6) {
                 TagChip(text: entry.entry.project, role: .project)
                 if showStore {

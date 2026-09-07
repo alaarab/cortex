@@ -121,7 +121,7 @@ in the Mac's login keychain; do not strip entitlements to bypass it.
 ## Realistic risks
 
 **Guideline 4.3 (Spam / duplicate)** — the "another AI to-do app" read.
-Mitigated by the Developer Tools category, the review-queue-first
+Mitigated by the Developer Tools category, the memory-graph-first
 screenshots, and the review notes. Most likely rejection; easily argued.
 
 **Guideline 4.2 (Minimum Functionality)** — the "thin client for a web

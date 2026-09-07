@@ -35,7 +35,11 @@ struct PhrenApp: App {
                 .onOpenURL { url in
                     guard url.scheme == "phren" else { return }
                     switch url.host {
-                    case "review": model.selectedTab = .review
+                    case "review":
+                        model.selectedTab = .projects
+                        model.showingMemoryMaintenance = true
+                    case "projects": model.selectedTab = .projects
+                    case "agents": model.selectedTab = .agents
                     case "tasks": model.selectedTab = .tasks
                     default: break
                     }
@@ -91,10 +95,9 @@ struct MainTabView: View {
             ProjectsView()
                 .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
                 .tag(AppTab.projects)
-            ReviewView()
-                .tabItem { Label("Review", systemImage: "checkmark.seal") }
-                .badge(model.totalReviewCount)
-                .tag(AppTab.review)
+            NavigationStack { LiveSessionsView() }
+                .tabItem { Label("Agents", systemImage: "waveform.path") }
+                .tag(AppTab.agents)
             TasksView()
                 .tabItem { Label("Tasks", systemImage: "checklist") }
                 .tag(AppTab.tasks)
@@ -105,5 +108,6 @@ struct MainTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        .sheet(isPresented: $model.showingMemoryMaintenance) { MemoryMaintenanceView() }
     }
 }

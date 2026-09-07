@@ -21,6 +21,8 @@ struct WidgetSnapshot: Codable, Equatable {
         var project: String
     }
 
+    var memoryCount: Int? = nil
+    var projectCount: Int? = nil
     var totalReviewCount: Int
     var storeBreakdown: [StoreCount]
     var topTask: TopTask?

@@ -6,6 +6,24 @@ tasks, and review queue — **live**. While an agent works on another machine an
 phren's session hooks push commits, the app polls GitHub continuously in the
 foreground, so new findings and tasks appear on your phone within seconds.
 
+## Everyday workflow
+
+Your agents capture and use memory while they work. The phone is for checking
+their sessions, exploring a project's findings and graph, adjusting skills or
+instructions, and adding direction when needed. It does not require approving
+every finding or agent action.
+
+The main tabs are **Projects, Agents, Tasks, Search, and Settings**. Tasks opens
+on **Active**; **Backlog** and **Done** are separate searchable views. Task rows
+show a short preview; tap the text to read the full plan, or use the checkbox
+to complete it.
+
+**Memory maintenance**, available from Projects and Settings, is optional. Its
+overview groups candidates, stale memories, and conflicts by project and store.
+Open a project to copy a maintenance request into an agent conversation or
+select several entries for manual action. Copying a request does not send it
+or change the queue. Individual triage is still available from the filter menu.
+
 ## Architecture
 
 **Serverless.** A phren store is a git repo of markdown, and git is phren's
@@ -22,7 +40,7 @@ apps/ios/
     WidgetBridge.swift   # writes the JSON snapshot the widgets read
     Intents/             # App Intents: "Hey Siri, add a task to phren"
     Onboarding/          # welcome → sign-in → repo picker → initial sync
-    Features/            # Projects, Review, Tasks, Search, Settings tabs
+    Features/            # Projects, Agents, Tasks, Search, Settings tabs
                          #   + native Skills, Agent setup and Memory graph screens
   PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
   PhrenLive/             # app-only SSH transport (SwiftNIO SSH) + connection tests
@@ -462,22 +480,22 @@ Read** on the store repo.
 
 ## Widgets
 
-The `PhrenWidgets` extension (`com.phren.ios.widgets`) puts the review queue
+The `PhrenWidgets` extension (`com.phren.ios.widgets`) puts your memory count
 and your top active task on the Home Screen and Lock Screen without opening
 the app:
 
-- **systemSmall** — review count, big numeral.
-- **systemMedium** — review count + top task line + relative last-sync; the
-  review half and task half deep-link separately (`phren://review`,
+- **systemSmall** — memory count, big numeral.
+- **systemMedium** — memory and project counts + top task line + relative last-sync; the
+  memory half and task half deep-link separately (`phren://projects`,
   `phren://tasks`).
-- **accessoryCircular** / **accessoryRectangular** (Lock Screen) — review
-  count, and "Review N" + top task line respectively.
+- **accessoryCircular** / **accessoryRectangular** (Lock Screen) — memory
+  count, and memory count + top task line respectively.
 
 The widget can't link PhrenKit or the app target (Apple keeps extensions
 dependency-thin, and this one stays fully offline besides). The bridge is a
 JSON file: `AppModel.refresh()` — the same place the per-store sync status
-settles every ~7s live-poll cycle — writes a `WidgetSnapshot` (review count,
-per-store breakdown, top task, last-sync date) to the `group.com.phren.ios`
+settles every ~7s live-poll cycle — writes a `WidgetSnapshot` (memory and project
+counts, top task, last-sync date, and legacy review fields) to the `group.com.phren.ios`
 App Group container, then calls `WidgetCenter.shared.reloadAllTimelines()`
 **only** when the visible content actually changed, so a quiet poll never
 touches the widget refresh budget. Before the app has ever run, the widgets
@@ -485,7 +503,9 @@ show an "open phren" state rather than fake numbers or a blank card.
 
 Tapping a widget delivers straight to `PhrenApp`'s `onOpenURL` (no
 `CFBundleURLTypes` registration needed for widget-originated opens), which
-selects the matching tab.
+selects the matching tab. Existing `phren://review` links open the optional
+maintenance sheet. Old snapshots without a memory count show a dash until the
+app writes a fresh snapshot.
 
 Building the widget target requires no extra setup — `xcodegen generate`
 declares both the extension and the App Group entitlements for both targets.

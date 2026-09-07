@@ -64,10 +64,6 @@ struct ProjectsView: View {
                                         Label("\(item.project.findingCount)", systemImage: "lightbulb")
                                         Label("\(item.project.taskCount)", systemImage: "checklist")
                                         Label("\(item.project.noteCount)", systemImage: "note.text")
-                                        if item.project.reviewCount > 0 {
-                                            Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
-                                                .foregroundStyle(.orange)
-                                        }
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -76,6 +72,14 @@ struct ProjectsView: View {
                             }
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
                         }
+                    }
+                    Section {
+                        Button("Memory maintenance", systemImage: "wrench.and.screwdriver") {
+                            model.showingMemoryMaintenance = true
+                        }
+                        .foregroundStyle(.secondary)
+                    } footer: {
+                        Text("Your agents build memory as you work. Explore it here; open maintenance when you want to inspect candidates, stale memories, or conflicts.")
                     }
                 }
                 .overlay {

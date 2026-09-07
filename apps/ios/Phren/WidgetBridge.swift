@@ -20,6 +20,8 @@ struct WidgetSnapshot: Codable, Equatable {
         var project: String
     }
 
+    var memoryCount: Int? = nil
+    var projectCount: Int? = nil
     var totalReviewCount: Int
     var storeBreakdown: [StoreCount]
     var topTask: TopTask?
@@ -34,19 +36,19 @@ struct WidgetSnapshot: Codable, Equatable {
     /// change-detection a no-op and spam `WidgetCenter.reloadAllTimelines()`
     /// well past its daily budget.
     struct Content: Codable, Equatable {
-        var totalReviewCount: Int
-        var storeBreakdown: [StoreCount]
+        var memoryCount: Int?
+        var projectCount: Int?
         var topTask: TopTask?
     }
 
     var content: Content {
-        Content(totalReviewCount: totalReviewCount, storeBreakdown: storeBreakdown, topTask: topTask)
+        Content(memoryCount: memoryCount, projectCount: projectCount, topTask: topTask)
     }
 }
 
 /// Writes `WidgetSnapshot` to the `group.com.phren.ios` shared container so
 /// the WidgetKit extension — which reads only this JSON file, never GitHub
-/// or PhrenKit directly — can render review count / top task without the
+/// or PhrenKit directly — can render memory count / top task without the
 /// app being open.
 ///
 /// Called from `AppModel.refresh()`, the same place the store-health data
@@ -98,6 +100,8 @@ enum WidgetBridge {
             .map { WidgetSnapshot.StoreCount(storeName: $0.descriptor.displayName, count: $0.snapshot.reviewQueue.count) }
             .sorted { $0.storeName < $1.storeName }
         return WidgetSnapshot(
+            memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.findingCount } },
+            projectCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.filter { $0.name != "global" }.count },
             totalReviewCount: model.totalReviewCount,
             storeBreakdown: breakdown,
             topTask: topActiveTask(model: model),

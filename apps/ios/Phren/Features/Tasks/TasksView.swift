@@ -36,9 +36,9 @@ struct TaskListView: View {
     @State private var selectedProject: String?
     @State private var showAdd = false
     @State private var editing: TaskListRow?
-    // Done is collapsed by default — the section still shows a live count in
-    // its header so a completed task never reads as "vanished".
-    @State private var doneExpanded = false
+    @State private var reading: TaskListRow?
+    @State private var section: PhrenTask.Section = .active
+    @State private var query = ""
 
     private var isProjectScoped: Bool {
         if case .project = scope { return true }
@@ -75,15 +75,18 @@ struct TaskListView: View {
             }
         }
         // Pinned first, then rank (tasks.ts display order).
-        return result.sorted {
+        return result.filter {
+            query.isEmpty || $0.task.line.localizedCaseInsensitiveContains(query)
+                || ($0.task.context?.localizedCaseInsensitiveContains(query) ?? false)
+                || $0.project.localizedCaseInsensitiveContains(query)
+        }.sorted {
             if ($0.task.pinned ?? false) != ($1.task.pinned ?? false) { return $0.task.pinned ?? false }
             return ($0.task.rank ?? Int.max) < ($1.task.rank ?? Int.max)
         }
     }
 
-    private var activeRows: [TaskListRow] { rows(in: .active) }
     private var queueRows: [TaskListRow] { rows(in: .queue) }
-    private var doneRows: [TaskListRow] { rows(in: .done) }
+    private var visibleRows: [TaskListRow] { rows(in: section) }
 
     private var projectNames: [String] {
         // Key paths can't traverse tuple elements — use a closure.
@@ -100,27 +103,45 @@ struct TaskListView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            Picker("Task status", selection: $section) {
+                Text("Active").tag(PhrenTask.Section.active)
+                Text("Backlog").tag(PhrenTask.Section.queue)
+                Text("Done").tag(PhrenTask.Section.done)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
             List {
-                Section("Active (\(activeRows.count))") {
-                    taskRows(activeRows)
-                }
-                Section("Queue (\(queueRows.count))") {
-                    taskRows(queueRows)
-                }
-                Section {
-                    DisclosureGroup("Done (\(doneRows.count))", isExpanded: $doneExpanded) {
-                        taskRows(doneRows)
+                if !visibleRows.isEmpty {
+                    Section("\(section == .queue ? "Backlog" : section.rawValue) · \(visibleRows.count)") {
+                        taskRows(visibleRows)
+                    }
+                } else if section == .active && query.isEmpty {
+                    Section {
+                        Label("No tasks marked active", systemImage: "checkmark.circle")
+                            .font(.headline)
+                        Text("Check Agents for live sessions, or browse the backlog for planned work.")
+                            .foregroundStyle(.secondary)
+                        if !queueRows.isEmpty {
+                            Button("View backlog (\(queueRows.count))") { section = .queue }
+                        }
+                        if !isProjectScoped {
+                            Button("View agents") { model.selectedTab = .agents }
+                        }
                     }
                 }
             }
             .overlay {
-                if activeRows.isEmpty && queueRows.isEmpty && doneRows.isEmpty {
-                    PhrenEmptyState(title: "No tasks yet", message: emptyMessage)
+                if visibleRows.isEmpty && (section != .active || !query.isEmpty) {
+                    PhrenEmptyState(title: query.isEmpty ? "No \(section == .queue ? "backlog" : "completed") tasks" : "No matching tasks",
+                                    message: query.isEmpty ? emptyMessage : "Try another search or task status.")
                 }
             }
+            .searchable(text: $query, prompt: "Search tasks")
             .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+            .phrenScreen()
         }
+        .background(PhrenTheme.bg)
         .toolbar {
             if !isProjectScoped {
                 ToolbarItem(placement: .topBarLeading) {
@@ -157,6 +178,9 @@ struct TaskListView: View {
         .sheet(item: $editing) { row in
             TaskEditSheet(row: row)
         }
+        .sheet(item: $reading) { row in
+            TaskDetailsSheet(row: row)
+        }
     }
 
     /// The + button is disabled cross-store when no (store, project) pair is
@@ -175,7 +199,9 @@ struct TaskListView: View {
             TaskRow(
                 row: row,
                 showProject: !isProjectScoped,
-                showStore: !isProjectScoped && model.hasMultipleStores
+                showStore: !isProjectScoped && model.hasMultipleStores,
+                canWrite: model.canWrite(storeId: row.storeId, project: row.project),
+                onRead: { reading = row }
             ) {
                 toggle(row)
             }
@@ -303,7 +329,7 @@ struct AddTaskSheet: View {
                     }
                 }
             }
-            .navigationTitle("Add to Queue")
+            .navigationTitle("Add to Backlog")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -339,6 +365,8 @@ struct TaskRow: View {
     let row: TaskListRow
     let showProject: Bool
     let showStore: Bool
+    let canWrite: Bool
+    let onRead: () -> Void
     let onToggle: () -> Void
 
     var body: some View {
@@ -349,17 +377,22 @@ struct TaskRow: View {
                     .font(.title3)
             }
             .buttonStyle(.plain)
+            .disabled(!canWrite)
+            .accessibilityLabel(row.task.checked ? "Reopen task" : "Complete task")
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(displayLine)
+            Button(action: onRead) {
+              VStack(alignment: .leading, spacing: 5) {
+                Text(.init(displayLine))
                     .font(.callout)
                     .strikethrough(row.task.checked)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
                     if showProject {
                         TagChip(text: row.project, role: .project)
                     }
                     if showStore {
-                        TagChip(text: row.storeName, role: .store)
+                        TagChip(text: row.storeId, role: .store)
                     }
                     if let priority = row.task.priority {
                         TagChip(text: priority.rawValue, color: priorityColor(priority))
@@ -375,9 +408,12 @@ struct TaskRow: View {
                     Text(context)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
+              }
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("task-detail:\(row.id)")
         }
         .padding(.vertical, 2)
     }
@@ -391,6 +427,54 @@ struct TaskRow: View {
         case .high: return PhrenTheme.red
         case .medium: return PhrenTheme.amber
         case .low: return PhrenTheme.textDim
+        }
+    }
+}
+
+/// Reading a long task never opens a text editor or changes its state.
+private struct TaskDetailsSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing = false
+    let row: TaskListRow
+
+    private var currentRow: TaskListRow {
+        let task = model.snapshot(for: row.storeId).tasks[row.project]?.allItems.first {
+            if let stableID = row.task.stableId { return $0.stableId == stableID }
+            return $0.id == row.task.id
+        }
+        return TaskListRow(storeId: row.storeId, storeName: row.storeName,
+                           project: row.project, task: task ?? row.task)
+    }
+
+    var body: some View {
+        let row = currentRow
+        NavigationStack {
+            List {
+                Section {
+                    Text(.init(TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))))
+                        .textSelection(.enabled)
+                }
+                if let context = row.task.context {
+                    Section("Context") { Text(.init(context)).textSelection(.enabled) }
+                }
+                Section {
+                    LabeledContent("Project", value: row.project)
+                    LabeledContent("Store", value: row.storeId)
+                    LabeledContent("Status", value: row.task.section == .queue ? "Backlog" : row.task.section.rawValue)
+                    if let priority = row.task.priority { LabeledContent("Priority", value: priority.rawValue) }
+                }
+            }
+            .navigationTitle("Task details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                if model.canWrite(storeId: row.storeId, project: row.project) {
+                    ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
+                }
+            }
+            .phrenScreen()
+            .sheet(isPresented: $editing) { TaskEditSheet(row: row) }
         }
     }
 }
@@ -427,7 +511,7 @@ struct TaskEditSheet: View {
                 }
                 Picker("Section", selection: $section) {
                     ForEach(PhrenTask.Section.allCases, id: \.self) { s in
-                        Text(s.rawValue).tag(s)
+                        Text(s == .queue ? "Backlog" : s.rawValue).tag(s)
                     }
                 }
             }

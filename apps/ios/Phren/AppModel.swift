@@ -86,7 +86,7 @@ struct FailedOpEntry: Identifiable {
 /// target (rather than the TabView's default no-selection mode) so a widget
 /// deep link's `onOpenURL` handler can jump the user straight to a tab.
 enum AppTab: Hashable {
-    case projects, review, tasks, search, settings
+    case projects, agents, tasks, search, settings
 }
 
 /// Why a mutation couldn't be routed to a store. Surfaced as
@@ -169,6 +169,7 @@ final class AppModel {
     /// Bound to `MainTabView`'s `TabView` selection — set from a widget deep
     /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
     var selectedTab: AppTab = .projects
+    var showingMemoryMaintenance = false
 
     /// Parsed `stores.yaml`, from whichever attached store actually carries
     /// the registry (see `refreshStoreRegistry`). Powers the claim-awareness
@@ -476,6 +477,27 @@ final class AppModel {
                     let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
                     try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
                     try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
+                    if ProcessInfo.processInfo.arguments.contains("--workflow-fixture") {
+                        let longTask = "Large migration plan. " + String(repeating: "Update the shared modules and verify behavior across projects. ", count: 18) + "END OF PLAN"
+                        try await store.write("demo/tasks.md", content: """
+                        # Demo tasks
+                        ## Active
+                        ## Queue
+                        - [ ] \(longTask) [high] <!-- bid:dead0001 -->
+                          Context: Keep the full plan available from task details.
+                        - [ ] A short follow-up task <!-- bid:dead0002 -->
+                        - [ ] Check the finished app <!-- bid:dead0003 -->
+                        ## Done
+                        """, blobSha: nil)
+                        try await store.write("demo/review.md", content: """
+                        # Review
+                        ## Review
+                        - [2026-09-06] Candidate for \(owner) memory
+                        - [2026-09-06] Another candidate for \(owner) memory
+                        ## Stale
+                        - [2026-09-05] Recheck an older convention
+                        """, blobSha: nil)
+                    }
                     // A fresh tokenless client refuses before making any request.
                     let engine = SyncEngine(client: GitHubClient(), store: store, stateDirectory: directory)
                     storeContexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: "brain", branch: "main", canPush: true), store: store, engine: engine))

@@ -62,6 +62,12 @@ struct SettingsView: View {
                 quickCaptureSection
                 recentCapturesSection
 
+                Section("Memory") {
+                    Button("Memory maintenance", systemImage: "wrench.and.screwdriver") {
+                        model.showingMemoryMaintenance = true
+                    }
+                }
+
                 Section("Account") {
                     if let user = model.user {
                         LabeledContent("GitHub", value: "@\(user.login)")
