@@ -351,7 +351,7 @@ Set `device` from `xcrun devicectl list devices` and your Apple development
 the saved phone. The command builds Release, verifies its signature, installs
 the app, and launches `com.phren.ios`, preserving its existing app data.
 If the phone is away, add `--build-only` to prepare and verify the signed app
-without contacting a device. Run the normal command once it reconnects.
+without contacting a device, then use the private Tailscale installer below.
 
 For unattended signing, `signing_helper` points to an existing executable that
 accepts `unlock` and `lock`: `unlock` prints only the dedicated keychain's path
@@ -364,6 +364,55 @@ before cleanup. Omit both helper fields to use Xcode's ordinary signing setup.
 
 This installs a development-signed app directly; it does not upload to
 TestFlight. A locked phone may need to be unlocked before the app can launch.
+
+### Install remotely over Tailscale
+
+A provisioned iPhone can install the same development-signed app from a private
+HTTPS page. Apple supports [over-the-air manifests for development exports](https://help.apple.com/xcode/mac/current/en.lproj/devde46df08a.html).
+Both the Mac and phone must be connected to the tailnet; the phone needs its
+existing Developer Mode setup. The hardware UDID must be registered in the app
+and widget provisioning profiles. CoreDevice's paired-device discovery is not
+required for this delivery path.
+
+After `deploy-phone.py --build-only`, package the signed app. Substitute the
+Mac's Tailscale DNS name, the hardware UDID, the build path from that command,
+and a new delivery identifier for every build:
+
+```bash
+python3 apps/ios/scripts/prepare-ota.py \
+  --app /path/to/Release-iphoneos/Phren.app \
+  --device-udid YOUR-HARDWARE-UDID \
+  --base-url https://YOUR-MAC.YOUR-TAILNET.ts.net/phren-install/BUILD-ID \
+  --output "$HOME/Library/Application Support/Phren/PhoneDelivery/site/BUILD-ID" \
+  --note 'What changed in this build.'
+python3 apps/ios/scripts/serve-ota.py \
+  --directory "$HOME/Library/Application Support/Phren/PhoneDelivery/site"
+```
+
+Keep the server running (or run it as a user LaunchAgent). In another terminal:
+
+```bash
+tailscale serve --bg --set-path /phren-install http://127.0.0.1:18763
+```
+
+If Tailscale prints a setup URL, enable HTTPS/Serve there, leave public Funnel
+off, and rerun the command. This adds only the `/phren-install` handler; choose
+a different path/port if another service already uses it. The loopback server
+works with the macOS Tailscale app, which cannot serve directories directly.
+See [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
+
+Open the build's HTTPS URL in Safari on the iPhone, tap **Install Phren**, and
+confirm **Install**. The app updates in place. Keep the Mac awake until the
+download finishes, then open Phren from the Home Screen. Downloading the IPA
+alone with Taildrop does not trigger installation.
+
+The packager checks the app and widget profiles and verifies signatures before
+and after ZIP extraction. The server exposes only installation assets from
+the separate delivery directory, with the required manifest/IPA content types.
+It never serves the checkout, configuration, or signing keychain. To stop
+sharing, run `tailscale serve --set-path /phren-install off` and stop the
+loopback server. Remove old build directories when their links are no longer
+needed; don't replace files while an installation is downloading.
 
 PhrenKit alone builds and tests anywhere Swift runs (macOS or Linux):
 
