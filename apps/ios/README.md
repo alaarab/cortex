@@ -299,6 +299,32 @@ The app target bundles the shared graph renderer during every build. A clean
 checkout therefore includes the renderer automatically, including in CI;
 `Phren/Resources/graph/phren-graph.js` remains generated and gitignored.
 
+### Install directly on a paired iPhone
+
+For the same direct-device delivery used by AlphaLens and Mutter, configure
+the ignored `apps/ios/Local.deploy.json` from `Local.deploy.json.example`, then:
+
+```bash
+python3 apps/ios/scripts/deploy-phone.py
+```
+
+Set `device` from `xcrun devicectl list devices` and your Apple development
+`team`. Optional `derived_data` reuses a build directory; `--device` overrides
+the saved phone. The command builds Release, verifies its signature, installs
+the app, and launches `com.phren.ios`, preserving its existing app data.
+
+For unattended signing, `signing_helper` points to an existing executable that
+accepts `unlock` and `lock`: `unlock` prints only the dedicated keychain's path
+and prioritizes it, while `lock` relocks it and restores the prior search list.
+`signing_lock_directory` must match the shared lock used by other apps with
+that helper. This Mac reuses AlphaLens's configured helper and lock; Phren
+does not copy credentials, export identities, or alter the login keychain.
+The script relocks after success, failure, or interruption and stops Xcode
+before cleanup. Omit both helper fields to use Xcode's ordinary signing setup.
+
+This installs a development-signed app directly; it does not upload to
+TestFlight. A locked phone may need to be unlocked before the app can launch.
+
 PhrenKit alone builds and tests anywhere Swift runs (macOS or Linux):
 
 ```bash

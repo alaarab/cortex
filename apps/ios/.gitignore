@@ -19,3 +19,4 @@ Phren/Resources/graph/phren-graph.js
 
 # Personal signing config — never commit a Team ID
 Local.xcconfig
+Local.deploy.json
