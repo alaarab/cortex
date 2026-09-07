@@ -120,6 +120,20 @@ struct SettingsView: View {
                         ForEach(failedOps) { failed in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(failed.op.op.label).font(.callout)
+                                if case .saveAuthoredFile(_, let content, _) = failed.op.op {
+                                    NavigationLink("Review saved draft") {
+                                        List {
+                                            Section("Your draft") { DocumentPreview(content: content) }
+                                            Section {
+                                                ShareLink(item: content) {
+                                                    Label("Share draft", systemImage: "square.and.arrow.up")
+                                                }
+                                                Text("Copy the text you want to keep, then open the latest instructions or skill to apply it.")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }.navigationTitle("Saved draft")
+                                    }
+                                }
                                 HStack(spacing: 6) {
                                     if model.hasMultipleStores {
                                         TagChip(text: failed.storeName, role: .store)

@@ -25,46 +25,63 @@ struct ProjectsView: View {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                List(projects) { item in
-                    NavigationLink(value: item) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                Text(item.project.name).font(.headline)
-                                if model.hasMultipleStores {
-                                    TagChip(text: item.storeName, role: .store)
-                                }
-                                // `global` is the store's cross-project tier:
-                                // visible, searchable, never editable here.
-                                if LocalStore.isReadOnlyProject(item.project.name) {
-                                    TagChip(text: "read-only", role: .status)
-                                }
-                                if let claimant = model.claimingStoreName(for: item) {
-                                    ClaimBadge(storeName: claimant)
-                                }
-                            }
-                            HStack(spacing: 10) {
-                                Label("\(item.project.findingCount)", systemImage: "lightbulb")
-                                Label("\(item.project.taskCount)", systemImage: "checklist")
-                                Label("\(item.project.noteCount)", systemImage: "note.text")
-                                if item.project.reviewCount > 0 {
-                                    Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
-                                        .foregroundStyle(.orange)
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                List {
+                    Section("Explore") {
+                        NavigationLink { GraphView() } label: {
+                            Label("Memory graph", systemImage: "circle.hexagongrid")
                         }
-                        .padding(.vertical, 2)
+                    }
+                    Section("Agent setup") {
+                        NavigationLink { SkillsView() } label: {
+                            Label("Skills", systemImage: "wand.and.stars")
+                        }
+                        NavigationLink { AgentsView() } label: {
+                            Label("Agent instructions", systemImage: "person.crop.rectangle.stack")
+                        }
+                    }
+                    Section("Projects") {
+                        ForEach(projects) { item in
+                            NavigationLink(value: item) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(item.project.name).font(.headline)
+                                        if model.hasMultipleStores {
+                                            TagChip(text: item.storeName, role: .store)
+                                        }
+                                        // `global` is the store's cross-project tier:
+                                        // visible, searchable, never editable here.
+                                        if LocalStore.isReadOnlyProject(item.project.name) {
+                                            TagChip(text: "read-only", role: .status)
+                                        }
+                                        if let claimant = model.claimingStoreName(for: item) {
+                                            ClaimBadge(storeName: claimant)
+                                        }
+                                    }
+                                    HStack(spacing: 10) {
+                                        Label("\(item.project.findingCount)", systemImage: "lightbulb")
+                                        Label("\(item.project.taskCount)", systemImage: "checklist")
+                                        Label("\(item.project.noteCount)", systemImage: "note.text")
+                                        if item.project.reviewCount > 0 {
+                                            Label("\(item.project.reviewCount)", systemImage: "checkmark.seal")
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
                     }
                 }
                 .overlay {
-                    if model.mergedProjects.isEmpty {
+                    if model.mergedProjects.isEmpty && model.storeDescriptors.isEmpty {
                         PhrenEmptyState(title: "No projects yet", message: "Projects appear here once your phren store has content.")
                     }
                 }
                 .searchable(text: $filter, prompt: "Filter projects")
                 .refreshable { await model.pullToRefresh() }
-        .phrenScreen()
+                .phrenScreen()
             }
             .navigationTitle("Projects")
             .toolbar {
@@ -72,9 +89,6 @@ struct ProjectsView: View {
                     Menu {
                         NavigationLink { GraphView() } label: {
                             Label("Memory graph", systemImage: "circle.hexagongrid")
-                        }
-                        NavigationLink { SkillsView() } label: {
-                            Label("Skills", systemImage: "wand.and.stars")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -189,6 +203,13 @@ struct ProjectDetailView: View {
         }
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink { GraphView(focusProject: project, initialStoreId: storeId) } label: {
+                    Label("Project graph", systemImage: "circle.hexagongrid")
+                }
+            }
+        }
     }
 }
 

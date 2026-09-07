@@ -1,107 +1,255 @@
 import PhrenKit
 import SwiftUI
-import WebKit
 
-/// The 3D memory graph, rendered by the same `browser/graph` bundle the web
-/// memory UI and the VS Code webview use.
-///
-/// The app is serverless, so unlike those two hosts there is no `/api/graph`
-/// to fetch: `GraphBuilder` builds the payload on-device from synced markdown
-/// and it is injected into the page. Edits travel the other way over
-/// `WKScriptMessageHandler` and become ordinary `PendingOp`s, so a graph edit
-/// syncs and conflicts exactly like one made in the findings list.
+/// Native phone controls around the shared terminal/VS Code graph contract.
 struct GraphView: View {
     @Environment(AppModel.self) private var model
-    /// nil renders every project; a value focuses one (and lifts the CLI's
-    /// per-project node caps, matching `?project=` on the web).
     var focusProject: String?
-
-    @State private var payloadJSON: String?
-    @State private var buildError: String?
+    var initialStoreId: String?
+    @State private var storeId = ""
+    @State private var project = ""
+    @State private var filter: GraphPayload.ContentFilter = .all
+    @State private var payload: GraphPayload?
+    @State private var error: String?
     @State private var selection: GraphNodeRef?
-    @State private var actionError: String?
+    @State private var command: GraphCommand?
+    @State private var query = ""
+    @State private var showingSearch = false
+    @State private var showingInfo = false
+    @State private var rendererID = UUID()
+    @State private var renderedStore: String?
+    @State private var renderedProject: String?
+    @FocusState private var searchFocused: Bool
+
+    private var selectedStore: String {
+        storeId.isEmpty ? (initialStoreId ?? model.storeFilter ?? model.storeDescriptors.first?.id ?? "") : storeId
+    }
+    private var selectedProject: String? {
+        let value = project.isEmpty ? focusProject : (project == "*" ? nil : project)
+        return value
+    }
+    private var projects: [String] { model.snapshot(for: selectedStore).projects.map(\.name).sorted() }
+    private var visible: GraphPayload? { payload?.filtered(by: filter) }
+    private var refreshKey: RefreshKey {
+        RefreshKey(store: selectedStore, project: selectedProject, date: model.syncStatus.lastSyncedAt)
+    }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            if let payloadJSON {
-                GraphWebView(
-                    payloadJSON: payloadJSON,
-                    onSelect: { selection = $0 },
-                    onAction: handle(action:items:),
-                    onError: { buildError = $0 }
-                )
-                .ignoresSafeArea()
-            } else if buildError == nil {
-                ProgressView("Building graph…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            if let buildError {
-                PhrenEmptyState(title: "Graph unavailable", message: buildError)
-            }
-
-            if let selection {
-                GraphSelectionBar(node: selection) {
-                    self.selection = nil
+        VStack(spacing: 0) {
+            LiveStatusBar()
+            controls
+            ZStack(alignment: .bottomTrailing) {
+                if let visible, let json = try? visible.jsonString(), !visible.nodes.isEmpty {
+                    GraphWebView(payloadJSON: json, command: command,
+                                 onSelect: receiveSelection,
+                                 onError: { error = $0 })
+                        .id(rendererID)
+                        .accessibilityLabel("Interactive memory graph")
+                    cameraControls.padding(12)
+                } else if payload != nil {
+                    PhrenEmptyState(title: "No graph content yet",
+                                    message: "Findings, tasks, and projects appear here after your store syncs.")
+                } else if error == nil {
+                    ProgressView("Loading graph…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    searchResults
+                }
+                if let error {
+                    VStack(spacing: 12) {
+                        PhrenEmptyState(title: "Graph unavailable", message: error)
+                        Button("Try again") {
+                            self.error = nil
+                            rendererID = UUID()
+                            Task { await rebuild() }
+                        }.buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(PhrenTheme.bg)
+                }
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: selection)
-        .navigationTitle(focusProject ?? "Graph")
+        .background(PhrenTheme.bg)
+        .navigationTitle("Memory graph")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await rebuild() }
-        .refreshable { await rebuild() }
-        .alert("Could not apply that edit", isPresented: .constant(actionError != nil)) {
-            Button("OK") { actionError = nil }
-        } message: {
-            Text(actionError ?? "")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showingSearch.toggle()
+                    searchFocused = showingSearch
+                    if !showingSearch { query = "" }
+                } label: { Label("Search graph", systemImage: "magnifyingglass") }
+                Menu {
+                    Button("Refresh", systemImage: "arrow.clockwise") {
+                        Task { await model.pullToRefresh(); await rebuild() }
+                    }
+                    Button("About this graph", systemImage: "info.circle") { showingInfo = true }
+                } label: { Label("Graph options", systemImage: "ellipsis.circle") }
+            }
         }
+        .task(id: refreshKey) { await rebuild() }
+        .onChange(of: storeId) { _, _ in resetSelection() }
+        .onChange(of: project) { _, _ in resetSelection() }
+        .onChange(of: filter) { _, _ in resetSelection() }
+        .sheet(item: $selection, onDismiss: { command = GraphCommand(action: .clear) }) { node in
+            GraphNodeSheet(node: node)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        .sheet(isPresented: $showingInfo) {
+            NavigationStack {
+                List {
+                    Section("Explore") {
+                        Text("Drag to rotate. Pinch to zoom. Tap a node to read its details or open its project.")
+                        Text("Search finds content in this view. Choose a project to load more of its findings and tasks.")
+                    }
+                    Section("Your data") {
+                        Text("The graph uses the same 3D renderer as the VS Code extension and the graph format shared with the terminal.")
+                        Text("It reads cached findings, team journals, and active or queued tasks. Archived documents and computer-only fragment indexes are not downloaded for this view.")
+                        Text("One store is shown at a time. Live sync updates the graph while it is open.")
+                    }
+                }
+                .navigationTitle("About the graph")
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingInfo = false } } }
+            }.presentationDetents([.medium, .large])
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Menu {
+                    ForEach(model.storeDescriptors) { store in
+                        Button(store.id) {
+                            storeId = store.id
+                            project = "*"
+                            payload = nil
+                        }
+                    }
+                } label: {
+                    Label(selectedStore, systemImage: "externaldrive")
+                        .lineLimit(1)
+                }
+                .accessibilityLabel("Store: \(selectedStore)")
+                Spacer(minLength: 10)
+                Menu {
+                    Button("All projects") { project = "*" }
+                    ForEach(projects, id: \.self) { name in Button(name) { project = name } }
+                } label: {
+                    Label(selectedProject ?? "All projects", systemImage: "square.grid.2x2").lineLimit(1)
+                }
+                .accessibilityLabel("Project: \(selectedProject ?? "All projects")")
+            }
+            .font(.subheadline)
+            .frame(minHeight: 36)
+
+            Picker("Graph content", selection: $filter) {
+                ForEach(GraphPayload.ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented)
+
+            if showingSearch {
+                HStack {
+                    TextField("Search findings, tasks, projects", text: $query)
+                        .textFieldStyle(.roundedBorder).focused($searchFocused)
+                        .autocorrectionDisabled().submitLabel(.search)
+                    if !query.isEmpty {
+                        Button { query = "" } label: { Label("Clear search", systemImage: "xmark.circle.fill").labelStyle(.iconOnly) }
+                    }
+                }
+            }
+        }.padding(.horizontal).padding(.bottom, 8)
+    }
+
+    private var cameraControls: some View {
+        VStack(spacing: 2) {
+            cameraButton("Zoom in", icon: "plus", action: .zoomIn)
+            cameraButton("Zoom out", icon: "minus", action: .zoomOut)
+            cameraButton("Fit graph", icon: "arrow.up.left.and.arrow.down.right", action: .reset)
+        }
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func cameraButton(_ title: String, icon: String, action: GraphCommand.Action) -> some View {
+        Button { command = GraphCommand(action: action) } label: {
+            Image(systemName: icon).frame(width: 44, height: 44)
+        }.accessibilityLabel(title)
+    }
+
+    private var searchResults: some View {
+        let results = visible?.search(query) ?? []
+        return List {
+            if results.isEmpty {
+                Text("No matches in this view. Try another phrase or change the project or content filter.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(results) { node in
+                Button {
+                    query = ""
+                    searchFocused = false
+                    command = GraphCommand(action: .focus(node.id))
+                    selection = GraphNodeRef(node: node)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(node.fullLabel).lineLimit(3).foregroundStyle(.primary)
+                        Text(node.project).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }.scrollDismissesKeyboard(.interactively)
+    }
+
+    private func receiveSelection(_ node: GraphNodeRef?) {
+        // The local renderer must not route a stale selection into another store.
+        guard let node else { selection = nil; return }
+        guard node.store == selectedStore,
+              visible?.nodes.contains(where: { $0.id == node.id }) == true else { return }
+        selection = node
+    }
+
+    private func resetSelection() {
+        selection = nil
+        query = ""
+        error = nil
+        command = GraphCommand(action: .reset)
     }
 
     private func rebuild() async {
+        let request = refreshKey
         do {
-            payloadJSON = try await model.graphPayloadJSON(focusProject: focusProject)
-            buildError = nil
+            let next = try await model.graphPayload(storeId: request.store, focusProject: request.project)
+            try Task.checkCancellation()
+            guard request.store == selectedStore, request.project == selectedProject else { return }
+            payload = next
+            if renderedStore != request.store || renderedProject != request.project {
+                command = GraphCommand(action: .reset)
+                renderedStore = request.store
+                renderedProject = request.project
+            }
+            if let selection, let updated = next.nodes.first(where: { $0.id == selection.id }) {
+                self.selection = GraphNodeRef(node: updated)
+            } else { selection = nil }
+        } catch is CancellationError {
+            // A newer store/project request owns the screen.
         } catch {
-            buildError = error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 
-    /// Maps a renderer action onto a pending op. Only the two single-item
-    /// actions are wired: `merge` and `delete-batch` are desktop bulk
-    /// affordances with no phone equivalent, and silently half-applying them
-    /// would be worse than ignoring them.
-    private func handle(action: String, items: [GraphNodeRef]) {
-        guard let node = items.first else { return }
-        Task {
-            do {
-                switch action {
-                case "save-inline":
-                    guard let edited = node.editedText?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !edited.isEmpty else { return }
-                    try await model.applyGraphEdit(node: node, newText: edited)
-                case "delete":
-                    try await model.applyGraphDelete(node: node)
-                default:
-                    return
-                }
-                await rebuild()
-            } catch {
-                actionError = error.localizedDescription
-            }
-        }
+    private struct RefreshKey: Hashable {
+        let store: String
+        let project: String?
+        let date: Date?
     }
 }
 
-/// The subset of a renderer node the app acts on, decoded from the page.
 struct GraphNodeRef: Codable, Equatable, Identifiable {
     var id: String
     var kind: String?
     var group: String?
     var project: String?
+    var store: String?
     var label: String?
     var fullLabel: String?
     var text: String?
@@ -110,151 +258,51 @@ struct GraphNodeRef: Codable, Equatable, Identifiable {
     var editedSection: String?
     var editedPriority: String?
 
-    /// The renderer groups tasks as `task-active` / `task-queue`; findings get
-    /// a `topic:` group. `kind` is the renderer's own classification and is
-    /// preferred when present.
     var isTask: Bool { kind == "task" || (group?.hasPrefix("task-") ?? false) }
     var isFinding: Bool { kind == "finding" || (group?.hasPrefix("topic:") ?? false) }
-
-    /// The markdown text this node was minted from.
     var sourceText: String? { fullLabel ?? text }
+
+    init(node: GraphPayload.Node) {
+        id = node.id
+        group = node.group
+        project = node.project
+        store = node.store
+        label = node.label
+        fullLabel = node.fullLabel
+        scoreKey = node.scoreKey
+    }
 }
 
-private struct GraphSelectionBar: View {
+private struct GraphNodeSheet: View {
+    @Environment(AppModel.self) private var model
     let node: GraphNodeRef
-    let onDismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                if let project = node.project {
-                    Text(project.uppercased())
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+        NavigationStack {
+            List {
+                Section {
+                    DocumentPreview(content: node.sourceText ?? node.label ?? node.id)
+                    if let store = node.store { LabeledContent("Store", value: model.storeName(for: store)) }
+                    if let project = node.project { LabeledContent("Project", value: project) }
+                    if node.id.hasPrefix("journal:") { Label("Team journal", systemImage: "person.2") }
                 }
-                Text(node.sourceText ?? node.label ?? node.id)
-                    .font(.callout)
-                    .lineLimit(4)
+                if let project = node.project, let storeId = node.store {
+                    Section {
+                        NavigationLink("Open project") { ProjectDetailView(storeId: storeId, project: project) }
+                        ShareLink(item: node.sourceText ?? node.label ?? node.id) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
             }
-            Spacer(minLength: 0)
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+            .navigationTitle(node.isTask ? "Task" : (node.isFinding ? "Finding" : "Project"))
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: ArchiveRoute.self) { route in
+                ArchiveBrowserView(storeId: route.storeId, project: route.project)
             }
-            .buttonStyle(.plain)
-        }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-// MARK: - WKWebView host
-
-private struct GraphWebView: UIViewRepresentable {
-    let payloadJSON: String
-    let onSelect: (GraphNodeRef?) -> Void
-    let onAction: (String, [GraphNodeRef]) -> Void
-    let onError: (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onSelect: onSelect, onAction: onAction, onError: onError)
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let controller = WKUserContentController()
-        for name in ["graphReady", "graphSelect", "graphAction", "graphError"] {
-            controller.add(context.coordinator, name: name)
-        }
-        config.userContentController = controller
-        // The bundle is local and the page makes no network requests; keeping
-        // it non-persistent means nothing from the graph outlives the view.
-        config.websiteDataStore = .nonPersistent()
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        context.coordinator.webView = webView
-
-        guard let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "graph") else {
-            // The bundle step was skipped — say so plainly rather than
-            // rendering an empty black screen.
-            onError("Graph renderer is missing from the app bundle. Run scripts/bundle-graph.mjs and rebuild.")
-            return webView
-        }
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.pendingPayload = payloadJSON
-        context.coordinator.renderIfReady()
-    }
-
-    final class Coordinator: NSObject, WKScriptMessageHandler {
-        weak var webView: WKWebView?
-        var pendingPayload: String?
-        private var isReady = false
-        private var lastRendered: String?
-
-        private let onSelect: (GraphNodeRef?) -> Void
-        private let onAction: (String, [GraphNodeRef]) -> Void
-        private let onError: (String) -> Void
-
-        init(onSelect: @escaping (GraphNodeRef?) -> Void,
-             onAction: @escaping (String, [GraphNodeRef]) -> Void,
-             onError: @escaping (String) -> Void) {
-            self.onSelect = onSelect
-            self.onAction = onAction
-            self.onError = onError
-        }
-
-        func renderIfReady() {
-            guard isReady, let payload = pendingPayload, payload != lastRendered, let webView else { return }
-            lastRendered = payload
-            // The payload is JSON from JSONEncoder, so it is already a valid
-            // JS expression — no string interpolation into source, nothing to
-            // escape.
-            webView.evaluateJavaScript("window.phrenHost.render(\(payload));") { [weak self] _, error in
-                if let error { self?.onError(error.localizedDescription) }
+            .navigationDestination(for: ArchiveTopicRoute.self) { route in
+                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
             }
-        }
-
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            switch message.name {
-            case "graphReady":
-                isReady = true
-                renderIfReady()
-
-            case "graphSelect":
-                onSelect(decode(GraphNodeRef.self, from: message.body))
-
-            case "graphAction":
-                guard let body = message.body as? [String: Any],
-                      let action = body["action"] as? String else { return }
-                let items = (body["items"] as? [Any])?.compactMap { decode(GraphNodeRef.self, from: $0) } ?? []
-                onAction(action, items)
-
-            case "graphError":
-                let body = message.body as? [String: Any]
-                onError(body?["message"] as? String ?? "The graph renderer reported an error.")
-
-            default:
-                break
-            }
-        }
-
-        /// Round-trips a JS object through JSONSerialization. `message.body`
-        /// is untrusted page data, so a shape that does not decode is dropped
-        /// rather than force-unwrapped.
-        private func decode<T: Decodable>(_ type: T.Type, from body: Any) -> T? {
-            guard JSONSerialization.isValidJSONObject(body),
-                  let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
-            return try? JSONDecoder().decode(type, from: data)
         }
     }
 }

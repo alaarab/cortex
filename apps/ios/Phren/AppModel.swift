@@ -200,7 +200,7 @@ final class AppModel {
     }
 
     func canPush(storeId: String) -> Bool {
-        storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? true
+        storeContexts.first { $0.id == storeId }?.descriptor.canPush ?? false
     }
 
     /// Whether this (store, project) pair can take a write at all. Two
@@ -773,48 +773,37 @@ final class AppModel {
         }
     }
 
-    /// Repo path for a new skill. Flat `<name>.md` is the shape the app mints:
-    /// `collectSkills` reads both, but a folder skill may carry supporting
-    /// files the app does not sync.
-    static func newSkillPath(scope: Skill.Scope, name: String) -> String {
-        "\(scope.source)/skills/\(name).md"
-    }
-
-    func saveSkill(path: String, content: String, in storeId: String) async throws {
-        try await enqueue(.updateSkill(path: path, content: content), in: storeId)
+    func saveDocument(path: String, content: String, expectedContent: String?, in storeId: String) async throws {
+        try await enqueue(.saveAuthoredFile(path: path, content: content, expectedContent: expectedContent), in: storeId)
         await refresh()
     }
 
-    func deleteSkill(path: String, in storeId: String) async throws {
-        try await enqueue(.deleteSkill(path: path), in: storeId)
+    func deleteSkill(_ entry: StoreSkill) async throws {
+        try await enqueue(.deleteAuthoredFile(path: entry.skill.path, expectedContent: entry.skill.content), in: entry.storeId)
         await refresh()
+    }
+
+    func instructions(scope: String, in storeId: String) -> String? {
+        storeContexts.first { $0.id == storeId }?.snapshot.instructions[scope]
+    }
+
+    func skills(in storeId: String) -> [Skill] {
+        storeContexts.first { $0.id == storeId }?.snapshot.skills ?? []
     }
 
     // MARK: - Graph
 
-    /// Builds the renderer payload from every open store and merges them, the
-    /// way `buildGraph` concatenates across store paths.
-    func graphPayloadJSON(focusProject: String?) async throws -> String {
-        var nodes: [GraphPayload.Node] = []
-        var links: [GraphPayload.Link] = []
-        var topics: [String: GraphPayload.Topic] = [:]
-
-        for context in filteredContexts {
-            let input = await context.store.graphInput(storeName: context.descriptor.displayName)
-            // Focusing a project that lives in another store would otherwise
-            // emit a bare project node with no findings.
-            if let focusProject, !input.projects.contains(focusProject) { continue }
-            let payload = GraphBuilder.build(input, focusProject: focusProject)
-            nodes.append(contentsOf: payload.nodes)
-            links.append(contentsOf: payload.links)
-            for topic in payload.topics { topics[topic.slug] = topic }
+    /// The phone explores one store at a time. Project/node identities remain
+    /// CLI-compatible without collisions between same-named projects in stores.
+    func graphPayload(storeId: String, focusProject: String?) async throws -> GraphPayload {
+        guard let context = storeContexts.first(where: { $0.id == storeId }) else {
+            throw StoreWriteError.storeNotOpen(storeId)
         }
-
-        return try GraphPayload(
-            nodes: nodes, links: links,
-            topics: topics.values.sorted { $0.slug < $1.slug },
-            total: nodes.count
-        ).jsonString()
+        let input = await context.store.graphInput(storeName: context.id)
+        if let focusProject, !input.projects.contains(focusProject) {
+            return GraphPayload(nodes: [], links: [], topics: [], total: 0)
+        }
+        return GraphBuilder.build(input, focusProject: focusProject)
     }
 
     /// Applies an inline edit made in the graph's project pane. The node's
@@ -851,8 +840,8 @@ final class AppModel {
         guard let project = node.project else {
             throw PhrenKitError.validation("That node is not attached to a project.")
         }
-        guard let context = filteredContexts.first(where: { context in
-            context.snapshot.projects.contains { $0.name == project }
+        guard let context = storeContexts.first(where: { context in
+            context.id == node.store && context.snapshot.projects.contains { $0.name == project }
         }) else {
             throw PhrenKitError.validation("No open store holds \(project).")
         }
@@ -870,7 +859,7 @@ final class AppModel {
         } else {
             resolved = nil
         }
-        guard let match = resolved ?? node.sourceText, !match.isEmpty else {
+        guard let match = resolved, !match.isEmpty else {
             throw PhrenKitError.validation("Could not find that finding in \(project)/FINDINGS.md.")
         }
         return (context.id, project, match)

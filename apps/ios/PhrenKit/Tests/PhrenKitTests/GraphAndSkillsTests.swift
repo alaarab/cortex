@@ -143,12 +143,12 @@ final class SkillPathTests: XCTestCase {
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/.hidden.md"))
     }
 
-    /// Skills are the one writable thing outside a project dir; the rest of
-    /// `global/` must stay read-only.
+    /// Authored skills and agent instructions are writable; knowledge tiers
+    /// retain their existing boundaries.
     func testWritabilityBoundary() {
         XCTAssertTrue(LocalStore.isWritablePath("global/skills/audit/SKILL.md"))
         XCTAssertTrue(LocalStore.isWritablePath("myproj/skills/parity.md"))
-        XCTAssertFalse(LocalStore.isWritablePath("global/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("global/CLAUDE.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/summary.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/reference/topics/auth.md"))
     }

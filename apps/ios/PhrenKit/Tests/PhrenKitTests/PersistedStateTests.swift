@@ -98,7 +98,10 @@ final class PersistedStateTests: XCTestCase {
         let loaded = PendingOpsQueue.load(from: url)
 
         XCTAssertNil(loaded.issue, "a file the shipped build wrote is not an issue")
-        XCTAssertEqual(loaded.queue.schemaVersion, 1, "a missing version key IS version 1")
+        let decoded = try JSONDecoder().decode(PendingOpsQueue.self, from: Data(Self.legacyPendingOpsJSON.utf8))
+        XCTAssertEqual(decoded.schemaVersion, 1, "a missing version key IS version 1")
+        XCTAssertEqual(loaded.queue.schemaVersion, PendingOpsQueue.currentSchemaVersion,
+                       "loading upgrades legacy queues before the engine can append new operations")
         XCTAssertEqual(loaded.queue.pending.count, 2)
         XCTAssertEqual(loaded.queue.failed.count, 1)
         XCTAssertEqual(
@@ -117,8 +120,7 @@ final class PersistedStateTests: XCTestCase {
     func testLegacyPendingOpsFileSurvivesAReSaveAtTheCurrentVersion() throws {
         let url = try write(Self.legacyPendingOpsJSON, to: "pending-ops.json")
 
-        var queue = PendingOpsQueue.load(from: url).queue
-        queue.schemaVersion = PendingOpsQueue.currentSchemaVersion
+        let queue = PendingOpsQueue.load(from: url).queue
         XCTAssertNil(queue.save(to: url))
 
         let reloaded = PendingOpsQueue.load(from: url)

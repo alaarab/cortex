@@ -22,6 +22,7 @@ apps/ios/
     Intents/             # App Intents: "Hey Siri, add a task to phren"
     Onboarding/          # welcome → sign-in → repo picker → initial sync
     Features/            # Projects, Review, Tasks, Search, Settings tabs
+                         #   + native Skills, Agent setup and Memory graph screens
   PhrenWidgets/          # WidgetKit extension target (Home Screen + Lock Screen)
   PhrenKit/              # Swift package: everything testable, UI-free
     Sources/PhrenKit/
@@ -75,6 +76,10 @@ one document at a time, only when you open it.
 `FINDINGS.md`, `tasks.md`, `review.md`, `summary.md`, `CLAUDE.md`, `truths.md`,
 `notes/YYYY-MM-DD.md`, and `journal/YYYY-MM-DD-<actor>.md`.
 
+Global and project skills are also mirrored, in both `<scope>/skills/<name>.md`
+and `<scope>/skills/<name>/SKILL.md` form. Supporting files inside skill folders
+remain on the computer; the phone edits the instruction document only.
+
 The journal is where a team store's findings actually live (see "Team stores"
 below). It is the same shape as `notes/` — one small file per day — with an
 actor suffix, so it grows with the number of people writing rather than with
@@ -85,10 +90,11 @@ as a read-only section at the head of the Findings tab and is searchable as
 its own `truth` kind. Pinning is `phren pin <project> "…"` from a computer;
 the app never writes it.
 
-`global/` is in the hot tier too, but only `FINDINGS.md` and `CLAUDE.md`, and
-strictly **read-only**: it is the consolidate skill's cross-project output —
+`global/FINDINGS.md` is in the hot tier too and remains **read-only**: it is
+the consolidate skill's cross-project output —
 often the largest findings file in a store — and the phone has no business
-rewriting it. `LocalStore.isSyncedPath` admits it on its own branch rather
+rewriting it. Global skills and `global/CLAUDE.md` are authored content and
+can be edited from the app. `LocalStore.isSyncedPath` admits global findings on its own branch rather
 than by relaxing `isProjectDirName`, because `isWritablePath` delegates to
 that predicate; the split is pinned by negative tests. Every write surface
 (add/edit/delete, the voice mic, Siri) asks `isReadOnlyProject` before drawing
@@ -136,7 +142,7 @@ has been hydrated at least once, because until then the number lives inside
 documents nobody has downloaded. Archived entries are marked as such and have
 no edit affordance — they are read-only everywhere else in phren too.
 
-`skills/`, `.config/` and the rest of `reference/` are not synced at all.
+`.config/` and the rest of `reference/` are not synced.
 
 #### Writes
 
@@ -155,25 +161,59 @@ no edit affordance — they are read-only everywhere else in phren too.
   in Settings → "Needs attention". Parking is per op, so an item another
   machine already handled parks alone while the rest of the batch commits.
 - **Write whitelist**: only `<project>/FINDINGS.md`, `tasks.md`, `review.md`,
-  `notes/YYYY-MM-DD.md` and `journal/YYYY-MM-DD-<actor>.md` are ever written,
-  and only for a `<project>` that is a real project directory. `.config/`,
-  `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`, `CLAUDE.md`,
-  `summary.md`, `truths.md`, `reference/`, `global/` and every reserved
+  `notes/YYYY-MM-DD.md` and `journal/YYYY-MM-DD-<actor>.md` are writable knowledge
+  files, and only for a `<project>` that is a real project directory. Authored
+  skills and canonical `CLAUDE.md` are also writable, under a project or
+  `global/`. `.config/`, `phren.root.yaml`, `stores.yaml`, `.phren-team.yaml`,
+  `summary.md`, `truths.md`, `reference/`, global findings and every reserved
   directory (`profiles`, `templates`, `scripts`, mirroring the CLI's
   `RESERVED_PROJECT_DIR_NAMES` plus `link.sh`'s store scaffolding) are
   read-only or untouched. The journal is gated on the same project-directory
   predicate as `FINDINGS.md`, which is what keeps a team store from making
   `global/` writable by the back door.
 
+### Skills and agent instructions
+
+Projects → **Skills** opens a searchable library across the selected stores.
+Create a skill with its name, description, instructions, store and scope;
+read, edit, share or delete an existing skill. Creation checks names without
+case sensitivity across both flat and folder formats. Project choices come
+only from the selected writable store. Read-only stores have no editing controls.
+
+Projects → **Agent instructions** groups global and project instructions,
+with links to each scope's skills. The app edits the canonical store
+`CLAUDE.md`; phren's link step derives managed `AGENTS.md` and Copilot mirrors
+on the computer. Changes reach linked agents after the computer syncs, and
+generated mirrors refresh when phren links the project. This screen manages
+agent setup; running agents are still local to the computer, with no mobile
+monitoring or start/stop connection. Skill enable/disable preferences and hook
+configuration are not synced by the app.
+
+Editors keep a separate draft during live refreshes and confirm before
+discarding changes. Saves and deletes carry the content the user opened, so
+conflict replay cannot silently overwrite another writer. A conflict detected
+while editing offers a comparison and merge flow. A conflict found during
+upload preserves the queued draft in Settings → Needs attention → Review saved
+draft, where its text can be copied or shared. Background pulls preserve
+queued files and their original SHAs until flush can check them. Pending queue
+schema 2 adds these guarded operations and upgrades schema 1 queues while
+retaining all existing operations.
+
 ## Building
 
-Requirements: Xcode 15+ (iOS 17 SDK), [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requirements: Xcode 15+ (iOS 17 SDK), [XcodeGen](https://github.com/yonaskolb/XcodeGen),
+Node 20+ and pnpm (the version in the root package.json).
 
 ```bash
+pnpm install --frozen-lockfile   # from the repository root; includes graph dependencies
 cd apps/ios
 xcodegen generate      # produces Phren.xcodeproj from project.yml
 open Phren.xcodeproj   # build & run the Phren scheme
 ```
+
+The app target bundles the shared graph renderer during every build. A clean
+checkout therefore includes the renderer automatically, including in CI;
+`Phren/Resources/graph/phren-graph.js` remains generated and gitignored.
 
 PhrenKit alone builds and tests anywhere Swift runs (macOS or Linux):
 
@@ -181,6 +221,45 @@ PhrenKit alone builds and tests anywhere Swift runs (macOS or Linux):
 cd apps/ios/PhrenKit
 swift test
 ```
+
+### Memory graph
+
+Open **Projects → Memory graph**, or use the graph button on a project's
+detail screen. The app bundles the same Three.js renderer as the VS Code
+extension and web viewer, using the payload contract shared with the terminal
+graph. All rendering assets are local; browsing cached data works offline.
+
+The phone provides native store/project menus, All/Findings/Tasks filters,
+search, zoom buttons and Fit graph. Drag to orbit, pinch to zoom, and tap a
+node for readable details, sharing and a link to its project. Desktop panels
+are replaced by these native controls; editing is available in the project's
+normal findings and task screens. Bloom is disabled on the phone, and label
+widths are constrained for the smaller viewport.
+
+One explicitly selected store is rendered at a time. The picker uses full
+owner/repository names and node selections carry that identity, so projects
+with the same name in different stores cannot be confused. The view rebuilds
+after live sync, preserves the camera on content refresh, and refits when the
+store or project changes. Loading failures and WebKit process termination
+offer a retry instead of leaving a blank canvas.
+
+The graph includes project hubs, current FINDINGS.md bullets, team journals,
+and active/queued tasks (including projects with only tasks). Archived blocks
+are excluded. Overview limits keep large stores bounded; selecting a project
+lifts its per-project finding/task caps. On-device topics use finding tags.
+Computer-only fragment/reference indexes and quality scores are not synced.
+
+To run the phone renderer smoke tests at a touch viewport:
+
+```bash
+node apps/ios/scripts/bundle-graph.mjs
+pnpm exec playwright install chromium
+node --test apps/ios/scripts/test-graph.mjs
+```
+
+These tests cover local assets, node selection and store attribution, camera
+commands, repeated mounts, and missing-renderer recovery. Set
+`PHREN_GRAPH_SCREENSHOT=/tmp/graph.png` to save the synthetic test graph image.
 
 ## Releasing
 
@@ -393,9 +472,9 @@ exactly which transcription needs updating.
 
 ## Not in the MVP
 
-- The 3D graph tab (the web UI's Graph view)
 - Editing or retracting a journal entry (the CLI can't either — its lifecycle
   tools address `FINDINGS.md`, and folding a journal into it has no command
   yet, only `materializeTeamFindings` in `finding/journal.ts`)
 - `stores.yaml` auto-discovery as an add-store suggestion source
-- Skills/Hooks/Settings management tabs from the web UI
+- Skill enable/disable preferences and hook configuration from the web UI
+- Monitoring and controlling agents running on a computer

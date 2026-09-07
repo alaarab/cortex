@@ -55,7 +55,9 @@ public struct SkillFile: Equatable, Sendable {
             guard !key.isEmpty, !value.isEmpty else { continue }
             if (value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2)
                 || (value.hasPrefix("'") && value.hasSuffix("'") && value.count >= 2) {
+                let singleQuoted = value.hasPrefix("'")
                 value = String(value.dropFirst().dropLast())
+                if singleQuoted { value = value.replacingOccurrences(of: "''", with: "'") }
             }
             result[key] = value
         }
@@ -86,5 +88,14 @@ public struct SkillFile: Equatable, Sendable {
         # \(name)
 
         """
+    }
+
+    public static func template(name: String, description: String, instructions: String) -> String {
+        let summary = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "'", with: "''")
+        return "---\nname: \(name)\ndescription: '\(summary)'\n---\n\n\(instructions)\n"
     }
 }

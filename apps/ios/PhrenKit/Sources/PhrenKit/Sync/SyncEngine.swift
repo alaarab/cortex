@@ -122,13 +122,17 @@ public actor SyncEngine {
     /// finds a pull in flight awaits it, and a forced caller then runs its own
     /// pass — the conflict-recovery path must never no-op on a stale sha.
     public func pull(force: Bool = false) async {
+        await pull(force: force, overwritingPendingPaths: [])
+    }
+
+    private func pull(force: Bool, overwritingPendingPaths: Set<String>) async {
         if let inFlight = pullTask {
             await inFlight.value
             if !force { return }
         }
         pullGeneration += 1
         let generation = pullGeneration
-        let task = Task { await self.performPull(force: force) }
+        let task = Task { await self.performPull(force: force, overwritingPendingPaths: overwritingPendingPaths) }
         pullTask = task
         await task.value
         if pullGeneration == generation {
@@ -136,7 +140,7 @@ public actor SyncEngine {
         }
     }
 
-    private func performPull(force: Bool) async {
+    private func performPull(force: Bool, overwritingPendingPaths: Set<String>) async {
         setStatus { $0.isSyncing = true; $0.lastError = nil }
         defer { setStatus { $0.isSyncing = false } }
 
@@ -176,20 +180,25 @@ public actor SyncEngine {
 
             var changed = false
             for (path, sha) in remote {
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 let cached = await store.blobSha(for: path)
                 guard cached != sha else { continue }
                 let data = try await client.blob(owner: manifest.owner, repo: manifest.repo, sha: sha)
                 let content = String(data: data, encoding: .utf8) ?? ""
+                // An edit can be queued while a blob request is in flight.
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 try await store.write(path, content: content, blobSha: sha)
                 changed = true
             }
             for path in await store.allPaths() {
                 guard remote[path] == nil, LocalStore.isSyncedPath(path) else { continue }
+                guard !preservesPendingFile(path, overwriting: overwritingPendingPaths) else { continue }
                 // A nil blob sha means the file was created locally and never
                 // synced (e.g. a new day's notes file from a queued op) —
                 // deleting it here would drop the user's change before the
                 // flush pushes it.
-                guard await store.blobSha(for: path) != nil else { continue }
+                let hasRemoteSha = await store.blobSha(for: path) != nil
+                guard hasRemoteSha || overwritingPendingPaths.contains(path) else { continue }
                 try await store.delete(path)
                 changed = true
             }
@@ -207,6 +216,13 @@ public actor SyncEngine {
         if !queue.pending.isEmpty {
             scheduleFlush()
         }
+    }
+
+    /// Polls must keep queued edits and their original blob SHAs intact until
+    /// flush can check them. Only conflict recovery replaces pending files;
+    /// it immediately replays the queue against the downloaded version.
+    private func preservesPendingFile(_ path: String, overwriting paths: Set<String>) -> Bool {
+        !paths.contains(path) && queue.pending.contains { $0.editedPaths.contains(path) }
     }
 
     // MARK: - Cold tier
@@ -428,7 +444,7 @@ public actor SyncEngine {
                         // the paths that did NOT land forget their sha; the
                         // ones that did are current and must stay cached.
                         await forgetCachedShas(plan.paths)
-                        await pull(force: true)
+                        await pull(force: true, overwritingPendingPaths: Set(plan.paths))
                         let retry = await reapply(plan.ops)
                         plan = retry.plan
                         parked.append(contentsOf: retry.parked)
@@ -899,6 +915,25 @@ public actor SyncEngine {
                 section: section.flatMap(PhrenTask.Section.init(rawValue:))
             ))
             return [FileEdit(path: "\(project)/tasks.md", content: file.render())]
+
+        case .saveAuthoredFile(let path, let content, let expected):
+            let current = await read(path, overlay: overlay)
+            try AuthoredFile.validate(path: path, current: current, expected: expected, content: content)
+            if expected == nil, LocalStore.isSkillPath(path) {
+                var paths = Set(await store.allPaths())
+                for (candidate, value) in overlay {
+                    if value == nil { paths.remove(candidate) } else { paths.insert(candidate) }
+                }
+                if let conflict = AuthoredFile.conflictingSkillPath(for: path, among: Array(paths)) {
+                    throw PhrenKitError.duplicate("A skill with that name already exists at \(conflict).")
+                }
+            }
+            return [FileEdit(path: path, content: content)]
+
+        case .deleteAuthoredFile(let path, let expected):
+            try AuthoredFile.validate(path: path, current: await read(path, overlay: overlay),
+                                      expected: expected, content: nil)
+            return [FileEdit(path: path, content: nil)]
 
         case .updateSkill(let path, let content):
             // A skill is authored prose, so the op already holds the finished

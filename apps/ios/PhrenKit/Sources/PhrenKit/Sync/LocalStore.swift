@@ -54,9 +54,9 @@ public actor LocalStore {
 
     /// Only these paths are ever written back to GitHub. Everything else in
     /// the store — `.config/`, `phren.root.yaml`, `stores.yaml`,
-    /// `.phren-team.yaml`, `CLAUDE.md`, `summary.md`, `truths.md`,
-    /// `reference/`, and everything under a reserved directory (`global/`
-    /// above all) — is read-only.
+    /// `.phren-team.yaml`, `summary.md`, `truths.md`, and `reference/` — is
+    /// read-only. Authored skills and canonical CLAUDE.md instructions are
+    /// explicitly writable in project directories and global/.
     ///
     /// `journal/YYYY-MM-DD-<actor>.md` is writable *and* gated on exactly the
     /// same ``isProjectDirName`` predicate as `FINDINGS.md`, which is what
@@ -64,9 +64,8 @@ public actor LocalStore {
     /// read-only tier: `global/journal/…` is refused for the same reason
     /// `global/FINDINGS.md` is.
     public static func isWritablePath(_ path: String) -> Bool {
-        // Skills are the one writable thing outside a project directory:
-        // `global/skills/…` is authored content, unlike the rest of `global/`.
-        if isSkillPath(path) { return true }
+        // Authored content is separate from global's read-only findings tier.
+        if isSkillPath(path) || AgentInstructions.isPath(path) { return true }
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 2, isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
@@ -86,7 +85,7 @@ public actor LocalStore {
     /// gets a lazily hydrated cold tier (``ColdStore``), and the rest is
     /// deliberately untouched.
     ///
-    /// `global/` is hot but read-only: `global/FINDINGS.md` is the
+    /// `global/FINDINGS.md` is hot but read-only: it is the
     /// consolidate skill's cross-project output — typically the largest
     /// findings file in a store — and hiding it was hiding the store's
     /// highest-value content. It is admitted here *without* being admitted to
@@ -134,7 +133,7 @@ public actor LocalStore {
     /// `<name>/SKILL.md`. Nothing else in a skill folder is synced —
     /// supporting files would need a whole-directory model the app lacks.
     public static func isSkillPath(_ path: String) -> Bool {
-        let parts = path.split(separator: "/").map(String.init)
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard parts.count >= 3, parts[1] == "skills" else { return false }
         guard parts[0] == globalDirName || isProjectDirName(parts[0]) else { return false }
         if parts.count == 3 {
@@ -333,6 +332,8 @@ public actor LocalStore {
         /// name. Flat rather than keyed by project because `global` is not a
         /// project and the Skills UI lists both together.
         public var skills: [Skill] = []
+        /// Canonical agent instructions, keyed by global/project scope.
+        public var instructions: [String: String] = [:]
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -350,6 +351,7 @@ public actor LocalStore {
         var projectNames = Set<String>()
         var journals: [String: [JournalFile]] = [:]
         var skills: [Skill] = []
+        var instructions: [String: String] = [:]
 
         for path in allPaths() {
             let parts = path.split(separator: "/").map(String.init)
@@ -387,6 +389,8 @@ public actor LocalStore {
                     }
                 case "summary.md":
                     summaries[project] = content
+                case "CLAUDE.md":
+                    instructions[project] = content
                 case "truths.md":
                     truths[project] = TruthsFile(content: content).truths
                 default:
@@ -448,7 +452,7 @@ public actor LocalStore {
         return Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
-            truths: truths, consolidated: consolidated, skills: skills
+            truths: truths, consolidated: consolidated, skills: skills, instructions: instructions
         )
     }
 
@@ -457,9 +461,10 @@ public actor LocalStore {
     /// line, tag prefix included — reconstructing those lines from parsed
     /// `Finding` values would risk drifting from the CLI's keys.
     public func graphInput(storeName: String) -> GraphBuilder.Input {
+        let snapshot = snapshot()
         var findingsMarkdown: [String: String] = [:]
         var tasks: [String: TaskDoc] = [:]
-        var projectNames = Set<String>()
+        var projectNames = Set(snapshot.projects.map(\.name))
 
         for path in allPaths() {
             let parts = path.split(separator: "/").map(String.init)
@@ -468,7 +473,11 @@ public actor LocalStore {
             guard let content = read(path) else { continue }
             switch parts[1] {
             case "FINDINGS.md":
-                findingsMarkdown[project] = content
+                // Preserve raw bullets for identity hashes, but do not draw
+                // archived blocks as current knowledge.
+                findingsMarkdown[project] = FindingsFile(content: content).parse()
+                    .filter { !$0.archived }
+                    .map { "## \($0.date)\n\($0.rawLine)" }.joined(separator: "\n")
                 projectNames.insert(project)
             case "tasks.md":
                 tasks[project] = TasksFile(project: project, content: content).doc
@@ -480,7 +489,8 @@ public actor LocalStore {
 
         return GraphBuilder.Input(
             findingsMarkdown: findingsMarkdown, tasks: tasks,
-            projects: projectNames.sorted(), storeName: storeName
+            projects: projectNames.sorted(), storeName: storeName,
+            journalFindings: snapshot.findings.mapValues { $0.filter(\.isJournalEntry) }
         )
     }
 

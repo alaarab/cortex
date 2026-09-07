@@ -30,6 +30,20 @@ targets:
       - package: PhrenKit
       - target: PhrenWidgets
         embed: true
+    preBuildScripts:
+      - name: Bundle memory graph
+        script: |
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          node "$SRCROOT/scripts/bundle-graph.mjs"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/scripts/bundle-graph.mjs
+          - $(SRCROOT)/../../packages/cli/browser
+          - $(SRCROOT)/../../packages/cli/src/graph-core
+          - $(SRCROOT)/../../node_modules
+          - $(SRCROOT)/../../packages/cli/node_modules
+        outputFiles:
+          - $(SRCROOT)/Phren/Resources/graph/phren-graph.js
     entitlements:
       path: Phren/Phren.entitlements
       properties:

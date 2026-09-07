@@ -30,6 +30,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
     /// than a diff — which also makes its postcondition exactly checkable.
     case updateSkill(path: String, content: String)
     case deleteSkill(path: String)
+    case saveAuthoredFile(path: String, content: String, expectedContent: String?)
+    case deleteAuthoredFile(path: String, expectedContent: String)
 
     public var project: String {
         switch self {
@@ -40,7 +42,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
              .addTask(let p, _), .completeTask(let p, _), .removeTask(let p, _),
              .updateTask(let p, _, _, _, _):
             return p
-        case .updateSkill(let path, _), .deleteSkill(let path):
+        case .updateSkill(let path, _), .deleteSkill(let path),
+             .saveAuthoredFile(let path, _, _), .deleteAuthoredFile(let path, _):
             // "global" for a global skill — not a project, but the correct
             // commit-message scope, and the only place this value is read for
             // skill ops.
@@ -57,6 +60,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .addNote, .editNote, .removeNote, .promoteNote: return "update"
         case .addTask, .completeTask, .removeTask, .updateTask: return "task"
         case .updateSkill, .deleteSkill: return "skills"
+        case .saveAuthoredFile(let path, _, _), .deleteAuthoredFile(let path, _):
+            return LocalStore.isSkillPath(path) ? "skills" : "update"
         }
     }
 
@@ -118,7 +123,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
             return "\(project)/notes/\(date).md"
         case .addTask, .completeTask, .removeTask, .updateTask:
             return "\(project)/tasks.md"
-        case .updateSkill(let path, _), .deleteSkill(let path):
+        case .updateSkill(let path, _), .deleteSkill(let path),
+             .saveAuthoredFile(let path, _, _), .deleteAuthoredFile(let path, _):
             return path
         }
     }
@@ -157,6 +163,8 @@ public enum PendingOp: Codable, Equatable, Sendable {
         case .updateTask: return "Update task"
         case .updateSkill(let path, _): return "Save skill: \(Self.skillLabel(path))"
         case .deleteSkill(let path): return "Delete skill: \(Self.skillLabel(path))"
+        case .saveAuthoredFile(let path, _, _): return "Save: \(path)"
+        case .deleteAuthoredFile(let path, _): return "Delete: \(path)"
         }
     }
 
@@ -209,10 +217,9 @@ public struct QueuedOp: Codable, Equatable, Identifiable, Sendable {
 /// bad read — see the contract on ``VersionedDocument`` before changing this
 /// type or ``PendingOp``.
 public struct PendingOpsQueue: Codable, Sendable, VersionedDocument {
-    /// Still 1: `schemaVersion` is itself an additive field, and the shape
-    /// every shipped build wrote (without the key) is version 1 by definition.
-    /// Bump this only alongside a real break — a new `PendingOp` case, say.
-    public static let currentSchemaVersion = 1
+    /// Version 2 adds guarded whole-file mutations. Legacy skill ops remain
+    /// decodable so an upgrade can finish already-queued edits.
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int = PendingOpsQueue.currentSchemaVersion
     public var pending: [QueuedOp] = []
@@ -244,7 +251,9 @@ public struct PendingOpsQueue: Codable, Sendable, VersionedDocument {
     /// the caller starts empty from there, with an issue to show the user.
     static func load(from url: URL) -> (queue: PendingOpsQueue, issue: StorageIssue?) {
         let result = PersistedState.load(PendingOpsQueue.self, from: url, document: documentName)
-        return (result.value ?? PendingOpsQueue(), result.issue)
+        var queue = result.value ?? PendingOpsQueue()
+        queue.schemaVersion = Self.currentSchemaVersion
+        return (queue, result.issue)
     }
 
     /// Returns the failure instead of swallowing it — a queue that can't be

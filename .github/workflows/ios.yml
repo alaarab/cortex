@@ -17,6 +17,9 @@ on:
       - "packages/cli/src/governance/policy.ts"
       - "packages/cli/src/core/**"
       - "packages/cli/src/task/**"
+      - "packages/cli/browser/**"
+      - "packages/cli/src/graph-core/**"
+      - "pnpm-lock.yaml"
   pull_request:
     paths:
       - "apps/ios/**"
@@ -27,6 +30,9 @@ on:
       - "packages/cli/src/governance/policy.ts"
       - "packages/cli/src/core/**"
       - "packages/cli/src/task/**"
+      - "packages/cli/browser/**"
+      - "packages/cli/src/graph-core/**"
+      - "pnpm-lock.yaml"
   workflow_dispatch:
 
 jobs:
@@ -47,6 +53,13 @@ jobs:
     needs: phrenkit-tests
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install graph renderer dependencies
+        run: pnpm install --frozen-lockfile
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
@@ -60,3 +73,7 @@ jobs:
             -scheme Phren \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO
+      - name: Install graph test browser
+        run: pnpm exec playwright install chromium
+      - name: Test phone graph renderer
+        run: node --test apps/ios/scripts/test-graph.mjs

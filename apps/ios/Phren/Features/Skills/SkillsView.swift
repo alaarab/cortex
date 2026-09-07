@@ -1,301 +1,273 @@
 import PhrenKit
 import SwiftUI
 
-/// Browse and edit skills. Global skills and each project's skills are listed
-/// together because that is how they resolve at read time — a project sees
-/// global skills plus its own (`buildSkillManifest`, skill/registry.ts:293).
 struct SkillsView: View {
     @Environment(AppModel.self) private var model
-    /// nil lists every scope; a value narrows to one project's own skills.
     var project: String?
-
+    var storeId: String?
+    @State private var query = ""
     @State private var creating = false
+    @State private var created: StoreSkill?
 
     private var skills: [StoreSkill] {
-        guard let project else { return model.mergedSkills }
-        return model.mergedSkills.filter {
-            if case .project(let name) = $0.skill.scope { return name == project }
-            return false
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.mergedSkills.filter { entry in
+            (storeId == nil || entry.storeId == storeId)
+                && (project == nil || entry.skill.scope == .global || entry.skill.scope.source == project)
+                && (search.isEmpty || [entry.skill.name, entry.skill.content, entry.storeName,
+                                     entry.skill.scope.source].contains { $0.localizedCaseInsensitiveContains(search) })
         }
     }
 
-    private var grouped: [(title: String, skills: [StoreSkill])] {
-        Dictionary(grouping: skills) { $0.skill.scope.source }
-            .map { (title: $0.key, skills: $0.value.sorted { $0.skill.name < $1.skill.name }) }
-            // "global" first, then projects alphabetically — matching the
-            // snapshot's own ordering.
-            .sorted { left, right in
-                if left.title == "global" { return true }
-                if right.title == "global" { return false }
-                return left.title < right.title
-            }
+    private var scopes: [String] {
+        Set(skills.map { $0.skill.scope.source }).sorted {
+            if $0 == "global" { return $1 != "global" }
+            if $1 == "global" { return false }
+            return $0 < $1
+        }
+    }
+
+    private var canCreate: Bool {
+        model.storeDescriptors.contains {
+            $0.canPush && (storeId == nil || $0.id == storeId)
+                && (model.storeFilter == nil || $0.id == model.storeFilter)
+        }
     }
 
     var body: some View {
         List {
-            ForEach(grouped, id: \.title) { group in
-                Section(group.title == "global" ? "Global" : group.title) {
-                    ForEach(group.skills) { entry in
-                        NavigationLink {
-                            SkillEditorView(entry: entry)
-                        } label: {
-                            SkillRow(skill: entry.skill)
+            ForEach(scopes, id: \.self) { scope in
+                Section(scope == "global" ? "Global skills" : scope) {
+                    ForEach(skills.filter { $0.skill.scope.source == scope }.sorted {
+                        if $0.skill.name != $1.skill.name { return $0.skill.name < $1.skill.name }
+                        return $0.storeId < $1.storeId
+                    }) { entry in
+                        NavigationLink { SkillEditorView(entry: entry) } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(entry.skill.title ?? entry.skill.name).font(.headline)
+                                if let summary = entry.skill.summary, !summary.isEmpty {
+                                    Text(summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                HStack {
+                                    if model.hasMultipleStores { TagChip(text: entry.storeName, role: .store) }
+                                    if !model.canPush(storeId: entry.storeId) { TagChip(text: "Read-only", role: .status) }
+                                    if project != nil && entry.skill.scope == .global {
+                                        TagChip(text: "Global", role: .scope)
+                                    }
+                                    if !SkillFile.frontmatterWarnings(for: entry.skill.content).isEmpty {
+                                        Label("Needs details", systemImage: "exclamationmark.triangle")
+                                            .font(.caption).foregroundStyle(.orange)
+                                    }
+                                }
+                            }.padding(.vertical, 3)
                         }
                     }
                 }
             }
-
+        }
+        .overlay {
             if skills.isEmpty {
-                PhrenEmptyState(
-                    title: "No skills yet",
-                    message: project == nil
-                        ? "Skills live in global/skills/ and <project>/skills/. Create one to get started."
-                        : "This project has no skills of its own. Global skills still apply to it."
-                )
-                .listRowSeparator(.hidden)
+                PhrenEmptyState(title: query.isEmpty ? "No skills yet" : "No matching skills",
+                                message: query.isEmpty ? "Create reusable instructions for your agents." : "Try another name, project, or phrase.")
             }
         }
         .navigationTitle("Skills")
+        .searchable(text: $query, prompt: "Search skills")
+        .refreshable { await model.pullToRefresh() }
+        .safeAreaInset(edge: .top, spacing: 0) { LiveStatusBar() }
+        .phrenScreen()
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    creating = true
-                } label: {
-                    Label("New skill", systemImage: "plus")
+            if canCreate {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { creating = true } label: { Label("New skill", systemImage: "plus") }
                 }
             }
         }
         .sheet(isPresented: $creating) {
-            NewSkillSheet(defaultProject: project)
+            NewSkillSheet(defaultProject: project, defaultStoreId: storeId) { created = $0 }
         }
+        .navigationDestination(item: $created) { SkillEditorView(entry: $0) }
     }
 }
 
-private struct SkillRow: View {
-    let skill: Skill
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(skill.title ?? skill.name)
-                    .font(.body.weight(.medium))
-                if skill.format == .folder {
-                    // A folder skill may carry files the app does not sync;
-                    // the badge explains why only SKILL.md is editable here.
-                    Image(systemName: "folder")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let summary = skill.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Text(skill.path)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-/// Full-file markdown editor. Skills are authored prose with no line grammar,
-/// so the whole file round-trips verbatim.
 struct SkillEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-
     let entry: StoreSkill
-
-    @State private var text: String = ""
-    @State private var loaded = false
-    @State private var saving = false
+    @State private var draft: DocumentDraft?
+    @State private var deleting: StoreSkill?
     @State private var error: String?
-    @State private var confirmingDelete = false
+    @State private var busy = false
 
-    private var warnings: [String] { SkillFile.frontmatterWarnings(for: text) }
-    private var isDirty: Bool { loaded && text != entry.skill.content }
+    private var current: StoreSkill? {
+        model.skills(in: entry.storeId).first { $0.path == entry.skill.path }.map {
+            StoreSkill(storeId: entry.storeId, storeName: entry.storeName, skill: $0)
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !warnings.isEmpty {
-                // A warning, not a block: `phren link` validates frontmatter,
-                // but refusing to save a half-written skill would be worse
-                // than letting it sync.
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(warnings, id: \.self) { warning in
-                        Label(warning, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
+        List {
+            if let current {
+                Section {
+                    LabeledContent("Scope", value: current.skill.scope.source)
+                    LabeledContent("Store", value: current.storeName)
+                    if !model.canPush(storeId: entry.storeId) { Label("Read-only store", systemImage: "lock") }
+                    if current.skill.format == .folder {
+                        Text("This skill includes a folder. Editing changes its instructions; supporting files stay in the store.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color.yellow.opacity(0.15))
+                Section("Instructions") { DocumentPreview(content: current.skill.content) }
+                Section {
+                    Text(current.skill.path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    ShareLink(item: current.skill.content) { Label("Share skill", systemImage: "square.and.arrow.up") }
+                }
+            } else {
+                PhrenEmptyState(title: "Skill removed", message: "This skill is no longer in the store.")
             }
-
-            TextEditor(text: $text)
-                .font(.system(.footnote, design: .monospaced))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .scrollContentBackground(.hidden)
         }
         .navigationTitle(entry.skill.name)
         .navigationBarTitleDisplayMode(.inline)
+        .phrenScreen()
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Save") { Task { await save() } }
-                    .disabled(!isDirty || saving)
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                Button(role: .destructive) {
-                    confirmingDelete = true
-                } label: {
-                    Label("Delete skill", systemImage: "trash")
+            if let current, model.canPush(storeId: entry.storeId) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Edit") { draft = DocumentDraft(path: current.skill.path, content: current.skill.content) }.disabled(busy)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button(role: .destructive) { deleting = current } label: {
+                        Label("Delete skill", systemImage: "trash")
+                    }.disabled(busy)
                 }
             }
         }
-        .task {
-            guard !loaded else { return }
-            text = entry.skill.content
-            loaded = true
-        }
-        .confirmationDialog("Delete \(entry.skill.name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { Task { await remove() } }
+        .sheet(item: $draft) { DocumentEditorSheet(title: "Edit skill", storeId: entry.storeId, draft: $0) }
+        .confirmationDialog("Delete \(entry.skill.name)?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible) {
+            if let deleting {
+                Button("Delete skill", role: .destructive) { Task { await remove(deleting) } }
+            }
         } message: {
-            Text("This removes \(entry.skill.path) from the store on the next sync.")
+            Text("The skill's instructions will be removed from \(entry.storeName) on sync."
+                 + (entry.skill.format == .folder ? " Supporting files will remain in its folder." : ""))
         }
-        .alert("Couldn't save", isPresented: .constant(error != nil)) {
+        .alert("Couldn't delete", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
+        } message: { Text(error ?? "") }
     }
 
-    private func save() async {
-        saving = true
-        defer { saving = false }
-        do {
-            try await model.saveSkill(path: entry.skill.path, content: text, in: entry.storeId)
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func remove() async {
-        do {
-            try await model.deleteSkill(path: entry.skill.path, in: entry.storeId)
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
-        }
+    private func remove(_ entry: StoreSkill) async {
+        busy = true
+        defer { busy = false }
+        do { try await model.deleteSkill(entry); dismiss() }
+        catch { self.error = error.localizedDescription }
     }
 }
 
 private struct NewSkillSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-
     let defaultProject: String?
-
+    let defaultStoreId: String?
+    let onCreate: (StoreSkill) -> Void
     @State private var name = ""
-    @State private var scopeIsGlobal = false
-    @State private var project = ""
+    @State private var summary = ""
+    @State private var instructions = ""
+    @State private var scope = "global"
     @State private var storeId = ""
     @State private var error: String?
+    @State private var saving = false
+    @State private var confirmingDiscard = false
 
+    private var stores: [StoreDescriptor] {
+        model.storeDescriptors.filter {
+            $0.canPush && (defaultStoreId == nil || $0.id == defaultStoreId)
+                && (model.storeFilter == nil || $0.id == model.storeFilter)
+        }
+    }
     private var projects: [String] {
-        Array(Set(model.mergedProjects.map(\.project.name))).sorted()
+        model.writableProjects.filter { $0.storeId == storeId }.map(\.project.name).sorted()
     }
-
-    private var scope: Skill.Scope {
-        scopeIsGlobal ? .global : .project(project)
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var path: String { "\(scope)/skills/\(trimmedName).md" }
+    private var nameError: String? {
+        guard !trimmedName.isEmpty else { return nil }
+        guard LocalStore.isSkillPath(path) else { return "Start with a letter or number; use letters, numbers, dots, dashes, or underscores." }
+        if model.skills(in: storeId).contains(where: {
+            $0.scope.source == scope && $0.name.lowercased() == trimmedName.lowercased()
+        }) { return "A skill with that name already exists in this scope." }
+        return nil
     }
-
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespaces)
+    private var valid: Bool {
+        !trimmedName.isEmpty && nameError == nil && stores.contains { $0.id == storeId }
+            && (scope == "global" || projects.contains(scope))
+            && !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-
-    private var isValid: Bool {
-        !trimmedName.isEmpty
-            && LocalStore.isSkillPath(AppModel.newSkillPath(scope: scope, name: trimmedName))
-            && !storeId.isEmpty
-            && (scopeIsGlobal || !project.isEmpty)
-    }
+    private var dirty: Bool { !name.isEmpty || !summary.isEmpty || !instructions.isEmpty }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Name") {
-                    TextField("skill-name", text: $name)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    if !trimmedName.isEmpty && !isValid {
-                        Text("Letters, numbers, dots, dashes and underscores only.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                Section("Skill") {
+                    TextField("skill-name", text: $name).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    if let nameError { Text(nameError).font(.caption).foregroundStyle(.red) }
+                    TextField("When should an agent use this skill?", text: $summary, axis: .vertical)
+                }
+                Section("Location") {
+                    if stores.count > 1 {
+                        Picker("Store", selection: $storeId) { ForEach(stores) { Text($0.displayName).tag($0.id) } }
+                    } else if let store = stores.first { LabeledContent("Store", value: store.displayName) }
+                    Picker("Scope", selection: $scope) {
+                        Text("Global · all projects").tag("global")
+                        ForEach(projects, id: \.self) { Text($0).tag($0) }
                     }
                 }
-
-                Section("Scope") {
-                    Toggle("Global skill", isOn: $scopeIsGlobal)
-                    if !scopeIsGlobal {
-                        Picker("Project", selection: $project) {
-                            ForEach(projects, id: \.self) { Text($0).tag($0) }
-                        }
-                    }
-                }
-
-                if model.hasMultipleStores {
-                    Section("Store") {
-                        Picker("Store", selection: $storeId) {
-                            ForEach(model.storeDescriptors, id: \.id) { descriptor in
-                                Text(descriptor.displayName).tag(descriptor.id)
-                            }
-                        }
-                    }
-                }
-
-                if isValid {
-                    Section("Path") {
-                        Text(AppModel.newSkillPath(scope: scope, name: trimmedName))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
+                Section("Instructions") {
+                    TextEditor(text: $instructions).frame(minHeight: 200).accessibilityLabel("Skill instructions")
                 }
             }
+            .disabled(saving)
             .navigationTitle("New skill")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { Task { await create() } }
-                        .disabled(!isValid)
+                    Button(saving ? "Creating…" : "Create") { Task { await create() } }.disabled(!valid || saving)
                 }
             }
-            .task {
-                project = defaultProject ?? projects.first ?? ""
-                scopeIsGlobal = defaultProject == nil
-                storeId = model.storeDescriptors.first?.id ?? ""
+            .onAppear {
+                guard storeId.isEmpty else { return }
+                storeId = stores.first?.id ?? ""
+                scope = defaultProject.flatMap { projects.contains($0) ? $0 : nil } ?? "global"
             }
-            .alert("Couldn't create that skill", isPresented: .constant(error != nil)) {
+            .onChange(of: storeId) { _, _ in
+                if scope != "global" && !projects.contains(scope) { scope = "global" }
+            }
+            .confirmationDialog("Discard this skill?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+                Button("Discard", role: .destructive) { dismiss() }
+            }
+            .alert("Couldn't create skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK") { error = nil }
-            } message: {
-                Text(error ?? "")
-            }
+            } message: { Text(error ?? "") }
         }
+        .interactiveDismissDisabled(dirty || saving)
     }
 
     private func create() async {
+        guard valid, !saving else { return }
+        saving = true
+        defer { saving = false }
         do {
-            let path = AppModel.newSkillPath(scope: scope, name: trimmedName)
-            try await model.saveSkill(path: path, content: SkillFile.template(name: trimmedName), in: storeId)
+            let content = SkillFile.template(name: trimmedName, description: summary, instructions: instructions)
+            try await model.saveDocument(path: path, content: content, expectedContent: nil, in: storeId)
+            if let skill = Skill.parse(path: path, content: content) {
+                onCreate(StoreSkill(storeId: storeId, storeName: model.storeName(for: storeId), skill: skill))
+            }
             dismiss()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        } catch { self.error = error.localizedDescription }
     }
 }

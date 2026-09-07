@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none';">
 <!-- viewport-fit=cover so the canvas runs under the home indicator; the HUD
      insets itself with env(safe-area-inset-*) below. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -20,6 +21,12 @@
   }
   #graph-canvas { position: absolute; inset: 0; }
   #graph-tooltip { position: absolute; }
+  /* SwiftUI provides search, filters, details and camera controls. Desktop
+     overlays would cover most of a phone's canvas and offer unsupported actions. */
+  .phren-project-nav, .phren-project-panel, .phren-pp-reopen,
+  .phren-hud-legend, .phren-hud-stats { display: none !important; }
+  #graph-canvas .phren-label { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
+  #graph-canvas .phren-label--project { max-width: 160px; }
   #graph-status {
     position: absolute;
     top: calc(env(safe-area-inset-top) + 12px); left: 50%;
@@ -34,7 +41,7 @@
 </style>
 </head>
 <body>
-  <div id="graph-canvas"></div>
+  <div id="graph-canvas" data-fx="off"></div>
   <div id="graph-tooltip"></div>
   <div id="graph-status">Loading graph…</div>
 
@@ -55,6 +62,13 @@
       if (handler) handler.postMessage(body);
     }
 
+    window.addEventListener("error", function () {
+      post("graphError", { message: "The renderer encountered an error." });
+    });
+    window.addEventListener("unhandledrejection", function () {
+      post("graphError", { message: "The renderer couldn't finish loading." });
+    });
+
     // Swift calls this with the payload built on-device by GraphBuilder.
     window.phrenHost = {
       render: function (payload) {
@@ -64,6 +78,7 @@
           return;
         }
         try {
+          wire();
           window.phrenGraph.mount(payload);
           setStatus(payload && payload.nodes && payload.nodes.length ? "" : "Nothing to show yet");
           wire();
@@ -75,6 +90,9 @@
       focusNode: function (id) {
         if (window.phrenGraph && window.phrenGraph.focusNode) window.phrenGraph.focusNode(id);
       },
+      reset: function () { window.graphReset(); },
+      zoom: function (factor) { window.graphZoom(factor); },
+      clear: function () { window.phrenGraph.clearSelection(); },
     };
 
     var wired = false;
@@ -88,16 +106,6 @@
       window.phrenGraph.onSelectionClear(function () {
         post("graphSelect", null);
       });
-
-      // The project pane's inline editor emits these. "save-inline" carries
-      // the edited text on the detail object; "delete" carries none.
-      window.phrenGraph.onItemAction(function (detail, action) {
-        var items = Array.isArray(detail) ? detail : [detail];
-        post("graphAction", {
-          action: action,
-          items: items.map(serialize),
-        });
-      });
     }
 
     // Only the fields Swift needs to resolve a node back to a markdown line.
@@ -108,6 +116,7 @@
         kind: node.kind,
         group: node.group,
         project: node.project,
+        store: node.store,
         label: node.label,
         fullLabel: node.fullLabel,
         text: node.text,

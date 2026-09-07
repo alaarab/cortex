@@ -23,7 +23,7 @@ import Foundation
 /// Node ids, score keys, and link structure *do* match the CLI exactly, which
 /// is what lets a node round-trip back to a FINDINGS.md bullet on save.
 public struct GraphPayload: Codable, Equatable, Sendable {
-    public struct Node: Codable, Equatable, Sendable {
+    public struct Node: Codable, Equatable, Identifiable, Sendable {
         public var id: String
         public var label: String
         public var fullLabel: String
@@ -82,6 +82,31 @@ public struct GraphPayload: Codable, Equatable, Sendable {
         }
         return json
     }
+
+    public enum ContentFilter: String, CaseIterable, Sendable {
+        case all = "All", findings = "Findings", tasks = "Tasks"
+    }
+
+    /// Keep project hubs so the filtered leaves retain their relationships.
+    public func filtered(by filter: ContentFilter) -> GraphPayload {
+        let filtered = nodes.filter { node in
+            filter == .all || node.group == "project"
+                || (filter == .findings && node.group.hasPrefix("topic:"))
+                || (filter == .tasks && node.group.hasPrefix("task-"))
+        }
+        let ids = Set(filtered.map(\.id))
+        return GraphPayload(nodes: filtered, links: links.filter { ids.contains($0.source) && ids.contains($0.target) },
+                            topics: topics, total: filtered.count)
+    }
+
+    public func search(_ query: String) -> [Node] {
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !terms.isEmpty else { return [] }
+        return nodes.filter { node in
+            let text = "\(node.fullLabel) \(node.project) \(node.topicLabel ?? "")"
+            return terms.allSatisfy { text.localizedCaseInsensitiveContains($0) }
+        }
+    }
 }
 
 /// Builds a `GraphPayload` from cached markdown.
@@ -125,13 +150,15 @@ public enum GraphBuilder {
         public var tasks: [String: TaskDoc]
         public var projects: [String]
         public var storeName: String
+        public var journalFindings: [String: [Finding]]
 
         public init(findingsMarkdown: [String: String], tasks: [String: TaskDoc],
-                    projects: [String], storeName: String) {
+                    projects: [String], storeName: String, journalFindings: [String: [Finding]] = [:]) {
             self.findingsMarkdown = findingsMarkdown
             self.tasks = tasks
             self.projects = projects
             self.storeName = storeName
+            self.journalFindings = journalFindings
         }
     }
 
@@ -162,13 +189,12 @@ public enum GraphBuilder {
                 refCount: markdown == nil ? 0 : 1, project: project, store: input.storeName,
                 tagged: false, findingCount: 0, taskCount: 0
             ))
-            guard let markdown else { continue }
 
             var taggedCount = 0
             var untaggedAdded = 0
             var currentDate: String?
 
-            for rawLine in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            for rawLine in (markdown ?? "").split(separator: "\n", omittingEmptySubsequences: false) {
                 let line = String(rawLine)
                 if let date = dateHeading.group(line, 1) {
                     currentDate = date
@@ -220,6 +246,24 @@ public enum GraphBuilder {
                     links.append(GraphPayload.Link(source: project, target: other))
                 }
             }
+            // Team findings live in append-only journals. They have distinct
+            // identities and no FINDINGS.md score key, so they cannot be
+            // routed to that file's edit/delete operations.
+            for finding in input.journalFindings[project] ?? [] {
+                guard !finding.archived, let file = finding.journalFile else { continue }
+                if !isFocused && taggedCount + untaggedAdded >= maxTagged + maxUntagged { break }
+                let slug = finding.typeTag ?? "general"
+                topics[slug] = topics[slug] ?? slug.replacingOccurrences(of: "-", with: " ").capitalized
+                let key = entryScoreKey(project: project, filename: file, snippet: finding.rawLine)
+                let id = uniqueFindingId("journal:\(findingStableId(scoreKey: key))")
+                nodes.append(GraphPayload.Node(
+                    id: id, label: truncate(finding.text), fullLabel: finding.text,
+                    group: "topic:\(slug)", refCount: 0, project: project, store: input.storeName,
+                    tagged: finding.typeTag != nil, topicSlug: slug, topicLabel: topics[slug], date: finding.date
+                ))
+                links.append(GraphPayload.Link(source: project, target: id))
+                if finding.typeTag == nil { untaggedAdded += 1 } else { taggedCount += 1 }
+            }
             findingCounts[project] = taggedCount + untaggedAdded
 
             // ── Tasks (data.ts:497) ──
@@ -228,7 +272,7 @@ public enum GraphBuilder {
                 for section in [PhrenTask.Section.active, .queue] {
                     let group = section == .active ? "task-active" : "task-queue"
                     for item in doc.items(in: section) {
-                        if taskCount >= maxTasks { break }
+                        if !isFocused && taskCount >= maxTasks { break }
                         let scoreKey = entryScoreKey(project: project, filename: "tasks.md", snippet: item.line)
                         nodes.append(GraphPayload.Node(
                             id: "\(project):task:\(item.id)", label: truncate(item.line), fullLabel: item.line,

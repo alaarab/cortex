@@ -14,7 +14,7 @@ final class StoreAndSearchTests: XCTestCase {
         XCTAssertFalse(LocalStore.isWritablePath("phren.root.yaml"))
         XCTAssertFalse(LocalStore.isWritablePath("stores.yaml"))
         XCTAssertFalse(LocalStore.isWritablePath(".phren-team.yaml"))
-        XCTAssertFalse(LocalStore.isWritablePath("myproj/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("myproj/CLAUDE.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/summary.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/truths.md"))
         XCTAssertFalse(LocalStore.isWritablePath("myproj/reference/topic.md"))
@@ -30,7 +30,7 @@ final class StoreAndSearchTests: XCTestCase {
         // assertions that fail the moment someone "simplifies" the split by
         // relaxing isProjectDirName, which isWritablePath delegates to.
         XCTAssertFalse(LocalStore.isWritablePath("global/FINDINGS.md"))
-        XCTAssertFalse(LocalStore.isWritablePath("global/CLAUDE.md"))
+        XCTAssertTrue(LocalStore.isWritablePath("global/CLAUDE.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/tasks.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/review.md"))
         XCTAssertFalse(LocalStore.isWritablePath("global/notes/2026-07-26.md"))
