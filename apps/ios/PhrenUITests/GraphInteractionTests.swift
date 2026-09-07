@@ -9,6 +9,9 @@ final class GraphInteractionTests: XCTestCase {
         let graph = app.buttons["Memory graph"]
         XCTAssertTrue(graph.waitForExistence(timeout: 15))
         graph.tap()
+        // The native search is available before WKWebView has mounted its
+        // graph. Wait for rendered content before issuing camera commands.
+        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         let search = app.buttons["Search graph"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()

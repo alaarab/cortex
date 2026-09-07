@@ -440,6 +440,7 @@ private struct GraphNodeSheet: View {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
                     }
+                    ProjectSessionActions(storeId: storeId, project: project, presentation: .section)
                 }
             }
             .navigationTitle(node.isTask ? "Task" : (node.isFinding ? "Finding" : "Project"))

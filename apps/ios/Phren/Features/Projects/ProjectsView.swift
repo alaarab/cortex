@@ -71,6 +71,7 @@ struct ProjectsView: View {
                                 }
                                 .padding(.vertical, 2)
                             }
+                            .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
                         }
                     }
                 }
@@ -204,6 +205,9 @@ struct ProjectDetailView: View {
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ProjectSessionActions(storeId: storeId, project: project)
+            }
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink { GraphView(focusProject: project, initialStoreId: storeId) } label: {
                     Label("Project graph", systemImage: "circle.hexagongrid")

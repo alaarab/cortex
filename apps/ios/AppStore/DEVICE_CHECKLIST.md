@@ -8,6 +8,10 @@ for writes and an ordinary read-only store to verify disabled controls.
 - Orbit, pinch, zoom, and fit a large graph. Background and foreground the app,
   then confirm rendering recovers without excessive heat or a blank view.
 - Search, focus one/two steps, go back, save a view, terminate, and restore it.
+- Optionally save a Moshi session link and open it from the project and graph.
+  Verify it reaches the intended session on the intended computer, including
+  a workspace/pane target. Close that session in Moshi and check its fallback.
+  Remove the link and confirm the Phren project remains usable.
 - Remove a bookmarked node/project remotely and confirm the explanation and
   fallback view. Remove its store from the phone and reopen the bookmark.
 - Disable a project skill and a global skill; pull on the desktop and verify

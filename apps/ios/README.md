@@ -219,6 +219,26 @@ queued files and their original SHAs until flush can check them. Pending queue
 schema 2 added guarded authored edits; schema 3 adds individual skill switches.
 Schema 1 and 2 queues upgrade while retaining all existing operations.
 
+### Optional Moshi session links
+
+With Moshi installed beside phren on an iPhone, open a project's **Project
+session** menu → **Add Moshi link**. The same controls appear under **Session**
+in graph node details. Choose tmux or Herdr and enter its session name; optional
+window, workspace, tab, and pane fields select a more specific destination.
+Then use **Open in Moshi** from either screen. **Edit Moshi link** changes or
+removes the shortcut.
+
+These are device-local project bookmarks, including for read-only stores.
+They are keyed by full store identity and project, never synced to Git, and
+do not create an agent or supply live status. Failed app launches retain the
+link; Moshi handles unavailable sessions. Phren remains usable without Moshi.
+See [Moshi's public session links](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links)
+for supported app versions and session matching.
+
+`MoshiSessionLinkTests` covers encoding, validation, store isolation, and saved
+data compatibility. `MoshiSessionTests` covers native setup, relaunch, graph
+access, removal, and the unavailable-app message in an isolated simulator.
+
 ## Building
 
 Requirements: Xcode 15+ (iOS 17 SDK), [XcodeGen](https://github.com/yonaskolb/XcodeGen),

@@ -10,12 +10,12 @@ Keep the "Last updated" date accurate — a policy dated before a material
 change is worse than no policy.
 -->
 
-**Last updated: 1 August 2026**
+**Last updated: 6 September 2026**
 
 phren for iOS ("the app") is a client for a knowledge store you own,
 stored in a Git repository on GitHub. This policy explains what the app
-does with your data. The short version: it does not send your data
-anywhere except the GitHub account you connect it to.
+does with your data. Store sync goes directly to the GitHub account you
+connect. Optional app handoffs and voice features are described below.
 
 ## We do not collect your data
 
@@ -34,24 +34,32 @@ statistics. The app contains no third-party SDKs.
 - **A queue of pending changes** you have made but which have not yet been
   pushed to GitHub.
 - **App settings**, such as your chosen default project for quick capture
-  and a short log of recent captures, so the app can tell you where a note
-  or task was filed.
+  and a short log of recent captures, saved graph views, and optional Moshi
+  session links associated with your projects.
 
 All of this lives in the app's private container and is removed when you
 delete the app. Signing out clears the stored token.
 
 ## What the app sends, and where
 
-The app communicates with exactly one external service: **the GitHub REST
-API** (`api.github.com`), using the token you supply.
+For sign-in and store sync, the app communicates directly with **GitHub**:
+`github.com` for optional device sign-in and `api.github.com` for repository
+access with your token.
 
 It reads the repository or repositories you select, and writes the changes
 you make — findings, notes, tasks, and review decisions — back to those
-repositories as commits authored by your GitHub account. Nothing is sent
-to any other destination.
+repositories as commits authored by your GitHub account.
 
 Your use of GitHub is governed by GitHub's own privacy policy:
 https://docs.github.com/site-policy/privacy-policies
+
+## Optional Moshi session links
+
+If you save a Moshi shortcut, its session name and optional workspace,
+window, tab, and pane identifiers remain in phren's device settings.
+Tapping **Open in Moshi** passes those identifiers to the Moshi app through
+an iOS URL handoff. The handoff contains no GitHub token or store content.
+Moshi handles the destination session under its own privacy policy.
 
 ## Microphone and speech recognition
 

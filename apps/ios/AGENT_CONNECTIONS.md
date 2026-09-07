@@ -1,22 +1,35 @@
 # Agent connections: Moshi and Herdr
 
-Design notes for the next iteration. The iPhone app currently edits agent
-instructions and skills; it does not list or control live desktop agents.
+The iPhone app edits agent instructions and skills and can optionally open a
+saved project session in the Moshi iPhone app. It does not list or control
+live desktop agents.
+
+## Optional iPhone handoff
+
+Moshi is an optional app beside phren on the iPhone. Project → Project session
+and graph node details → Session configure a tmux or Herdr destination.
+Bookmarks use the full store ID and project, stay in device preferences, and
+can be edited or removed without changing the repository or running session.
+The app builds a validated public URL; names and IDs are encoded individually.
+If iOS cannot open Moshi, phren reports the failure and retains the shortcut.
+Moshi handles a session that no longer exists; a successful app launch is not
+evidence of a running agent. No desktop companion is installed by this feature.
 
 ## Start with an integration
 
 Keep phren responsible for project memory, skills, findings, tasks, and the
-graph. Use Moshi for the live terminal, chat, and approvals the user already
-has. The CLI already has `AgentRecord`, `JoinedAgent`, and a Herdr discovery
+graph. Users who choose Moshi can use it for live interaction. The CLI
+already has `AgentRecord`, `JoinedAgent`, and a Herdr discovery
 provider in `packages/cli/src/agents/`. A phone adapter can build on that
 contract without implementing another process supervisor.
 
 Moshi's public links resume active/minimized session cards. Herdr links can
 carry session, workspace, tab, and pane IDs; tmux links carry session and
 optionally window/pane. They cannot create a saved connection and have no
-public host selector, so matching names across hosts are ambiguous. Keep
-host identity visible and ask the user to open the intended connection when
-there is no unique handoff. Do not use Moshi's internal terminal route.
+public host selector, so matching names across hosts are ambiguous. The
+manual setup explains using distinct session names. A future discovered
+destination should retain host identity and avoid an ambiguous automatic
+handoff. Do not use Moshi's internal terminal route.
 [Documented link grammar and limitations](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
 
 The Herdr provider should retain session/workspace/tab/pane IDs as structured
@@ -34,10 +47,12 @@ an empty successful snapshot means no agents, not a connection failure.
 Resolve working directories to projects on the host. Do not infer a store
 from its display name or send full transcripts just to show status.
 
-Transport still needs a decision: an authenticated host bridge over a
-private network, or a narrowly scoped SSH tunnel. iOS cannot borrow another
-app's SSH credentials or its existing tunnel. Keep live state out of Git;
-the store repo remains the durable memory layer.
+For hosts already reachable over Tailscale, investigate a phren SSH
+connection over that network to an existing `moshi-hook` gateway first;
+another phren gateway is not a prerequisite. iOS cannot borrow another app's
+SSH credentials or its existing tunnel. Tailscale supplies reachability, not
+cross-app access. Keep live state out of Git; the store repo remains the
+durable memory layer. [Tailscale setup](https://getmoshi.app/docs/tailscale).
 
 Moshi documents a loopback gateway at port 24543. Its `/events` WebSocket is
 session-context oriented, and transcript streaming is a separate route. This
@@ -45,6 +60,11 @@ is a candidate adapter, not evidence of a stable remote all-agent API; verify
 the supported discovery contract before depending on it. Keep the gateway
 private and use its documented tunnel path.
 [Gateway behavior](https://getmoshi.app/docs/debug-gateway).
+
+Moshi's Desktop documentation also describes structured workspace and agent
+APIs on that same gateway. Verify the installed version's endpoints and data
+before implementing the live adapter; the optional phone handoff does not
+require Moshi Desktop. [Daemon and gateway roles](https://getmoshi.app/docs/install-desktop).
 
 ## What to decide together
 
