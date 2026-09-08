@@ -5,13 +5,17 @@ struct SkillsView: View {
     @Environment(AppModel.self) private var model
     var project: String?
     var storeId: String?
+    var returnToProject: (() -> Void)?
     @State private var query = ""
     @State private var creating = false
     @State private var created: StoreSkill?
 
     private var skills: [StoreSkill] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.mergedSkills.filter { entry in
+        let available = storeId.map { id in
+            model.skills(in: id).map { StoreSkill(storeId: id, storeName: model.storeName(for: id), skill: $0) }
+        } ?? model.mergedSkills
+        return available.filter { entry in
             (storeId == nil || entry.storeId == storeId)
                 && (project == nil || entry.skill.scope == .global || entry.skill.scope.source == project)
                 && (search.isEmpty || [entry.skill.name, entry.skill.content, entry.storeName,
@@ -30,7 +34,7 @@ struct SkillsView: View {
     private var canCreate: Bool {
         model.storeDescriptors.contains {
             $0.canPush && (storeId == nil || $0.id == storeId)
-                && (model.storeFilter == nil || $0.id == model.storeFilter)
+                && (storeId != nil || model.storeFilter == nil || $0.id == model.storeFilter)
         }
     }
 
@@ -42,7 +46,7 @@ struct SkillsView: View {
                         if $0.skill.name != $1.skill.name { return $0.skill.name < $1.skill.name }
                         return $0.storeId < $1.storeId
                     }) { entry in
-                        NavigationLink { SkillEditorView(entry: entry) } label: {
+                        NavigationLink { SkillEditorView(entry: entry, returnToProject: returnToProject) } label: {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(entry.skill.title ?? entry.skill.name).font(.headline)
                                 if let summary = entry.skill.summary, !summary.isEmpty {
@@ -65,6 +69,7 @@ struct SkillsView: View {
                                 }
                             }.padding(.vertical, 3)
                         }
+                        .accessibilityIdentifier("skill:\(entry.storeId):\(entry.skill.path)")
                     }
                 }
             }
@@ -76,11 +81,18 @@ struct SkillsView: View {
             }
         }
         .navigationTitle("Skills")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search skills")
         .refreshable { await model.pullToRefresh() }
         .safeAreaInset(edge: .top, spacing: 0) { LiveStatusBar() }
         .phrenScreen()
         .toolbar {
+            if let returnToProject {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Back to project", systemImage: "xmark", action: returnToProject)
+                        .accessibilityIdentifier("skills-return-to-project")
+                }
+            }
             if canCreate {
                 ToolbarItem(placement: .primaryAction) {
                     Button { creating = true } label: { Label("New skill", systemImage: "plus") }
@@ -90,7 +102,7 @@ struct SkillsView: View {
         .sheet(isPresented: $creating) {
             NewSkillSheet(defaultProject: project, defaultStoreId: storeId) { created = $0 }
         }
-        .navigationDestination(item: $created) { SkillEditorView(entry: $0) }
+        .navigationDestination(item: $created) { SkillEditorView(entry: $0, returnToProject: returnToProject) }
     }
 }
 
@@ -98,6 +110,7 @@ struct SkillEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let entry: StoreSkill
+    var returnToProject: (() -> Void)?
     @State private var draft: DocumentDraft?
     @State private var deleting: StoreSkill?
     @State private var error: String?
@@ -160,6 +173,12 @@ struct SkillEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
         .toolbar {
+            if let returnToProject {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Back to project", systemImage: "xmark", action: returnToProject)
+                        .accessibilityIdentifier("skills-return-to-project")
+                }
+            }
             if let current, model.canPush(storeId: entry.storeId) {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Edit") { draft = DocumentDraft(path: current.skill.path, content: current.skill.content) }.disabled(busy)
@@ -220,7 +239,7 @@ private struct NewSkillSheet: View {
     private var stores: [StoreDescriptor] {
         model.storeDescriptors.filter {
             $0.canPush && (defaultStoreId == nil || $0.id == defaultStoreId)
-                && (model.storeFilter == nil || $0.id == model.storeFilter)
+                && (defaultStoreId != nil || model.storeFilter == nil || $0.id == model.storeFilter)
         }
     }
     private var projects: [String] {

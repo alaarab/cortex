@@ -485,6 +485,10 @@ final class AppModel {
                     let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
                     try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
                     try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
+                    if ProcessInfo.processInfo.arguments.contains("--project-skills-fixture") {
+                        try await store.write("global/skills/review-style.md", content: SkillFile.template(name: "review-style", description: "Review shared style", instructions: "Use clear names."), blobSha: nil)
+                        try await store.write("other/skills/other-check.md", content: SkillFile.template(name: "other-check", description: "Review another project", instructions: "Check the other project."), blobSha: nil)
+                    }
                     if owner == "sample", ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
                         try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
                         let host = try LiveHost(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,

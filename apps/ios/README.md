@@ -199,6 +199,10 @@ the rest of `.config/` and `reference/` are not synced.
 ### Skills and agent instructions
 
 Projects → **Skills** opens a searchable library across the selected stores.
+Inside a project, the **Skills** button opens just that store's
+project and global skills. Its close button returns directly to the project from
+the library or skill detail. Saving or cancelling an edit returns to skill detail;
+unsaved edits still require an explicit discard before leaving the editor.
 Create a skill with its name, description, instructions, store and scope;
 read, edit, share or delete an existing skill. Creation checks names without
 case sensitivity across both flat and folder formats. Project choices come
@@ -246,13 +250,15 @@ Schema 1 and 2 queues upgrade while retaining all existing operations.
 After connecting a computer in **Agents**, tap **Open [workspace] in Moshi** on
 a live tab. Phren uses the hook's workspace ID directly when that workspace
 has one tab, and includes the selected tab ID when there are several. No session
-link form or project mapping is needed. Long-press the action to copy its link.
+link form or project mapping is needed. A computer check precedes the handoff;
+it shows the target computer and explains that Moshi cannot select it from the
+workspace link. Long-press the action to copy its link.
 
 A project's **Project session → Open in Moshi**, and **Session → Open in Moshi**
 in graph details, discover sessions on the configured computers. One matching
-session opens automatically after discovery succeeds. Several matches offer a
+session is shown for selection after discovery succeeds. Several matches offer a
 chooser with the actual agent, status, workspace, directory, and computer.
-Later refreshes never unexpectedly open another app. If no session matches,
+Discovery and refresh never open another app automatically. If no session matches,
 choosing one remembers its directory for this project on this iPhone.
 
 Directory recognition uses the deepest path component matching a unique attached
@@ -261,9 +267,13 @@ take precedence. Duplicate project names across stores require a choice; Phren
 does not infer a project from a session label or agent conversation ID.
 
 Moshi must already have an open or minimized session for the computer. Its public
-links cannot create a connection or select a host ID. Known workspace collisions
-across computers prevent automatic opening and show a warning. Phren cannot read
-the Moshi iPhone app's active cards. Computer setup in Phren remains a one-time step.
+links cannot create a connection or select a host ID. Even with only one computer
+saved in Phren, Moshi may have another computer active. Every discovered-session
+handoff shows the target computer before offering **Open workspace link**. Known
+workspace collisions also appear in the chooser. This check is a workaround:
+the link still cannot guarantee the computer Moshi will choose. Phren cannot read
+the Moshi iPhone app's active cards. Fully automatic computer selection needs a
+supported host-specific handoff from Moshi.
 
 **Add Moshi link** and **Edit Moshi link** remain manual fallbacks for tmux,
 named Herdr servers, or other destinations outside the discovery adapter.

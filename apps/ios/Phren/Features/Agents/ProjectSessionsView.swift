@@ -61,8 +61,8 @@ private final class ProjectSessionDiscovery {
 }
 
 /// Opened by an explicit request to resume a project's session. Resolve once
-/// before opening; multiple matches stay visible for a choice. Later polls never
-/// take the user out of the app unexpectedly.
+/// before offering a handoff. Discovery cannot establish which computer Moshi
+/// will use, so neither the first result nor later polls open another app.
 struct ProjectSessionsView: View {
     let storeID: String
     let project: String
@@ -72,7 +72,8 @@ struct ProjectSessionsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var discovery = ProjectSessionDiscovery()
-    @State private var attemptedAutomaticOpen = false
+    @State private var checkingComputer = false
+    @State private var pending: Handoff?
     @State private var visible = false
     @State private var refreshID = UUID()
     @State private var error: String?
@@ -112,14 +113,14 @@ struct ProjectSessionsView: View {
                     Section {
                         ForEach(discovery.sessions) { session in sessionRow(session, assign: true) }
                     } header: { Text("Choose a session") } footer: {
-                        Text("Choosing a session remembers its directory for this project on this iPhone.")
+                        Text("Opening a chosen session remembers its directory for this project on this iPhone.")
                     }
                 }
                 if discovery.updated != nil && discovery.sessions.isEmpty && discovery.problems.isEmpty {
                     Text("No Herdr sessions are running on the connected computers.").foregroundStyle(.secondary)
                 }
                 Section {
-                    Text("Moshi resumes a session already open or minimized on the chosen computer. It must be connected there first.")
+                    Text("Phren found the computer and workspace. Moshi's public links cannot select that computer; choose it in Moshi before opening a workspace link.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -134,6 +135,10 @@ struct ProjectSessionsView: View {
             }
             .phrenScreen()
             .modifier(MoshiLaunchAlert(error: $error))
+            .modifier(MoshiComputerCheck(host: pending?.session.host, destination: try? pending?.session.link().url(), isPresented: $checkingComputer) { requestedURL in
+                guard let pending else { return }
+                open(pending.session, assign: pending.assign, requestedURL: requestedURL)
+            })
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .task(id: DiscoveryIdentity(data: data, active: visible && scenePhase == .active, refresh: refreshID)) {
@@ -141,14 +146,6 @@ struct ProjectSessionsView: View {
                 while !Task.isCancelled {
                     await discovery.refresh(hosts: preferences.hosts)
                     guard !Task.isCancelled else { return }
-                    if !attemptedAutomaticOpen {
-                        attemptedAutomaticOpen = true
-                        if matches.count == 1, let session = matches.first,
-                           discovery.problems.isEmpty, !session.hasHostCollision(in: discovery.sessions),
-                           model.sessionProjects.contains(target) {
-                            open(session, assign: false)
-                        }
-                    }
                     do { try await Task.sleep(for: .seconds(10)) } catch { return }
                 }
             }
@@ -158,7 +155,10 @@ struct ProjectSessionsView: View {
     private func sessionRow(_ session: DiscoveredMoshiSession, assign: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
-            Button { open(session, assign: assign) } label: {
+            Button {
+                pending = Handoff(session: session, assign: assign)
+                checkingComputer = true
+            } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(session.tab.displayTitle).font(.headline).lineLimit(2)
                     Text("\(session.host.name) · \(session.workspaceName)").font(.caption).lineLimit(1)
@@ -180,10 +180,22 @@ struct ProjectSessionsView: View {
         }
     }
 
-    private func open(_ session: DiscoveredMoshiSession, assign: Bool) {
+    private func open(_ session: DiscoveredMoshiSession, assign: Bool, requestedURL: URL) {
         do {
-            let url = try session.link().url()
-            if assign, let cwd = session.tab.cwd {
+            guard scenePhase == .active, visible,
+                  discovery.updated.map({ Date().timeIntervalSince($0) < 25 }) == true,
+                  let current = discovery.sessions.first(where: { $0.id == session.id }),
+                  current.host == session.host, current.tab.cwd == session.tab.cwd,
+                  model.sessionProjects.contains(target) else {
+                error = "This session changed or needs a refresh. Choose it again from the current list."
+                return
+            }
+            let url = try current.link().url()
+            guard url == requestedURL else {
+                error = "This session's destination changed. Choose it again from the current list."
+                return
+            }
+            if assign, let cwd = current.tab.cwd {
                 data = try LiveSessionPreferences.assigning(hostID: session.host.id, directory: cwd,
                                                             storeID: storeID, project: project, in: data)
             }
@@ -192,6 +204,11 @@ struct ProjectSessionsView: View {
                 else { error = "Moshi couldn't be opened on this iPhone. Install it and open this computer's session there first." }
             }
         } catch { self.error = error.localizedDescription }
+    }
+
+    private struct Handoff {
+        let session: DiscoveredMoshiSession
+        let assign: Bool
     }
 
     private struct DiscoveryIdentity: Equatable {

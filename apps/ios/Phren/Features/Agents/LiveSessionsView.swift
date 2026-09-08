@@ -383,7 +383,8 @@ private struct LiveSessionCard: View {
 
             HStack(spacing: 12) {
                 if let destination = try? session.link().url() {
-                    MoshiSessionOpenLink(destination: destination, workspaceName: session.workspaceName)
+                    MoshiSessionOpenLink(destination: destination, workspaceName: session.workspaceName, host: session.host)
+                        .id(destination)
                         .font(.subheadline.weight(.medium))
                         .tint(PhrenTheme.cyan)
                         .accessibilityIdentifier("live-open:\(session.workspaceID):\(session.tab.id)")
@@ -447,7 +448,8 @@ private struct LiveSessionDetailView: View {
                         .listRowBackground(session.tab.activity.color.opacity(0.10))
                         Section {
                             if let destination = try? session.link().url() {
-                                MoshiSessionOpenLink(destination: destination, workspaceName: session.workspaceName)
+                                MoshiSessionOpenLink(destination: destination, workspaceName: session.workspaceName, host: session.host)
+                                    .id(destination)
                                     .accessibilityIdentifier("session-detail-open")
                                     .disabled(!fresh)
                             }

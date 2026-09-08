@@ -47,14 +47,14 @@ latest snapshot contains just one tab in a workspace, the handoff uses only
 `workspace`, avoiding a second tab-focus transition after Moshi resumes its card.
 Multiple tabs (or an unknown tab count) include the selected tab's ID. The default
 server is implicit. No manual link or project mapping is needed to open the tab.
-The Agents action is a native link labelled with the destination workspace,
+The Agents action is labelled with the destination workspace,
 with its view identity tied to the URL across row refreshes. Long-pressing it
 can copy that same link for a direct comparison in Safari.
 Project → Project session and graph node details → Session discover current
-sessions using directory recognition and explicit mappings. A single match opens
-automatically after a successful discovery pass. Multiple matches stay in a
-chooser; failed hosts prevent automatic opening from incomplete discovery.
-The chooser refreshes while visible but never automatically opens on a later poll.
+sessions using directory recognition and explicit mappings. A single match stays
+visible for selection, as do multiple matches. Discovery and subsequent refreshes
+never launch Moshi automatically. Before opening, every discovered-session path
+shows the target computer and explains that the workspace URL cannot select it.
 Choosing an unmatched session remembers its directory for this project.
 
 Manual tmux/Herdr shortcuts remain available for unsupported discovery targets.
@@ -62,8 +62,12 @@ The app encodes each value independently and preserves shortcuts on launch failu
 
 Moshi's links resume active/minimized session cards; they do not create a
 connection and have no public host selector. Matching workspaces across hosts
-can therefore be ambiguous. Known workspace collisions disable automatic handoff
-and show a warning; the user must have the intended computer connected in Moshi.
+can therefore be ambiguous. Known workspace collisions show a warning; the user
+must have the intended computer connected in Moshi. A unique result among Phren's
+configured computers does not establish uniqueness among Moshi's active cards.
+The computer check is a workaround, not automatic host switching: the final URL
+can still resolve to another computer. Full host selection requires a supported
+Moshi API. Do not invent `hostId` parameters or use its internal terminal route.
 Phren cannot inspect Moshi's iPhone session cards or share its credentials.
 An agent conversation ID is never used as a Herdr server, workspace, tab, or pane.
 [Link grammar](https://getmoshi.app/docs/notifications#open-active-sessions-with-deep-links).
@@ -85,6 +89,9 @@ This separates Phren's project matching from Moshi's card selection and focus.
 An accepted iOS URL-open callback confirms only that the app handled the URL;
 it cannot confirm which terminal or Chat View Moshi displayed. A passing
 simulator launch test is therefore not physical-device handoff verification.
+Regression coverage checks that initial discovery and foreground refresh do not
+send a URL, cancelling the computer check sends nothing, and the final explicit
+workspace action retains the selected destination after row refreshes.
 
 ## Next integration steps
 
