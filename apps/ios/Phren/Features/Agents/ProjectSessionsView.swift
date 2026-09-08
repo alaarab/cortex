@@ -160,7 +160,7 @@ struct ProjectSessionsView: View {
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
             Button { open(session, assign: assign) } label: {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(session.tab.label).font(.headline).lineLimit(2)
+                    Text(session.tab.displayTitle).font(.headline).lineLimit(2)
                     Text("\(session.host.name) · \(session.workspaceName)").font(.caption).lineLimit(1)
                     Text("\(session.tab.agent ?? "Terminal") · \(session.tab.status)\(fresh ? "" : " · refresh needed")").font(.caption)
                     if let cwd = session.tab.cwd { Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(2) }

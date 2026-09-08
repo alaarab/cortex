@@ -6,20 +6,34 @@ public struct MoshiWorkspaces: Decodable, Equatable, Sendable {
     public struct Tab: Decodable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
+        public let title: String?
         public let agentStatus: String?
         public let agent: String?
         public let cwd: String?
         public let agentPaneCount: Int?
-        public var status: String {
+        public let paneCount: Int?
+
+        public var displayTitle: String {
+            let value = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return value.isEmpty ? label : value
+        }
+
+        public enum Activity: String, CaseIterable, Sendable {
+            case error = "Error", waiting = "Waiting", working = "Working"
+            case idle = "Idle", done = "Done", unknown = "Unknown"
+        }
+
+        public var activity: Activity {
             switch agentStatus {
-            case "working": return "Working"
-            case "idle": return "Idle"
-            case "done": return "Done"
-            case "error": return "Error"
-            case "blocked", "waiting": return "Waiting"
-            default: return "Unknown"
+            case "working": return .working
+            case "idle": return .idle
+            case "done": return .done
+            case "error": return .error
+            case "blocked", "waiting": return .waiting
+            default: return .unknown
             }
         }
+        public var status: String { activity.rawValue }
     }
     public struct Group: Decodable, Equatable, Sendable, Identifiable {
         public let id: String

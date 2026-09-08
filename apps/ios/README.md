@@ -18,6 +18,7 @@ on **Active**; **Backlog** and **Done** are separate searchable views. Task rows
 show a short preview; tap the text to read the full plan, or use the checkbox
 to complete it. Projects appear above agent setup links; the **More** menu
 keeps Skills, Agent instructions, and Live sessions available without scrolling.
+The Agents tab also includes Skills and Agent instructions below your computers.
 
 **Memory maintenance**, available from Projects and Settings, is optional. Its
 overview groups candidates, stale memories, and conflicts by project and store.
@@ -282,6 +283,24 @@ The existing Moshi tests cover manual shortcuts, encoding, persistence, and remo
 
 ### Live Herdr sessions over Tailscale / SSH
 
+Inside a computer, switch between **Workspaces** and **Activity**. Activity groups
+tabs by their reported state, putting errors and waiting sessions first. Search
+matches session titles, workspace names, agents, folders, and linked projects.
+Cards use the hook's conversation title when available, with the tab label as a
+fallback, plus status icons and a direct Moshi action.
+
+Tap a card to open **Session details**: its full title, live state, computer,
+workspace, tab, agent and pane counts when reported, and a copyable folder path.
+Project memory links open the matched project's findings, tasks, and graph;
+**Change project link** corrects the association. Details track the live session
+identity, and a closed session loses its actions on the next successful refresh.
+Stale sessions stay readable with opening disabled until reconnection.
+
+**Open [workspace] in Moshi** continues the session there. In Moshi, tap the agent
+icon to switch to [Chat View](https://getmoshi.app/docs/chat-view) when available.
+Phren's handoff selects the live session; it does not request a particular Moshi
+view or read the conversation transcript.
+
 Open **Agents → Add computer** (also available from Projects and graph options).
 Enter the computer's Tailscale hostname/IP, SSH port, and user. Create a device
 key and add the copied authorization line to that user's `~/.ssh/authorized_keys`
@@ -322,6 +341,8 @@ The SSH suite uses an isolated loopback server and ephemeral test keys; add
 `PHREN_TEST_MOSHI_HOOK=1` locally to also check the installed hook's real payload.
 Native simulator tests use ad hoc signing to exercise Keychain access; they do
 not require a developer certificate or connect to real hosts.
+`SessionDetailsTests` covers activity ordering, search, session metadata, project
+and graph navigation, the outgoing Moshi URL, and removal during an open detail view.
 
 ## Building
 

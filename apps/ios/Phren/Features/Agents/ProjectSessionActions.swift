@@ -108,6 +108,8 @@ struct MoshiSessionOpenLink: View {
     var body: some View {
         Link(destination: destination) {
             Label("Open \(workspaceName) in Moshi", systemImage: "arrow.up.forward.app")
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .id(destination)
         .buttonStyle(.borderless)

@@ -51,6 +51,12 @@ public struct DiscoveredMoshiSession: Equatable, Identifiable, Sendable {
     public let tab: MoshiWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id) }
 
+    public func matches(_ query: String, projectName: String? = nil) -> Bool {
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        let text = [workspaceName, tab.displayTitle, tab.label, tab.agent ?? "", tab.cwd ?? "", projectName ?? ""].joined(separator: " ")
+        return terms.allSatisfy { text.localizedCaseInsensitiveContains($0) }
+    }
+
     public init(host: LiveHost, workspaceID: String, workspaceName: String, tab: MoshiWorkspaces.Tab,
                 workspaceTabCount: Int? = nil) {
         self.host = host; self.workspaceID = workspaceID; self.workspaceName = workspaceName; self.tab = tab

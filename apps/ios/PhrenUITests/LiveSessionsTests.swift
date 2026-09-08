@@ -29,11 +29,13 @@ final class LiveSessionsTests: XCTestCase {
         }
         computer.tap()
         XCTAssertTrue(app.staticTexts["Build graph"].waitForExistence(timeout: 10))
+        app.buttons["live-detail:w1:w1:t1"].tap()
         if app.buttons["Change project link"].exists { app.buttons["Change project link"].tap() }
         else { app.buttons["Link to project"].tap() }
         let project = app.buttons["live-project:team/brain:demo"]
         XCTAssertTrue(project.waitForExistence(timeout: 5))
         project.tap()
+        app.navigationBars["Session details"].buttons["Done"].tap()
         let graph = app.buttons["live-graph:team/brain:demo"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
         graph.tap()
@@ -56,9 +58,11 @@ final class LiveSessionsTests: XCTestCase {
         reopenedLiveItem?.tap()
         computer.tap()
         XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        app.buttons["live-detail:w1:w1:t1"].tap()
         app.buttons["Change project link"].tap()
         app.buttons["Remove directory link"].tap()
         XCTAssertTrue(app.buttons["Link to project"].waitForExistence(timeout: 5))
+        app.navigationBars["Session details"].buttons["Done"].tap()
         app.buttons["Connection settings"].tap()
         app.swipeUp()
         app.buttons["Forget computer"].tap()

@@ -15,6 +15,30 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertThrowsError(try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"a","children":[]},{"id":"w1","label":"b","children":[]}]}"#.utf8)))
     }
 
+    func testReadableTitlesAndConservativeActivity() throws {
+        let value = try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone","children":[{"id":"w1:t1","label":"1","title":"  Build the phone app  ","agentStatus":"blocked","agentPaneCount":2,"paneCount":3},{"id":"w1:t2","label":"Shell","title":"  ","agentStatus":"future-state"}]}]}"#.utf8))
+        let tabs = value.groups[0].children
+        XCTAssertEqual(tabs[0].displayTitle, "Build the phone app")
+        XCTAssertEqual(tabs[0].activity, .waiting)
+        XCTAssertEqual(tabs[0].agentPaneCount, 2)
+        XCTAssertEqual(tabs[0].paneCount, 3)
+        XCTAssertEqual(tabs[1].displayTitle, "Shell")
+        XCTAssertEqual(tabs[1].activity, .unknown)
+        XCTAssertNil(tabs[1].agentPaneCount)
+        XCTAssertNil(tabs[1].paneCount)
+    }
+
+    func testSearchFindsTitleWorkspaceAgentAndFolderTogether() throws {
+        let value = try MoshiWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w1","label":"Phone work","children":[{"id":"w1:t1","label":"1","title":"Fix navigation","agent":"codex","cwd":"/work/mobile/src"}]}]}"#.utf8))
+        let host = try LiveHost(name: "Mac", address: "fixture.invalid", username: "fixture")
+        let session = try XCTUnwrap(value.sessions(on: host).first)
+        XCTAssertTrue(session.matches("NAVIGATION codex"))
+        XCTAssertTrue(session.matches("phone mobile"))
+        XCTAssertTrue(session.matches("ios navigation", projectName: "iOS"))
+        XCTAssertTrue(session.matches("  \n "))
+        XCTAssertFalse(session.matches("navigation unrelated"))
+    }
+
     func testExplicitStoreAndHostIdentityWithLongestDirectoryBoundary() throws {
         let a = try LiveHost(name: "A", address: "100.64.0.1", username: "user")
         let b = try LiveHost(name: "B", address: "server.tail.example", username: "user")
