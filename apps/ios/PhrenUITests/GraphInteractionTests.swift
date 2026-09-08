@@ -2,6 +2,59 @@ import XCTest
 
 final class GraphInteractionTests: XCTestCase {
     @MainActor
+    func testGraphDragsStayOnMapAndBackButtonExits() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Memory graph"].waitForExistence(timeout: 15))
+        capture(app, name: "Projects design")
+        app.buttons["Memory graph"].tap()
+        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        let canvas = app.webViews.firstMatch
+        let back = app.buttons["graph-back"]
+        for (start, end) in [(0.05, 0.85), (0.85, 0.15), (0.35, 0.9)] {
+            canvas.coordinate(withNormalizedOffset: CGVector(dx: start, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: end, dy: 0.55)))
+            XCTAssertTrue(back.exists, "Dragging the graph navigated away")
+            XCTAssertTrue(canvas.exists)
+        }
+        // Exercise the navigation controller's edge gesture as well.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
+        XCTAssertTrue(back.exists)
+        capture(app, name: "Graph after canvas and edge drags")
+        back.tap()
+        XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))
+        app.buttons["More"].tap()
+        tapVisibleSkillsItem(app)
+        XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.001, dy: 0.55))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
+        XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5),
+                      "Normal back gestures must still work outside the graph")
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        capture(app, name: "Settings design")
+    }
+
+    @MainActor
+    private func tapVisibleSkillsItem(_ app: XCUIApplication) {
+        // iOS exposes both the menu action and the obscured list shortcut.
+        let item = app.buttons.matching(NSPredicate(format: "label == %@", "Skills"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(item)
+        item?.tap()
+    }
+
+    @MainActor
+    private func capture(_ app: XCUIApplication, name: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
     func testFocusSaveAndRestoreGraphView() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -55,8 +108,9 @@ final class GraphInteractionTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
-        XCTAssertTrue(app.buttons["Skills"].waitForExistence(timeout: 15))
-        app.buttons["Skills"].tap()
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
+        app.buttons["More"].tap()
+        tapVisibleSkillsItem(app)
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "audit")).firstMatch.tap()
         let enable = app.buttons["Enable on linked computers"]
         XCTAssertTrue(enable.waitForExistence(timeout: 5))

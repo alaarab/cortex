@@ -4,6 +4,7 @@ import SwiftUI
 /// Native phone controls around the shared terminal/VS Code graph contract.
 struct GraphView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     var focusProject: String?
     var initialStoreId: String?
     @State private var storeId = ""
@@ -80,7 +81,7 @@ struct GraphView: View {
                             self.error = nil
                             rendererID = UUID()
                             Task { await rebuild() }
-                        }.buttonStyle(.borderedProminent)
+                        }.buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(PhrenTheme.bg)
@@ -90,7 +91,17 @@ struct GraphView: View {
         .background(PhrenTheme.bg)
         .navigationTitle("Memory graph")
         .navigationBarTitleDisplayMode(.inline)
+        // A graph drag must never become an interactive navigation pop.
+        // Hiding the system back item removes its swipe gesture; keep an
+        // explicit, accessible way out in the leading toolbar instead.
+        .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .accessibilityIdentifier("graph-back")
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     showingSearch.toggle()
@@ -112,7 +123,7 @@ struct GraphView: View {
                         Task { await model.pullToRefresh(); await rebuild() }
                     }
                     Button("About this graph", systemImage: "info.circle") { showingInfo = true }
-                } label: { Label("Graph options", systemImage: "ellipsis.circle") }
+                } label: { Label("Graph options", systemImage: "ellipsis") }
             }
         }
         .task(id: refreshKey) { await rebuild() }
@@ -138,7 +149,7 @@ struct GraphView: View {
         } message: { Text(notice ?? "") }
         .sheet(isPresented: $showingInfo) {
             NavigationStack {
-                List {
+                PhrenList {
                     Section("Explore") {
                         Text("Drag to rotate. Pinch to zoom. Tap a node to read its details or open its project.")
                         Text("Search finds content in this view. Choose a project to load more of its findings and tasks. Open a node's details and choose Focus connections to follow one or two steps of actual links.")
@@ -182,8 +193,10 @@ struct GraphView: View {
                 }
                 .accessibilityLabel("Project: \(selectedProject ?? "All projects")")
             }
-            .font(.subheadline)
-            .frame(minHeight: 36)
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             Picker("Graph content", selection: Binding(get: { filter }, set: { filter = $0; clearFocus() })) {
                 ForEach(GraphPayload.ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -223,7 +236,7 @@ struct GraphView: View {
                     }
                 }
             }
-        }.padding(.horizontal).padding(.bottom, 8)
+        }.padding(.horizontal).padding(.bottom, 12)
     }
 
     private var cameraControls: some View {
@@ -232,7 +245,8 @@ struct GraphView: View {
             cameraButton("Zoom out", icon: "minus", action: .zoomOut)
             cameraButton("Fit graph", icon: "arrow.up.left.and.arrow.down.right", action: .reset)
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(PhrenTheme.border, lineWidth: 1))
     }
 
     private func cameraButton(_ title: String, icon: String, action: GraphCommand.Action) -> some View {
@@ -243,7 +257,7 @@ struct GraphView: View {
 
     private var searchResults: some View {
         let results = visible?.search(query) ?? []
-        return List {
+        return PhrenList {
             if results.isEmpty {
                 Text("No matches in this view. Try another phrase or change the project or content filter.")
                     .foregroundStyle(.secondary)
@@ -293,7 +307,7 @@ struct GraphView: View {
 
     private var savedViewsSheet: some View {
         NavigationStack {
-            List {
+            PhrenList {
                 if savedViews.isEmpty { Text("Save a view from the graph's options menu to return to it here.").foregroundStyle(.secondary) }
                 ForEach(savedViews) { view in
                     Button {
@@ -428,7 +442,7 @@ private struct GraphNodeSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            PhrenList {
                 Section {
                     DocumentPreview(content: node.sourceText ?? node.label ?? node.id)
                     if let store = node.store { LabeledContent("Store", value: model.storeName(for: store)) }

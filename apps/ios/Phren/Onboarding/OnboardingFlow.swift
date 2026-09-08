@@ -67,7 +67,7 @@ struct WelcomeView: View {
                         Label("Sign in with GitHub", systemImage: "person.crop.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
                     .disabled(polling)
                 }
                 Button {
@@ -162,7 +162,7 @@ struct PATSignInSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 Section {
                     Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
                     SecureField("github_pat_… or ghp_…", text: $token)
@@ -287,7 +287,7 @@ struct RepoPickerList: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             if !likelyStores.isEmpty || probing {
                 Section {
                     if likelyStores.isEmpty {

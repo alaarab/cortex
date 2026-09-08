@@ -87,7 +87,7 @@ struct ProjectSessionsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            PhrenList {
                 Section {
                     Text("\(project) · \(storeID)").font(.caption).foregroundStyle(.secondary)
                     if discovery.refreshing { ProgressView("Finding project sessions…") }

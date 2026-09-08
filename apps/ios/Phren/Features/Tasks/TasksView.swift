@@ -111,17 +111,22 @@ struct TaskListView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.vertical, 8)
-            List {
+            PhrenList {
                 if !visibleRows.isEmpty {
                     Section("\(section == .queue ? "Backlog" : section.rawValue) · \(visibleRows.count)") {
                         taskRows(visibleRows)
                     }
                 } else if section == .active && query.isEmpty {
                     Section {
-                        Label("No tasks marked active", systemImage: "checkmark.circle")
-                            .font(.headline)
-                        Text("Check Agents for live sessions, or browse the backlog for planned work.")
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Image(systemName: "checkmark.circle")
+                                .font(.title2).foregroundStyle(PhrenTheme.success)
+                                .accessibilityHidden(true)
+                            Text("No tasks marked active").font(.headline)
+                            Text("Check Agents for live sessions, or browse the backlog for planned work.")
+                                .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        .padding(.vertical, 10)
                         if !queueRows.isEmpty {
                             Button("View backlog (\(queueRows.count))") { section = .queue }
                         }
@@ -161,7 +166,7 @@ struct TaskListView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
+                        Image(systemName: "line.3.horizontal.decrease")
                     }
                 }
             }
@@ -317,7 +322,7 @@ struct AddTaskSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
                 if fixedTarget == nil {
@@ -450,7 +455,7 @@ private struct TaskDetailsSheet: View {
     var body: some View {
         let row = currentRow
         NavigationStack {
-            List {
+            PhrenList {
                 Section {
                     Text(.init(TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))))
                         .textSelection(.enabled)
@@ -499,7 +504,7 @@ struct TaskEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 TextField("Task", text: $text, axis: .vertical)
                     .lineLimit(2...6)
                 Toggle("Pinned", isOn: $pinned)

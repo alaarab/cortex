@@ -14,7 +14,7 @@ final class AgentsLayoutTests: XCTestCase {
         XCTAssertGreaterThan(title.frame.height, 0)
         XCTAssertTrue(app.navigationBars.firstMatch.frame.contains(title.frame))
         assertRenderedTitle(app, title: "Live sessions")
-        let intro = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "See Herdr session status")).firstMatch
+        let intro = app.staticTexts["agents-introduction"]
         XCTAssertTrue(intro.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(intro.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         capture(app, name: "Agents root")
@@ -32,6 +32,18 @@ final class AgentsLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(intro.frame.minY, app.navigationBars.firstMatch.frame.maxY)
         assertRenderedTitle(app, title: "Live sessions")
         capture(app, name: "Agents after navigating back")
+    }
+
+    @MainActor
+    func testSettingsTitleIsVisibleAboveTheForm() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        assertRenderedTitle(app, title: "Settings")
+        capture(app, name: "Settings with visible title")
     }
 
     @MainActor

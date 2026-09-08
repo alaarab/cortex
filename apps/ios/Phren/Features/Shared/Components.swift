@@ -13,20 +13,19 @@ struct LiveStatusBar: View {
         HStack(spacing: 6) {
             Circle()
                 .fill(indicatorColor)
-                .frame(width: 8, height: 8)
-                .shadow(color: indicatorColor.opacity(0.7), radius: model.syncStatus.isLive ? 3 : 0)
+                .frame(width: 5, height: 5)
             Text(statusText)
-                .font(.caption.monospaced())
+                .font(.caption)
                 .foregroundStyle(PhrenTheme.textMuted)
             Spacer()
             if model.syncStatus.pendingCount > 0 {
                 Label("\(model.syncStatus.pendingCount)", systemImage: "arrow.up.circle")
-                    .font(.caption.monospaced())
+                    .font(.caption)
                     .foregroundStyle(PhrenTheme.amber)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 8)
         .background(PhrenTheme.bg)
         .onReceive(ticker) { now = $0 }
     }
@@ -126,14 +125,11 @@ struct TagChip: View {
     }
 
     var body: some View {
-        // The site's chips are monospace, squared-off, and bordered rather
-        // than pill-shaped (docs/index.html .mini-tag / card styling).
         Text(text)
-            .font(.caption2.monospaced().weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(color.opacity(0.45), lineWidth: 1))
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.10), in: Capsule())
             .foregroundStyle(color)
     }
 }
@@ -163,7 +159,7 @@ struct TextEntrySheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 Section {
                     TextField("Text", text: $text, axis: .vertical)
                         .lineLimit(3...12)

@@ -250,7 +250,7 @@ struct VoiceCaptureView: View {
             } label: {
                 Label("Open Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
         }
         .padding(.vertical, 8)
     }

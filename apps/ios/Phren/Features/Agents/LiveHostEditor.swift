@@ -18,7 +18,7 @@ struct LiveHostEditor: View {
     @State private var copied = false
 
     var body: some View {
-        Form {
+        PhrenForm {
             Section("SSH computer") {
                 TextField("Name", text: $name).accessibilityIdentifier("live-host-name")
                 TextField("Tailscale hostname or IP", text: $address).accessibilityIdentifier("live-host-address")

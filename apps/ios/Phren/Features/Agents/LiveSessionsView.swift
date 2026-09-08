@@ -7,32 +7,37 @@ struct LiveSessionsView: View {
     @State private var adding = false
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
-                Text("See Herdr session status from your computer's Moshi hook over SSH. Connect Tailscale on both devices when away from home.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    Image(systemName: "waveform.path")
+                        .font(.title2).foregroundStyle(PhrenTheme.cyan)
+                        .accessibilityHidden(true)
+                    Text("Your agents, within reach")
+                        .font(.title2.weight(.semibold))
+                    Text("See what's running on your computers and continue a session in Moshi.")
+                        .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityIdentifier("agents-introduction")
+                }
+                .padding(.vertical, 12)
             }
-            Section("Computers") {
+            Section {
                 if let preferences = try? LiveSessionPreferences.read(data) {
                     ForEach(preferences.hosts) { host in
                         NavigationLink { LiveHostView(hostID: host.id) } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(host.name)
-                                    Text(host.address).font(.caption).foregroundStyle(.secondary)
-                                }
-                            } icon: { Image(systemName: "desktopcomputer") }
+                            PhrenMenuRow(title: host.name, subtitle: host.address, icon: "desktopcomputer")
                         }
+                        .accessibilityIdentifier("live-host:\(host.id)")
                     }
                     Button("Add computer", systemImage: "plus") { adding = true }
                 } else {
                     Text("Saved connections couldn't be read. They have been preserved; update phren before editing them.")
                         .foregroundStyle(.orange)
                 }
-            }
-            Section {
-                Text("Phren reads status while a computer's session screen is visible. Moshi is optional for opening sessions. This first connection supports the hook's default Herdr server.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Computers")
+            } footer: {
+                Text("Keep Tailscale connected on both devices when you're away. Moshi is optional.")
             }
         }
         .navigationTitle("Live sessions")
@@ -126,14 +131,17 @@ private struct LiveHostView: View {
     private var host: LiveHost? { preferences?.hosts.first { $0.id == hostID } }
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let fresh = monitor.polling && monitor.message == nil
                         && monitor.lastUpdated.map { context.date.timeIntervalSince($0) < 25 } == true
-                    Label(fresh ? "Live · refreshes every 10 seconds" : monitor.refreshing ? "Connecting…" : "Disconnected",
-                          systemImage: fresh ? "circle.fill" : "wifi.slash")
-                        .foregroundStyle(fresh ? .green : .secondary)
+                    HStack(spacing: 8) {
+                        Circle().fill(fresh ? PhrenTheme.success : PhrenTheme.textMuted)
+                            .frame(width: 6, height: 6)
+                        Text(fresh ? "Live sessions" : monitor.refreshing ? "Connecting…" : "Disconnected")
+                            .font(.subheadline.weight(.medium))
+                    }
                     if let date = monitor.lastUpdated {
                         Text("Last received \(date, style: .relative) ago\(fresh ? "" : " · showing previous status")")
                             .font(.caption).foregroundStyle(.secondary)
@@ -225,12 +233,12 @@ private struct LiveTabRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(tab.label).font(.headline).lineLimit(2)
                 Spacer()
-                Text(tab.status + (stale ? " · stale" : "")).font(.caption)
-                    .foregroundStyle(!stale && tab.status == "Working" ? .green : .secondary)
+                TagChip(text: tab.status + (stale ? " · stale" : ""),
+                        color: !stale && tab.status == "Working" ? PhrenTheme.success : PhrenTheme.textMuted)
             }
             if let agent = tab.agent {
                 Text(agent + ((tab.agentPaneCount ?? 0) > 1 ? " · \(tab.agentPaneCount!) agent panes in this tab" : ""))
@@ -263,7 +271,7 @@ private struct LiveTabRow: View {
                     .font(.caption).buttonStyle(.borderless)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 10)
         .sheet(isPresented: $assigning) {
             NavigationStack { LiveProjectPicker(hostID: hostID, cwd: tab.cwd ?? "", existing: mapping) }
         }
@@ -280,7 +288,7 @@ private struct LiveProjectPicker: View {
     let existing: LiveSessionPreferences.Mapping?
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
                 Text(cwd).font(.caption.monospaced())
                 Text("Link this directory and its subdirectories to a project on this iPhone.").foregroundStyle(.secondary)

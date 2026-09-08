@@ -30,7 +30,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 ActionErrorBanner()
                 ScrollViewReader { proxy in
-                Form {
+                PhrenForm {
                 Section {
                     ForEach(model.storeContexts) { context in
                         StoreHealthCard(
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Store health")
                 } footer: {
-                    Text("A store card turns amber when a sync has failed or gone quiet for more than 10 minutes while the app is open.")
+                    Text("Amber indicates a failed or delayed sync.")
                 }
 
                 quickCaptureSection
@@ -128,7 +128,7 @@ struct SettingsView: View {
                                 Text(failed.op.op.label).font(.callout)
                                 if case .saveAuthoredFile(_, let content, _) = failed.op.op {
                                     NavigationLink("Review saved draft") {
-                                        List {
+                                        PhrenList {
                                             Section("Your draft") { DocumentPreview(content: content) }
                                             Section {
                                                 ShareLink(item: content) {
@@ -191,6 +191,7 @@ struct SettingsView: View {
             }
             .phrenScreen()
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 failedOps = await model.failedOps()
                 await reloadCaptureState()
@@ -282,7 +283,7 @@ struct SettingsView: View {
                     Text("'\(unavailable.label)' isn't in an attached, writable store any more — captures ask where to go until you pick a new default.")
                         .foregroundStyle(PhrenTheme.warning)
                 }
-                Text("Where a capture goes when you don't name a project: 'Hey Siri, add a task to phren', a Shortcuts tile, or the mic button. With 'Always ask', Siri and Shortcuts ask every time — nothing is ever filed somewhere you didn't choose.")
+                Text("Choose where Siri, Shortcuts, and voice captures are saved. With Always ask, you choose a project each time.")
             }
         }
     }

@@ -35,7 +35,7 @@ struct SkillsView: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             ForEach(scopes, id: \.self) { scope in
                 Section(scope == "global" ? "Global skills" : scope) {
                     ForEach(skills.filter { $0.skill.scope.source == scope }.sorted {
@@ -110,7 +110,7 @@ struct SkillEditorView: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             if let current {
                 Section {
                     LabeledContent("Scope", value: current.skill.scope.source)
@@ -246,7 +246,7 @@ private struct NewSkillSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            PhrenForm {
                 Section("Skill") {
                     TextField("skill-name", text: $name).autocorrectionDisabled().textInputAutocapitalization(.never)
                     if let nameError { Text(nameError).font(.caption).foregroundStyle(.red) }

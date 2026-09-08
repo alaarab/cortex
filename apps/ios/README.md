@@ -16,7 +16,8 @@ every finding or agent action.
 The main tabs are **Projects, Agents, Tasks, Search, and Settings**. Tasks opens
 on **Active**; **Backlog** and **Done** are separate searchable views. Task rows
 show a short preview; tap the text to read the full plan, or use the checkbox
-to complete it.
+to complete it. Projects appear above agent setup links; the **More** menu
+keeps Skills, Agent instructions, and Live sessions available without scrolling.
 
 **Memory maintenance**, available from Projects and Settings, is optional. Its
 overview groups candidates, stale memories, and conflicts by project and store.
@@ -440,9 +441,13 @@ are replaced by these native controls; editing is available in the project's
 normal findings and task screens. Bloom is disabled on the phone, and label
 widths are constrained for the smaller viewport.
 
+Use the top-left **Back** button to leave the graph. Interactive back swipes
+are disabled on this screen so canvas and edge drags stay with the map;
+normal back gestures remain available elsewhere in the app.
+
 **Focus connections** in a node's detail sheet limits the view to one or two
-steps of actual links. The back button returns to previous focus points; the
-close button restores the full current view. **Options → Save this view**
+steps of actual links. The **Previous focus** control returns to earlier focus
+points; the close button restores the full current view. **Options → Save this view**
 bookmarks its store, project, filter, and focused node. **Saved views** restores
 them after app relaunch using current synced content. These bookmarks stay on
 the device; they do not preserve a camera position or copy store content.

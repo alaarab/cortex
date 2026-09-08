@@ -15,7 +15,7 @@ struct PhrenApp: App {
             RootView()
                 .environment(model)
                 .defaultAppStorage(AppModel.isUITesting ? UserDefaults(suiteName: "phren.ui-tests")! : .standard)
-                .tint(PhrenTheme.accent)
+                .tint(PhrenTheme.navigation)
                 // The phren identity is dark-only (docs/style.css).
                 .preferredColorScheme(.dark)
                 .modifier(MoshiURLTestCapture())
@@ -48,14 +48,15 @@ struct PhrenApp: App {
         }
     }
 
-    /// Navy navigation + tab chrome matching the site's --bg/--bg-1 surfaces.
+    /// Neutral chrome keeps the content and small status accents in focus.
     private static func applyPhrenChrome() {
-        let navy = UIColor(PhrenTheme.bg)
+        let background = UIColor(PhrenTheme.bg)
         let text = UIColor(PhrenTheme.text)
 
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
-        nav.backgroundColor = navy
+        nav.backgroundColor = background
+        nav.shadowColor = .clear
         nav.titleTextAttributes = [.foregroundColor: text]
         nav.largeTitleTextAttributes = [.foregroundColor: text]
         UINavigationBar.appearance().standardAppearance = nav
@@ -64,7 +65,14 @@ struct PhrenApp: App {
 
         let tab = UITabBarAppearance()
         tab.configureWithOpaqueBackground()
-        tab.backgroundColor = navy
+        tab.backgroundColor = background
+        for item in [tab.stackedLayoutAppearance, tab.inlineLayoutAppearance, tab.compactInlineLayoutAppearance] {
+            item.normal.iconColor = UIColor(PhrenTheme.textMuted)
+            item.normal.titleTextAttributes = [.foregroundColor: UIColor(PhrenTheme.textMuted)]
+            item.selected.iconColor = text
+            item.selected.titleTextAttributes = [.foregroundColor: text]
+        }
+        UISwitch.appearance().onTintColor = UIColor(PhrenTheme.accentSolid)
         UITabBar.appearance().standardAppearance = tab
         UITabBar.appearance().scrollEdgeAppearance = tab
     }

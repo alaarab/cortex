@@ -16,7 +16,7 @@ struct AgentsView: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
                 Text("Shape how your agents work with shared instructions and reusable skills.")
                     .foregroundStyle(.secondary)
@@ -75,7 +75,7 @@ struct AgentContextView: View {
     private var content: String? { model.instructions(scope: scope, in: storeId) }
 
     var body: some View {
-        List {
+        PhrenList {
             Section {
                 LabeledContent("Store", value: model.storeName(for: storeId))
                 if !model.canPush(storeId: storeId) { Label("Read-only store", systemImage: "lock") }

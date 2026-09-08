@@ -11,6 +11,10 @@ final class WorkflowTests: XCTestCase {
         app.tabBars.buttons["Tasks"].tap()
         XCTAssertTrue(app.staticTexts["No tasks marked active"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["task-detail:sample/brain/demo/dead0001"].exists)
+        let activeScreenshot = XCTAttachment(screenshot: app.screenshot())
+        activeScreenshot.name = "Calm active tasks state"
+        activeScreenshot.lifetime = .keepAlways
+        add(activeScreenshot)
         app.buttons["View backlog (6)"].tap()
         let long = app.buttons["task-detail:sample/brain/demo/dead0001"]
         XCTAssertTrue(long.waitForExistence(timeout: 5))

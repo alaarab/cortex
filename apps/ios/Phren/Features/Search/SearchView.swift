@@ -18,7 +18,7 @@ struct SearchView: View {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                List {
+                PhrenList {
                     if !query.isEmpty {
                         ForEach(results) { result in
                             NavigationLink {
@@ -50,7 +50,7 @@ struct SearchView: View {
                 }
                 .overlay {
                     if query.isEmpty {
-                        PhrenEmptyState(title: "Search your memory", message: "Findings, truths, notes, tasks, and summaries — all searched on-device. Archived findings are excluded, the same way the CLI leaves them out of its own index.")
+                        PhrenEmptyState(title: "Search your memory", message: "Find a decision, a useful note, or your next task. Searches current memory saved on this iPhone.")
                     } else if results.isEmpty {
                         ContentUnavailableView.search(text: query)
                     }
@@ -83,7 +83,7 @@ struct SearchView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
+                        Image(systemName: "line.3.horizontal.decrease")
                     }
                 }
             }

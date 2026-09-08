@@ -88,7 +88,7 @@ struct DocumentEditorSheet: View {
             } message: { Text(error ?? "") }
             .sheet(item: $comparison) { latest in
                 NavigationStack {
-                    List {
+                    PhrenList {
                         Section("Latest in store") {
                             if let content = latest.content { DocumentPreview(content: content) }
                             else { Text("This file was removed from the store.") }

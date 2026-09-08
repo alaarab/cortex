@@ -1,45 +1,37 @@
 import SwiftUI
 
-/// The phren visual identity, blending the two canonical sources:
-/// - the `phren web-ui` deep-void theme (packages/cli/src/ui/deep-void.ts) —
-///   near-black navy base, violet accent, lavender-tinted borders, glows
-/// - the site (docs/style.css) — cyan highlights, monospace data, pixel mascot
-/// The brand is dark-only.
+/// Quiet graphite surfaces with small, purposeful touches of Phren color.
 enum PhrenTheme {
-    // Surfaces — deep-void.ts:19-23
-    static let bg = Color(hex: 0x0A0A1A)            // --bg
-    static let bgSunken = Color(hex: 0x0D0D22)      // --surface-sunken
-    static let surface = Color(hex: 0x12122A)       // --surface-solid
-    static let surfaceRaised = Color(hex: 0x1A1A3E) // site --bg-2 (cards)
+    static let bg = Color(hex: 0x101114)
+    static let bgSunken = Color(hex: 0x0B0C0F)
+    static let surface = Color(hex: 0x1B1D22)
+    static let surfaceRaised = Color(hex: 0x252830)
 
-    // Ink — deep-void.ts:25-27
-    static let text = Color(hex: 0xECE9F5)          // --ink
-    static let textSecondary = Color(hex: 0xC8C3E3) // --ink-secondary
-    static let textMuted = Color(hex: 0xECE9F5).opacity(0.55) // --muted
-    static let textDim = Color(hex: 0x7A7570)       // site --text-dim
+    static let text = Color(hex: 0xF1F1F3)
+    static let textSecondary = Color(hex: 0xC4C6CE)
+    static let textMuted = Color(hex: 0x989DAA)
+    static let textDim = Color(hex: 0x8B919E)
 
-    // Accents — violet is THE interactive accent (deep-void.ts:29-40),
-    // cyan is the live/glow highlight shared by both sources.
-    static let accent = Color(hex: 0x9058F0)        // --accent
-    static let accentHover = Color(hex: 0xB07AFF)   // --accent-hover
-    static let accentSolid = Color(hex: 0x7C3AED)   // --accent-solid
-    static let cyan = Color(hex: 0x28D3F2)          // --cyan
-    static let lavender = Color(hex: 0x9B8DC8)      // site --copper
+    // Navigation stays neutral; lavender marks selected controls and actions.
+    static let navigation = Color(hex: 0xDFE1E7)
+    static let accent = Color(hex: 0xB5AFE3)
+    static let accentHover = Color(hex: 0xCBC6EF)
+    static let accentSolid = Color(hex: 0x655A99)
+    static let cyan = Color(hex: 0x8ECBD0)
+    static let lavender = Color(hex: 0xB0A8CE)
 
-    // Borders — deep-void.ts:42-44 (lavender-tinted)
-    static let border = Color(hex: 0x9C8FF8).opacity(0.18)
-    static let borderStrong = Color(hex: 0x9C8FF8).opacity(0.32)
+    static let border = Color.white.opacity(0.07)
+    static let borderStrong = Color.white.opacity(0.14)
 
-    // Status — deep-void.ts:46-51
-    static let success = Color(hex: 0x4ADE80)
-    static let warning = Color(hex: 0xFBBF24)
-    static let danger = Color(hex: 0xF87171)
+    static let success = Color(hex: 0x8AC8AC)
+    static let warning = Color(hex: 0xE0BC7F)
+    static let danger = Color(hex: 0xEF9898)
 
     // Aliases kept for call-site readability
     static let green = success
     static let amber = warning
     static let red = danger
-    static let violet = Color(hex: 0x7C3AED)
+    static let violet = accentSolid
 
     /// Chip color roles, mapped to the deep-void conventions.
     static func chipColor(_ role: ChipRole) -> Color {
@@ -74,33 +66,80 @@ extension Color {
 // MARK: - Screen scaffolding
 
 extension View {
-    /// Deep-void screen background behind system list/scroll content.
     func phrenScreen() -> some View {
         self
             .scrollContentBackground(.hidden)
             .background(PhrenTheme.bg)
     }
 
-    /// Web-UI card: solid navy surface, lavender border, soft violet shadow
-    /// (deep-void --surface + --border + --shadow).
     func phrenCard() -> some View {
         self
-            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(PhrenTheme.border, lineWidth: 1))
-            .shadow(color: PhrenTheme.accentSolid.opacity(0.18), radius: 10, y: 4)
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(PhrenTheme.border, lineWidth: 1))
     }
-}
 
-/// List row background matching the web UI's raised surface.
-struct PhrenRowBackground: ViewModifier {
-    func body(content: Content) -> some View {
-        content.listRowBackground(PhrenTheme.surface)
-    }
-}
-
-extension View {
     func phrenRow() -> some View {
-        modifier(PhrenRowBackground())
+        self.listRowBackground(PhrenTheme.surface)
+            .listRowSeparatorTint(PhrenTheme.borderStrong)
+    }
+}
+
+/// Apply row styling inside the builder: a background on List alone leaves
+/// the system gray cells in place. Keep native scrolling, selection and forms.
+struct PhrenList<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        List { content.phrenRow() }
+            .listStyle(.insetGrouped)
+            .phrenScreen()
+    }
+}
+
+struct PhrenForm<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Form { content.phrenRow() }
+            .phrenScreen()
+    }
+}
+
+/// A shared silhouette makes menus feel related without coloring every row.
+struct PhrenMenuRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let icon: String
+    var color: Color = PhrenTheme.textSecondary
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// Counts are metadata, so avoid the full-size icon column used by list rows.
+struct PhrenMetadataLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
     }
 }
 
@@ -112,6 +151,7 @@ struct PhrenMascotView: View {
     var bobbing = true
     var glow = true
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var up = false
 
     var body: some View {
@@ -121,9 +161,9 @@ struct PhrenMascotView: View {
             .scaledToFit()
             .frame(width: size, height: size)
             .shadow(color: glow ? PhrenTheme.cyan.opacity(0.25) : .clear, radius: size / 6)
-            .offset(y: up ? -6 : 0)
+            .offset(y: up && !reduceMotion ? -6 : 0)
             .animation(
-                bobbing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
+                bobbing && !reduceMotion ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil,
                 value: up
             )
             .onAppear { if bobbing { up = true } }

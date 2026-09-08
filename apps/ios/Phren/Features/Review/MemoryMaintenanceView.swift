@@ -15,7 +15,7 @@ struct MemoryMaintenanceView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            PhrenList {
                 Section {
                     Text("Your agents capture and use memory as you work. You can leave routine maintenance to an agent, or inspect a project here.")
                         .foregroundStyle(.secondary)

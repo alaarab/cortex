@@ -155,7 +155,7 @@ private struct ProjectSessionEditor: View {
     }
 
     var body: some View {
-        Form {
+        PhrenForm {
             Section {
                 LabeledContent("Project", value: project)
                 LabeledContent("Store", value: storeId)

@@ -6,8 +6,12 @@ final class LiveSessionsTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--live-sessions-fixture", "--live-sessions-offline"]
         app.launch()
-        XCTAssertTrue(app.buttons["Live sessions"].waitForExistence(timeout: 15))
-        app.buttons["Live sessions"].tap()
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
+        app.buttons["More"].tap()
+        let liveItem = app.buttons.matching(NSPredicate(format: "label == %@", "Live sessions"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(liveItem)
+        liveItem?.tap()
         let computer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch
         if !computer.exists {
             app.buttons["Add computer"].tap()
@@ -34,7 +38,7 @@ final class LiveSessionsTests: XCTestCase {
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
         graph.tap()
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
-        app.navigationBars.buttons["Test Mac"].tap()
+        app.buttons["graph-back"].tap()
         let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "showing previous status")).firstMatch
         XCTAssertTrue(stale.waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["Working · stale"].exists)
@@ -44,8 +48,12 @@ final class LiveSessionsTests: XCTestCase {
         add(screenshot)
 
         app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["Live sessions"].waitForExistence(timeout: 15))
-        app.buttons["Live sessions"].tap()
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 15))
+        app.buttons["More"].tap()
+        let reopenedLiveItem = app.buttons.matching(NSPredicate(format: "label == %@", "Live sessions"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(reopenedLiveItem)
+        reopenedLiveItem?.tap()
         computer.tap()
         XCTAssertTrue(graph.waitForExistence(timeout: 10))
         app.buttons["Change project link"].tap()

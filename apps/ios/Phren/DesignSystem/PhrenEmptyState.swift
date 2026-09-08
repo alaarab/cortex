@@ -11,7 +11,7 @@ struct PhrenEmptyState: View {
             PhrenMascotView(size: 76, bobbing: false, glow: false)
                 .opacity(0.8)
             Text(title)
-                .font(.headline.monospaced())
+                .font(.headline)
                 .foregroundStyle(PhrenTheme.text)
             Text(message)
                 .font(.footnote)

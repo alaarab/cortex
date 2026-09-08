@@ -25,22 +25,12 @@ struct ProjectsView: View {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
-                List {
+                PhrenList {
                     Section("Explore") {
                         NavigationLink { GraphView() } label: {
-                            Label("Memory graph", systemImage: "circle.hexagongrid")
-                        }
-                    }
-                    Section("Agent setup") {
-                        NavigationLink { LiveSessionsView() } label: {
-                            Label("Live sessions", systemImage: "waveform.path")
-                        }
-                        NavigationLink { SkillsView() } label: {
-                            Label("Skills", systemImage: "wand.and.stars")
-                        }
-                        NavigationLink { AgentsView() } label: {
-                            Label("Agent instructions", systemImage: "person.crop.rectangle.stack")
-                        }
+                            PhrenMenuRow(title: "Memory graph", subtitle: "Explore how your knowledge connects",
+                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan)
+                        }.accessibilityLabel("Memory graph")
                     }
                     Section("Projects") {
                         ForEach(projects) { item in
@@ -66,11 +56,24 @@ struct ProjectsView: View {
                                         Label("\(item.project.noteCount)", systemImage: "note.text")
                                     }
                                     .font(.caption)
+                                    .labelStyle(PhrenMetadataLabelStyle())
                                     .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 2)
+                                .padding(.vertical, 8)
                             }
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
+                        }
+                    }
+                    Section("Agent setup") {
+                        NavigationLink { LiveSessionsView() } label: {
+                            PhrenMenuRow(title: "Live sessions", subtitle: "Pick up where your agents left off",
+                                         icon: "waveform.path")
+                        }.accessibilityLabel("Live sessions")
+                        NavigationLink { SkillsView() } label: {
+                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender)
+                        }
+                        NavigationLink { AgentsView() } label: {
+                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack")
                         }
                     }
                     Section {
@@ -79,7 +82,7 @@ struct ProjectsView: View {
                         }
                         .foregroundStyle(.secondary)
                     } footer: {
-                        Text("Your agents build memory as you work. Explore it here; open maintenance when you want to inspect candidates, stale memories, or conflicts.")
+                        Text("Your agents build memory as you work. Maintenance is here when you need it.")
                     }
                 }
                 .overlay {
@@ -98,8 +101,19 @@ struct ProjectsView: View {
                         NavigationLink { GraphView() } label: {
                             Label("Memory graph", systemImage: "circle.hexagongrid")
                         }
+                        Section("Agent setup") {
+                            NavigationLink { LiveSessionsView() } label: {
+                                Label("Live sessions", systemImage: "waveform.path")
+                            }
+                            NavigationLink { SkillsView() } label: {
+                                Label("Skills", systemImage: "wand.and.stars")
+                            }
+                            NavigationLink { AgentsView() } label: {
+                                Label("Agent instructions", systemImage: "person.crop.rectangle.stack")
+                            }
+                        }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "ellipsis")
                     }
                     .accessibilityLabel("More")
                 }
@@ -114,7 +128,7 @@ struct ProjectsView: View {
                             }
                         } label: {
                             Image(systemName: model.storeFilter == nil
-                                  ? "line.3.horizontal.decrease.circle"
+                                  ? "line.3.horizontal.decrease"
                                   : "line.3.horizontal.decrease.circle.fill")
                         }
                     }
@@ -265,7 +279,7 @@ struct FindingsTab: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             // Pinned first, because that is what pinning means: the CLI
             // injects these into every session regardless of what else it
             // retrieves (shared/retrieval.ts, "always-inject").
@@ -521,7 +535,7 @@ struct NotesTab: View {
     }
 
     var body: some View {
-        List {
+        PhrenList {
             ForEach(groupedByDay, id: \.date) { group in
                 Section(group.date) {
                     ForEach(group.items) { note in

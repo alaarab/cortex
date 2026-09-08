@@ -49,7 +49,7 @@ struct ReviewView: View {
                         .buttonStyle(.borderless)
                         Text("Paste this into your agent conversation. You can also select several entries below for manual maintenance.")
                             .font(.caption).foregroundStyle(.secondary)
-                    }
+                    }.phrenRow()
                     ForEach(QueueItem.Section.allCases, id: \.self) { section in
                         let sectionItems = items.filter { $0.entry.item.section == section }
                         if !sectionItems.isEmpty {
@@ -102,14 +102,14 @@ struct ReviewView: View {
                                             }
                                         }
                                 }
-                            }
+                            }.phrenRow()
                         }
                     }
                     if items.isEmpty {
                         Section {
                             Text("No maintenance entries for this project and filter.")
                                 .foregroundStyle(.secondary)
-                        }
+                        }.phrenRow()
                     }
                 }
                 .environment(\.editMode, $editMode)
@@ -129,7 +129,7 @@ struct ReviewView: View {
                         Button("Review individually", systemImage: "square.stack") { triaging = true }
                             .disabled(triageDeck.isEmpty)
                     } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
+                        Image(systemName: "line.3.horizontal.decrease")
                     }
                     .accessibilityLabel("Maintenance options")
                 }
@@ -166,7 +166,7 @@ struct ReviewView: View {
             }
             .sheet(item: $reading) { entry in
                 NavigationStack {
-                    List {
+                    PhrenList {
                         Text(.init(entry.entry.item.text)).textSelection(.enabled)
                         LabeledContent("Project", value: entry.entry.project)
                         LabeledContent("Store", value: entry.storeId)
@@ -208,7 +208,7 @@ struct ReviewView: View {
             Button("Approve") {
                 Task { await approve(selectedEntries()) }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderedProminent).tint(PhrenTheme.accentSolid)
             .disabled(selection.isEmpty)
         }
         .padding()
