@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// Quiet graphite surfaces with small, purposeful touches of Phren color.
+/// Lighter warm charcoal surfaces with small, purposeful touches of Phren color.
 enum PhrenTheme {
-    static let bg = Color(hex: 0x101114)
-    static let bgSunken = Color(hex: 0x0B0C0F)
-    static let surface = Color(hex: 0x1B1D22)
-    static let surfaceRaised = Color(hex: 0x252830)
+    static let bg = Color(hex: 0x29282A)
+    static let bgSunken = Color(hex: 0x232225)
+    static let surface = Color(hex: 0x383638)
+    static let surfaceRaised = Color(hex: 0x494648)
 
-    static let text = Color(hex: 0xF1F1F3)
-    static let textSecondary = Color(hex: 0xC4C6CE)
-    static let textMuted = Color(hex: 0x989DAA)
-    static let textDim = Color(hex: 0x8B919E)
+    static let text = Color(hex: 0xF7F4EF)
+    static let textSecondary = Color(hex: 0xDCD5CF)
+    static let textMuted = Color(hex: 0xC0B9B3)
+    static let textDim = Color(hex: 0xB0AAA4)
 
     // Navigation stays neutral; lavender marks selected controls and actions.
-    static let navigation = Color(hex: 0xDFE1E7)
+    static let navigation = Color(hex: 0xECE7E1)
     static let accent = Color(hex: 0xB5AFE3)
     static let accentHover = Color(hex: 0xCBC6EF)
     static let accentSolid = Color(hex: 0x655A99)
